@@ -102,4 +102,5 @@
 считывается (некролог рассмешил). Балансовые числа остаются черновыми (тюнинг —
 будущие инкременты), персонаж-визуал / картиночные слайды / 🔗-логика / звук —
 отложены по контракту.
-`Landed:` cf5b2f7
+`Landed:` c653e6d (increment code/scene/tests); Landed-hash recorded in this
+follow-up bookkeeping commit.
