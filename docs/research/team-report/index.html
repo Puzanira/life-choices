@@ -1,0 +1,990 @@
+<title>Life Choices — ресерч референсов для команды</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root {
+    --bg: #faf8f3;
+    --bg-alt: #f1ede2;
+    --card: #ffffff;
+    --text: #2b2620;
+    --text-dim: #63594a;
+    --accent: #a8432e;
+    --accent-2: #2e6b5e;
+    --border: #e2d9c6;
+    --quote-bg: #fbf0e4;
+    --tag-confirmed-bg: #e4f0e0;
+    --tag-confirmed-text: #2e6b3a;
+    --tag-refuted-bg: #f7dede;
+    --tag-refuted-text: #a8342e;
+    --code-bg: #f1ede2;
+    --shadow: 0 2px 10px rgba(43,38,32,0.08);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1b1815;
+      --bg-alt: #24201b;
+      --card: #262220;
+      --text: #ece5d8;
+      --text-dim: #b3a894;
+      --accent: #e08a6d;
+      --accent-2: #7bc9ab;
+      --border: #3a332a;
+      --quote-bg: #2e2620;
+      --tag-confirmed-bg: #22331f;
+      --tag-confirmed-text: #8fd18a;
+      --tag-refuted-bg: #3a2222;
+      --tag-refuted-text: #e2938c;
+      --code-bg: #2a251f;
+      --shadow: 0 2px 14px rgba(0,0,0,0.4);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #1b1815; --bg-alt: #24201b; --card: #262220; --text: #ece5d8; --text-dim: #b3a894;
+    --accent: #e08a6d; --accent-2: #7bc9ab; --border: #3a332a; --quote-bg: #2e2620;
+    --tag-confirmed-bg: #22331f; --tag-confirmed-text: #8fd18a;
+    --tag-refuted-bg: #3a2222; --tag-refuted-text: #e2938c;
+    --code-bg: #2a251f; --shadow: 0 2px 14px rgba(0,0,0,0.4);
+  }
+  :root[data-theme="light"] {
+    --bg: #faf8f3; --bg-alt: #f1ede2; --card: #ffffff; --text: #2b2620; --text-dim: #63594a;
+    --accent: #a8432e; --accent-2: #2e6b5e; --border: #e2d9c6; --quote-bg: #fbf0e4;
+    --tag-confirmed-bg: #e4f0e0; --tag-confirmed-text: #2e6b3a;
+    --tag-refuted-bg: #f7dede; --tag-refuted-text: #a8342e;
+    --code-bg: #f1ede2; --shadow: 0 2px 10px rgba(43,38,32,0.08);
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    line-height: 1.6;
+    font-size: 17px;
+  }
+  .wrap { max-width: 880px; margin: 0 auto; padding: 40px 24px 100px; }
+
+  header.hero {
+    padding: 48px 0 32px;
+    border-bottom: 3px solid var(--accent);
+    margin-bottom: 36px;
+  }
+  header.hero .kicker {
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    font-size: 13px;
+    color: var(--accent);
+    font-weight: 700;
+    margin-bottom: 10px;
+  }
+  header.hero h1 {
+    font-size: 2.1rem;
+    line-height: 1.15;
+    margin: 0 0 14px;
+    font-weight: 800;
+  }
+  header.hero .date {
+    color: var(--text-dim);
+    font-size: 14px;
+    margin-bottom: 20px;
+  }
+  header.hero p {
+    color: var(--text-dim);
+    max-width: 68ch;
+  }
+  .method-strip {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-top: 22px;
+  }
+  .method-pill {
+    background: var(--bg-alt);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 6px 14px;
+    font-size: 13.5px;
+    color: var(--text-dim);
+    white-space: nowrap;
+  }
+  .method-pill b { color: var(--text); }
+
+  h2.section-title {
+    font-size: 1.5rem;
+    margin: 56px 0 6px;
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+  }
+  h2.section-title .num {
+    color: var(--accent);
+    font-weight: 800;
+  }
+  .section-lede {
+    color: var(--text-dim);
+    margin-bottom: 22px;
+    max-width: 70ch;
+  }
+
+  /* TL;DR */
+  .tldr {
+    background: var(--bg-alt);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 28px 28px 8px;
+    margin-bottom: 8px;
+  }
+  .tldr h2 { margin-top: 0; font-size: 1.4rem; }
+  .tldr ol { padding-left: 22px; margin: 0; }
+  .tldr li { margin-bottom: 16px; }
+  .tldr li b { color: var(--accent); }
+
+  /* finding card */
+  .finding {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 22px 24px;
+    margin-bottom: 22px;
+    box-shadow: var(--shadow);
+  }
+  .finding h3 {
+    margin: 0 0 10px;
+    font-size: 1.15rem;
+  }
+  .finding .badges {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 14px;
+  }
+  .badge {
+    font-size: 12px;
+    font-weight: 700;
+    padding: 3px 10px;
+    border-radius: 999px;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+  }
+  .badge.high { background: var(--tag-confirmed-bg); color: var(--tag-confirmed-text); }
+  .badge.medium { background: var(--bg-alt); color: var(--text-dim); border: 1px solid var(--border); }
+  .badge.vote { background: var(--code-bg); color: var(--text-dim); }
+
+  figure.shot {
+    margin: 14px 0 18px;
+    text-align: center;
+  }
+  figure.shot img {
+    max-width: 100%;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    display: block;
+    margin: 0 auto;
+  }
+  figure.shot figcaption {
+    font-size: 13px;
+    color: var(--text-dim);
+    margin-top: 8px;
+    line-height: 1.45;
+  }
+  figure.shot figcaption a { color: var(--text-dim); }
+
+  blockquote.evidence {
+    background: var(--quote-bg);
+    border-left: 3px solid var(--accent);
+    margin: 14px 0;
+    padding: 12px 18px;
+    border-radius: 0 8px 8px 0;
+    font-size: 15.5px;
+  }
+  blockquote.evidence p { margin: 0 0 8px; }
+  blockquote.evidence p:last-child { margin-bottom: 0; }
+
+  .sources-line {
+    font-size: 13.5px;
+    color: var(--text-dim);
+    margin-top: 10px;
+  }
+
+  .implication {
+    margin-top: 16px;
+    padding: 14px 18px;
+    background: var(--bg-alt);
+    border-radius: 8px;
+    border: 1px dashed var(--border);
+  }
+  .implication .label {
+    font-weight: 700;
+    color: var(--accent-2);
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin-bottom: 6px;
+  }
+
+  /* refuted block */
+  .danger-block {
+    background: var(--tag-refuted-bg);
+    border: 1px solid var(--accent);
+    border-radius: 14px;
+    padding: 26px 28px;
+    margin: 20px 0 40px;
+  }
+  .danger-block h2 {
+    margin-top: 0;
+    color: var(--tag-refuted-text);
+  }
+  .danger-item {
+    padding: 14px 0;
+    border-top: 1px solid var(--border);
+  }
+  .danger-item:first-of-type { border-top: none; }
+  .danger-item .claim { font-weight: 600; }
+  .danger-item .meta { font-size: 13px; color: var(--text-dim); margin-top: 6px; }
+
+  /* open questions */
+  .oq-list { padding-left: 0; list-style: none; }
+  .oq-list li {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-left: 4px solid var(--accent-2);
+    border-radius: 8px;
+    padding: 14px 18px;
+    margin-bottom: 12px;
+  }
+
+  .caveats-block {
+    background: var(--bg-alt);
+    border-radius: 14px;
+    padding: 24px 28px;
+    border: 1px solid var(--border);
+  }
+  .caveats-block ol { padding-left: 20px; }
+  .caveats-block li { margin-bottom: 10px; }
+
+  table.sources-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 14px;
+    margin-top: 10px;
+    overflow-x: auto;
+    display: block;
+  }
+  table.sources-table thead { display: table; width: 100%; table-layout: fixed; }
+  table.sources-table tbody { display: table; width: 100%; table-layout: fixed; }
+  table.sources-table th, table.sources-table td {
+    text-align: left;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+    word-break: break-word;
+  }
+  table.sources-table th {
+    color: var(--text-dim);
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+  }
+  .qual {
+    font-size: 12px;
+    font-weight: 700;
+    padding: 2px 8px;
+    border-radius: 999px;
+    white-space: nowrap;
+  }
+  .qual.primary { background: var(--tag-confirmed-bg); color: var(--tag-confirmed-text); }
+  .qual.secondary { background: var(--code-bg); color: var(--text-dim); }
+  .qual.blog { background: var(--bg-alt); color: var(--text-dim); border: 1px solid var(--border); }
+  .qual.forum { background: var(--tag-refuted-bg); color: var(--tag-refuted-text); }
+
+  .table-scroll { overflow-x: auto; }
+
+  a { color: var(--accent); }
+
+  footer {
+    margin-top: 60px;
+    padding-top: 20px;
+    border-top: 1px solid var(--border);
+    color: var(--text-dim);
+    font-size: 13px;
+  }
+
+  code { background: var(--code-bg); padding: 1px 5px; border-radius: 4px; font-size: 0.9em; }
+</style>
+
+<div class="wrap">
+
+<header class="hero">
+  <div class="kicker">Ресерч-отчёт · Life Choices</div>
+  <h1>Life Choices — ресерч референсов для команды</h1>
+  <div class="date">13 июля 2026</div>
+  <p>
+    Life Choices — юмористическая аркадная игра про быстрые жизненные выборы: игроку
+    прилетают карточки-ситуации («сомнительный договор с мелким шрифтом», что-то
+    приятное, что-то опасное), решение — принять или отклонить — нужно принять
+    <b>быстро</b>, в открытое окно времени. Каждое решение накидывает аффект на
+    персонажа, а накопленные решения складываются в <b>итог прожитой жизни</b> —
+    смешной, абсурдный, иногда мрачный пересказ того, как всё прошло. Целевой сетап —
+    аркадный автомат с физическими кнопками, минимум «да/нет», но, возможно, не
+    только. Референс от основательницы — Papers, Please.
+  </p>
+  <p>
+    Ниже — ресерч по шести открытым вопросам из брифа. Метод: 5 поисковых
+    направлений → 21 источник → 101 извлечённое утверждение → адверсарная проверка
+    топ-25 самых важных claim'ов (каждый independently проверяли 3 верификатора) →
+    22 подтверждено, 3 отклонено. Дальше в отчёте — только то, что прошло проверку,
+    плюс отдельно вынесенные отклонённые заявления, на которые опираться нельзя.
+  </p>
+  <div class="method-strip">
+    <span class="method-pill"><b>5</b> направлений поиска</span>
+    <span class="method-pill"><b>21</b> источник</span>
+    <span class="method-pill"><b>101</b> утверждение извлечено</span>
+    <span class="method-pill"><b>25</b> проверено адверсарно (×3 верификатора)</span>
+    <span class="method-pill"><b>22</b> подтверждено / <b>3</b> отклонено</span>
+    <span class="method-pill"><b>10</b> находок в синтезе</span>
+  </div>
+</header>
+
+<section class="tldr">
+  <h2>TL;DR — 8 главных выводов</h2>
+  <ol>
+    <li><b>Плоская шкала денег/успеха — подтверждённо слабый ориентир.</b> Работающие
+      альтернативы: многомерный баланс нескольких ресурсов (Reigns) или
+      материализация состояния через конкретных людей и их нужды (Papers, Please).
+      Интуиция основательницы, что шкала «непоказательна», ресерчем подтверждена.</li>
+    <li><b>Passage — прямое предупреждение против числа как итога жизни.</b> Автор
+      игры намеренно сделал счёт бессмысленным: если финал сводится к цифре, он
+      эмоционально пуст.</li>
+    <li><b>Итог жизни цепляет, когда он двухслойный.</b> BitLife: подробный отчёт
+      (надгробие со статистикой) + один ёмкий ярлык-«лента» с эмодзи. Плюс одно
+      конкретное, часто нарочито мелкое воспоминание, привязанное к реальному
+      прохождению, — это главный источник юмора и «залипательности».</li>
+    <li><b>Мерило и мгновенный фидбек — по сути одна механика.</b> В Reigns каждый
+      бинарный свайп сразу двигает 4 видимые шкалы; по словам автора, именно эта
+      привязка последствий к простому жесту придала ему смысл.</li>
+    <li><b>Спешка весёлая, а не бесящая, когда карточка считывается как микроигра
+      WarioWare</b> — одна картинка + один глагол-команда + предельно простой ввод
+      (в оригинале — часто одна кнопка). Точный тайминг окна решения ресерч не
+      подтвердил — это на плейтесты.</li>
+    <li><b>Две кнопки — проверенный путь, а не риск.</b> Dobotone, Canabalt, Winnitron
+      прямо валидируют минимальное управление; для да/нет-карточек это готовая
+      формула. Ходящий персонаж, вероятно, потребует джойстика — но это дизайн-догадка,
+      не подтверждённый факт (сравнение «карточки vs ходьба» ресерч не нашёл).</li>
+    <li><b>Формат кабинета: сессия ≈3 минуты, максимум 2 кнопки на игрока</b>
+      (Winnitron), и аркадный контекст сам по себе превращает провал в смешное, а не
+      фрустрирующее — игроки у автоматов смеются над своими неудачами.</li>
+    <li><b>Риск: голые две кнопки «да/нет» сами по себе не проходят планку
+      alt.ctrl.GDC</b> («взаимодействие, невоспроизводимое на стандартном
+      контроллере») — ценность физического кабинета придётся добирать формой
+      (большая кнопка, физический таймер, зрительский театр вокруг выбора).</li>
+  </ol>
+</section>
+
+<!-- ================= QUESTION 1 ================= -->
+<h2 class="section-title"><span class="num">1.</span> Мерило успеха / состояния жизни</h2>
+<p class="section-lede">
+  Вопрос из брифа: шкала денег/успеха кажется непоказательной и плохо считываемой.
+  В чём тогда измерять состояние жизни?
+</p>
+
+<div class="finding">
+  <h3>Reigns: баланс вместо накопления</h3>
+  <div class="badges">
+    <span class="badge high">confidence: high</span>
+    <span class="badge vote">verify 3-0</span>
+  </div>
+  <p>
+    Состояние игрока в Reigns — не одна шкала, а баланс четырёх ресурсов («столпов
+    власти»): церковь, народ, армия, деньги. Проигрыш наступает, когда <b>любая</b>
+    из шкал уходит в 0 <b>или</b> в максимум — то есть плохо не только «слишком
+    мало», но и «слишком много». Успех — это удержание баланса, а не максимизация
+    одного числа.
+  </p>
+  <figure class="shot">
+    <img src="images/reigns-gameplay.png" alt="Скриншот Reigns: карточка-персонаж со свайп-выбором «Yes», сверху — четыре иконки шкал (церковь, люди, армия, деньги)">
+    <figcaption>Reigns — свайп-карточка и четыре иконки-шкалы сверху (крест / человек / плюс-армия / мешок денег).
+      Источник: <a href="https://en.wikipedia.org/wiki/File:Reigns_Gameplay.png" target="_blank" rel="noopener">Wikipedia, File:Reigns Gameplay.png</a>.</figcaption>
+  </figure>
+  <blockquote class="evidence">
+    <p>«you had to balance the 4 pillars of your power (church, people, army and
+      money)» — «you end up dying in gruesome and colorful ways».</p>
+  </blockquote>
+  <p class="sources-line">Источник: авторский постмортем Франсуа Альо —
+    <a href="https://www.gamedeveloper.com/design/game-design-deep-dive-creating-an-adaptive-narrative-in-i-reigns-i-" target="_blank" rel="noopener">Game Developer, 2016</a>
+    (первичный источник). Порог 0/100 подтверждён вторичными источниками (Wikipedia, фан-вики).</p>
+  <div class="implication">
+    <div class="label">Что это значит для Life Choices</div>
+    Многомерный баланс закрывает сразу два вопроса — мерило (1) и мгновенный фидбек
+    (3), потому что это одна и та же механика: видимый сдвиг нескольких шкал на
+    каждый выбор. Риск переизбытка («слишком хорошо — тоже плохо») хорошо ложится на
+    юмористический тон: смерть от «слишком много счастья» — готовый абсурдный финал.
+  </div>
+</div>
+
+<div class="finding">
+  <h3>Papers, Please: мерило материализовано через людей</h3>
+  <div class="badges">
+    <span class="badge high">confidence: high</span>
+    <span class="badge vote">verify 3-0</span>
+  </div>
+  <p>
+    В Papers, Please нет вообще никакой шкалы морали или кармы — игра даже не
+    маркирует выборы как «добрые» или «злые». Деньги в игре есть, но выражены не
+    числом ради числа: в конце каждого дня зарплата уходит на аренду, еду, отопление
+    и лекарства для семьи инспектора. Моральный вес решений живёт в эмоциональном
+    состоянии игрока, а не в интерфейсе.
+  </p>
+  <figure class="shot">
+    <img src="images/papers-please-booth.jpg" alt="Скриншот Papers, Please: будка инспектора паспортного контроля, слева — просительница, справа — досье с разрешением на въезд">
+    <figcaption>Papers, Please — будка инспектора: досье просителя рядом с портретом, решение «пропустить / не пропустить».
+      Источник: <a href="https://en.wikipedia.org/wiki/File:Papers,_Please_(video_game_screenshot).jpg" target="_blank" rel="noopener">Wikipedia, File:Papers, Please (video game screenshot).jpg</a>.</figcaption>
+  </figure>
+  <blockquote class="evidence">
+    <p>«That money is then used at the end of each day to pay the living expenses
+      for your family — rent, food, heat and medicine.»</p>
+    <p>«…actions do have consequences, but most of it relies on the emotional state
+      and investment of the player.»</p>
+  </blockquote>
+  <p class="sources-line">Источник: <a href="https://www.popmatters.com/183289-papers-please-morality-2495645423.html" target="_blank" rel="noopener">PopMatters</a>
+    (вторичный, игровая критика), корроборировано вики игры, Wikipedia и рецензируемой статьёй Morrissette в Game Studies:
+    числовой шкалы морали нет, дилеммы возникают из нейтральных систем и эмпатии игрока.</p>
+  <div class="implication">
+    <div class="label">Что это значит для Life Choices</div>
+    «Успех» можно выражать через конкретных людей и их нужды вместо абстрактного
+    числа — но важно помнить, что под капотом всё равно должны быть механические
+    последствия (деньги, здоровье, отношения), просто не выведенные в лоб как шкала
+    морали.
+  </div>
+</div>
+
+<div class="finding">
+  <h3>Passage: предупреждение против числа как мерила жизни</h3>
+  <div class="badges">
+    <span class="badge high">confidence: high</span>
+    <span class="badge vote">verify 3-0</span>
+  </div>
+  <p>
+    Джейсон Рорер, автор Passage, сознательно сделал игровой счёт бессмысленным —
+    очки «висят над надгробием» как осознанный авторский аргумент против числа как
+    итога прожитой жизни.
+  </p>
+  <blockquote class="evidence">
+    <p>«Your score looks pretty meaningless hovering there above your little
+      tombstone.»</p>
+  </blockquote>
+  <p class="sources-line">Источник: <a href="https://hcsoftware.sourceforge.net/passage/statement.html" target="_blank" rel="noopener">авторский statement Джейсона Рорера</a>
+    (первичный источник), корроборировано страницей MoMA и прессой.</p>
+  <div class="implication">
+    <div class="label">Что это значит для Life Choices</div>
+    Если финал Life Choices сведётся к голому числу («вы набрали 1400 очков») —
+    ресерч прямо говорит, что это будет эмоционально пусто. Число, если оно вообще
+    нужно, должно быть подано как побочный эффект, а не как главный итог.
+  </div>
+</div>
+
+<div class="implication" style="margin: 0 0 40px; border-color: var(--accent);">
+  <div class="label" style="color:var(--accent);">Вывод-опции по вопросу 1</div>
+  Три рабочих направления, каждое подтверждено референсом: (а) многомерный баланс
+  а-ля Reigns; (б) материализация через конкретных людей/нужды а-ля Papers, Please;
+  (в) вообще без чисел, чисто сценарно (аргумент Passage). Плоская шкала денег —
+  подтверждённо слабый вариант.
+</div>
+
+<!-- ================= QUESTION 2 ================= -->
+<h2 class="section-title"><span class="num">2.</span> Итог жизни (финал)</h2>
+<p class="section-lede">
+  Как из потока решений собирается финал? Сколько финалов, как игра «рассказывает»
+  прожитую жизнь, чтобы это было смешно и цепляло?
+</p>
+
+<div class="finding">
+  <h3>BitLife: трёхчастная формула смешного финала</h3>
+  <div class="badges">
+    <span class="badge medium">confidence: medium</span>
+    <span class="badge vote">verify 3-0 (все три claim'а)</span>
+  </div>
+  <p>Самый прямой референс для финала Life Choices. Финал BitLife собран из трёх слоёв:</p>
+  <ol>
+    <li><b>Надгробие</b> — подробная статистика прожитой жизни (возраст, причина
+      смерти, баланс счёта, шкалы happiness/karma на момент смерти);</li>
+    <li><b>«Лента»-ярлык</b> — одна ёмкая категория с эмодзи (~40 штук: «Unlucky»,
+      «Hero», «Wicked» и т. п.), символизирующая, чем в целом была эта жизнь;</li>
+    <li><b>Одно конкретное воспоминание «анонимных друзей»</b>, привязанное к
+      реальному событию прохождения — часто нарочито мелкое или абсурдное
+      («Friends laugh when remembering the time they defrauded a casino», ~80
+      задокументированных шаблонов). Это главный источник юмора и «цепкости».</li>
+  </ol>
+  <p>Плюс социальный итог: на похороны приходят только родственники с хорошими
+    отношениями на момент смерти — то есть мерило жизни частично выражено через
+    людей, а не через шкалы.</p>
+  <figure class="shot">
+    <img src="images/bitlife-tombstone.png" alt="Финальный экран BitLife: надгробие персонажа Brandon Bryatt, ярлык-лента «Unlucky», шкалы Happiness и Karma, текст воспоминания друзей">
+    <figcaption>BitLife — надгробие: имя, возраст, причина смерти, шкалы Happiness/Karma, лента-ярлык «Unlucky» и текст воспоминания.
+      Источник: <a href="https://bitlife-life-simulator.fandom.com/wiki/File:BrandonBryattDeath.png" target="_blank" rel="noopener">BitLife Wiki (Fandom), File:BrandonBryattDeath.png</a>.</figcaption>
+  </figure>
+  <figure class="shot">
+    <img src="images/bitlife-ribbons.png" alt="Экран BitLife «Ribbons»: сетка эмодзи-ярлыков — Wasteful, Mediocre, Lustful, Wicked, Unlucky, Hero и другие, 9 из 30 заработано">
+    <figcaption>BitLife — экран «Ribbons»: набор ёмких категорий-ярлыков с эмодзи, из которых собирается «лента» на надгробии.
+      Источник: <a href="https://bitlife-life-simulator.fandom.com/wiki/File:Ribbons.png" target="_blank" rel="noopener">BitLife Wiki (Fandom), File:Ribbons.png</a>.</figcaption>
+  </figure>
+  <p class="sources-line">Источник: <a href="https://bitlife-life-simulator.fandom.com/wiki/Death/Final_Results" target="_blank" rel="noopener">BitLife Wiki (Fandom)</a>
+    — фан-вики, но проверена напрямую через MediaWiki API (список ~80 шаблонов
+    воспоминаний с процедурными слотами присутствует в wikitext), корроборирована
+    GameRant, Destructoid, TheNerdStash, Twinfinite.</p>
+  <div class="implication">
+    <div class="label">Что это значит для Life Choices</div>
+    Готовый рецепт финала: детальный отчёт (что случилось) + один ёмкий ярлык
+    (эмоциональное резюме) + одно абсурдно-конкретное воспоминание, сгенерированное
+    из реальных решений игрока в конкретном прохождении. Именно третий элемент —
+    источник смеха, и его нужно строить как процедурную вставку, привязанную к
+    конкретным принятым карточкам, а не как общий шаблон.
+  </div>
+</div>
+
+<div class="finding">
+  <h3>Passage: длина сессии и тон memento mori</h3>
+  <div class="badges">
+    <span class="badge high">confidence: high</span>
+    <span class="badge vote">verify 3-0</span>
+  </div>
+  <p>
+    Вся жизнь персонажа — от молодости до смерти — сжата в 5-минутную сессию, смерть
+    одна и неизбежна («memento mori», а не игра про победу).
+  </p>
+  <figure class="shot">
+    <img src="images/passage-strip.png" alt="Характерный кадр из Passage: длинная узкая горизонтальная полоса-уровень, персонаж слева, впереди по дороге — цветок, деревья и другие пиксельные объекты">
+    <figcaption>Passage — фирменная узкая горизонтальная полоса-«жизнь», по которой идёт персонаж от начала до конца сессии.
+      Источник: <a href="https://en.wikipedia.org/wiki/File:Passage_3_by_Jason_Rohrer_screenshot.png" target="_blank" rel="noopener">Wikipedia, File:Passage 3 by Jason Rohrer screenshot.png</a>.</figcaption>
+  </figure>
+  <blockquote class="evidence">
+    <p>«a memento mori game… presents an entire life, from young adulthood through
+      old age and death, in the span of five minutes» — «you die only once, at the
+      very end.»</p>
+  </blockquote>
+  <p class="sources-line">Источник: <a href="https://hcsoftware.sourceforge.net/passage/statement.html" target="_blank" rel="noopener">авторский statement Джейсона Рорера</a>, корроборировано страницей MoMA и прессой.</p>
+  <div class="implication">
+    <div class="label">Что это значит для Life Choices</div>
+    Ориентир длины сессии (сжатая, но полная «жизнь») и тон — единственная и
+    неизбежная смерть в конце, без «победы» как таковой. Это совпадает с бюджетом
+    сессии ~3 минуты из вопроса 6 (см. ниже, Winnitron).
+  </div>
+</div>
+
+<div class="finding">
+  <h3>Reigns: как из карточек собирается связная «жизнь»</h3>
+  <div class="badges">
+    <span class="badge high">confidence: high</span>
+    <span class="badge vote">verify 3-0</span>
+  </div>
+  <p>
+    Адаптивный нарратив Reigns строится на вероятностном «мешке» карт, который
+    расширяется и сжимается по состоянию игры: нет королевы — нет карт про королеву;
+    идёт война — военные карты выпадают чаще и «весят» больше. Так получается
+    связная «жизнь» без ветвящегося дерева сценариев.
+  </p>
+  <blockquote class="evidence">
+    <p>«Imagine a bag with the interesting ability to expand and shrink» — карты
+      про королеву убираются из «мешка», если королевы нет; во время войны военные
+      карты укрупняются.</p>
+  </blockquote>
+  <p class="sources-line">Источник: <a href="https://www.gamedeveloper.com/design/game-design-deep-dive-creating-an-adaptive-narrative-in-i-reigns-i-" target="_blank" rel="noopener">Game Developer, постмортем автора</a> (первичный источник), независимо корроборировано разбором storylet-дизайна (videlais.com, 2021).</p>
+  <div class="implication">
+    <div class="label">Что это значит для Life Choices</div>
+    Готовый технический рецепт: пул да/нет-карточек с весами выпадения, зависящими
+    от текущего состояния персонажа/аффектов. Не нужно писать ветвящееся дерево —
+    достаточно правил «эта карта уместна/более вероятна, если...».
+  </div>
+</div>
+
+<div class="implication" style="margin: 0 0 40px; border-color: var(--accent);">
+  <div class="label" style="color:var(--accent);">Оговорка по вопросу 2</div>
+  Прямой ответ на вопрос 2 из брифа закрыт только двумя играми — BitLife и Passage.
+  Alter Ego и Death and Taxes, а также структура/количество финалов самого Reigns, в
+  подтверждённые находки не попали (см. раздел «Открытые вопросы» и «Оговорки»).
+</div>
+
+<!-- ================= QUESTION 3 ================= -->
+<h2 class="section-title"><span class="num">3.</span> Фидбек на решение</h2>
+<p class="section-lede">
+  Как игрок сразу понимает, что выбор на него повлиял (аффекты, настроение,
+  состояние персонажа)?
+</p>
+
+<div class="finding">
+  <h3>Reigns: фидбек и мерило — одна и та же механика</h3>
+  <div class="badges">
+    <span class="badge high">confidence: high</span>
+    <span class="badge vote">verify 3-0</span>
+  </div>
+  <p>
+    Мгновенный фидбек в Reigns — это видимый сдвиг четырёх шкал на каждый свайп.
+    Механика мерила состояния и механика фидбека буквально совпадают: один и тот же
+    жест одновременно двигает шкалы и показывает игроку, что он их подвинул (см.
+    скриншот и цитату в разделе 1).
+  </p>
+  <blockquote class="evidence">
+    <p>«As soon as we weighted the decisions of the player with consequences on the
+      4 dimensions of power, we gave a lot of meaning to very simple swiping
+      gestures.»</p>
+  </blockquote>
+  <p class="sources-line">Источник: <a href="https://www.gamedeveloper.com/design/game-design-deep-dive-creating-an-adaptive-narrative-in-i-reigns-i-" target="_blank" rel="noopener">Game Developer, постмортем автора</a> (первичный источник).</p>
+  <div class="implication">
+    <div class="label">Что это значит для Life Choices</div>
+    Не проектировать фидбек отдельно от мерила состояния — если аффекты персонажа
+    видимы (шкалы, иконки, цвет), сам факт их сдвига на выбор уже и есть фидбек.
+    Дополнительно в источниках всплывала классика «game feel»/«juice» (микро-твики
+    анимации и звука за доли секунды) — но этот материал не попал в верифицированный
+    топ-25, поэтому в отчёт как факт не включён; как общая практика индустрии он всё
+    же стоит упоминания при последующем плейтесте.
+  </div>
+</div>
+
+<!-- ================= QUESTION 4 ================= -->
+<h2 class="section-title"><span class="num">4.</span> Давление времени</h2>
+<p class="section-lede">
+  Как устроено окно решения в играх с таймером — что делает спешку весёлой, а не
+  раздражающей?
+</p>
+
+<div class="finding">
+  <h3>WarioWare: три оси предельной простоты</h3>
+  <div class="badges">
+    <span class="badge high">confidence: high</span>
+    <span class="badge vote">verify 3-0 (два claim'а; смежный числовой claim отклонён 0-3)</span>
+  </div>
+  <p>
+    Спешка в WarioWare не раздражает, потому что микроигры предельно просты по трём
+    осям: <b>фикция</b> (контекст), <b>цель</b> (один глагол — «Catch!»,
+    «Avoid!») и <b>ввод</b> (в GBA-оригинале большинство микроигр — одна кнопка A,
+    многие — только влево/вправо). Игрок считывает, что от него хотят, за секунды —
+    и именно тогда таймер превращается в источник веселья, а не раздражения.
+  </p>
+  <figure class="shot">
+    <img src="images/warioware-microgame.png" alt="Скриншот микроигры из WarioWare, Inc.: команда-глагол «Enter!» на экране, персонаж должен войти в дверь пещеры">
+    <figcaption>WarioWare — типичная микроигра: одна команда-глагол на экране («Enter!»), простой сценарий, простой ввод.
+      Источник: <a href="https://en.wikipedia.org/wiki/File:Gameplay_of_WarioWare,_Inc..png" target="_blank" rel="noopener">Wikipedia, File:Gameplay of WarioWare, Inc..png</a>.</figcaption>
+  </figure>
+  <blockquote class="evidence">
+    <p>«Most games use only the A button for player input, and many others use only
+      the left and right directional buttons.»</p>
+    <p>«WarioWare's micro games… are so simple in terms of fiction, goal structure,
+      and agency, that they are quickly grasped.»</p>
+  </blockquote>
+  <p class="sources-line">Источник: Chaim Gingold, <a href="https://www.gamestudies.org/0501/gingold/" target="_blank" rel="noopener">Game Studies, 2005</a>
+    — рецензируемый академический журнал (первичный источник в смысле авторского анализа). Оговорка: простота —
+    первый из трёх механизмов Гингольда (ещё знакомость образов и чёткие границы
+    между играми); статистика про кнопки — про GBA-оригинал 2003 г., а не про всю
+    франшизу.</p>
+  <div class="implication">
+    <div class="label">Что это значит для Life Choices</div>
+    Формула для карточки Life Choices: одна картинка + один глагол + две кнопки =
+    считываемость уровня микроигры WarioWare. Это прямая и проверенная формула для
+    юмористического тайм-прессинга.
+  </div>
+</div>
+
+<div class="danger-block" style="margin: 12px 0 40px;">
+  <div class="badges" style="margin-bottom:8px;">
+    <span class="badge vote" style="background:transparent;color:var(--tag-refuted-text);font-weight:700;">⚠ важная оговорка внутри вопроса 4</span>
+  </div>
+  Числа «24 микроигры по ~5 секунд» как эталон тайминга <b>не подтвердились</b> при
+  верификации (0-3) — см. раздел «На это опираться нельзя». Точную длину окна
+  решения для Life Choices придётся тюнить своими плейтестами, эталона в
+  исследованных источниках нет.
+</div>
+
+<!-- ================= QUESTION 5 ================= -->
+<h2 class="section-title"><span class="num">5.</span> Управление: да/нет vs ходящий персонаж</h2>
+<p class="section-lede">
+  Чистые «да/нет» карточки — или персонаж, который ходит по миру и встречает
+  выборы? Что даёт каждый вариант?
+</p>
+
+<div class="finding">
+  <h3>Двухкнопочность — проверенный путь, не рискованный</h3>
+  <div class="badges">
+    <span class="badge medium">confidence: medium</span>
+    <span class="badge vote">verify 3-0 (все три claim'а)</span>
+  </div>
+  <p>
+    <b>Dobotone</b> — пати-консоль на 4 игроков, у каждого только 2 кнопки и никакого
+    джойстика. Разработчики прямо говорят: контроллер полностью определяет дизайн, а
+    игры обязаны быть интуитивны без туториалов — «на туториалы нет времени».
+  </p>
+  <figure class="shot">
+    <img src="images/dobotone-controllers.jpg" alt="Четыре человека держат в руках двухкнопочные контроллеры Dobotone на выставке, смеются, смотрят на экран">
+    <figcaption>Dobotone — игроки с двухкнопочными хендхелдами (без джойстика) на выставочном показе alt.ctrl.GDC.
+      Источник: <a href="https://www.creativeapplications.net/project/dobotone-videogamos-parametric-party-machine/" target="_blank" rel="noopener">CreativeApplications.Net, проект Dobotone (VIDEOGAMO)</a>.</figcaption>
+  </figure>
+  <p>
+    <b>Canabalt</b> — эталон одной кнопки: единственное действие — тайминг прыжка.
+    Игра работала на вебе, телефонах и в физических инсталляциях, попала в
+    коллекцию MoMA.
+  </p>
+  <figure class="shot">
+    <img src="images/canabalt-gameplay.jpg" alt="Скриншот Canabalt: чёрно-белый силуэт бегущего персонажа на фоне города, летящие птицы, счётчик метров сверху">
+    <figcaption>Canabalt — вся игра сводится к одной кнопке-прыжку, минимализм ввода довели до предела.
+      Источник: <a href="https://en.wikipedia.org/wiki/File:Canabalt_gameplay.jpg" target="_blank" rel="noopener">Wikipedia, File:Canabalt gameplay.jpg</a>.</figcaption>
+  </figure>
+  <blockquote class="evidence">
+    <p>Dobotone, Эрнан Саэс (Game Developer, 2016): «The games have to totally rely
+      on intuitiveness… There's no time for tutorials.»</p>
+  </blockquote>
+  <p class="sources-line">Источники: Dobotone — <a href="https://www.gamedeveloper.com/design/alt-ctrl-gdc-showcase-videogamo-s-i-dobotone-i-" target="_blank" rel="noopener">Game Developer</a>, корроборировано shakethatbutton.com (название — от исп. «dos botones»). Canabalt — <a href="https://www.stuff.tv/features/weekend-read-how-canabalt-jumped-indie-game-jam-museum-modern-art/" target="_blank" rel="noopener">Stuff.tv</a>, Wikipedia, <a href="https://www.moma.org/collection/works/164922" target="_blank" rel="noopener">страница коллекции MoMA</a>. Смежный прецедент — Risky Bison (джойстик + 1 кнопка, не чисто двухкнопочный кейс).</p>
+  <div class="implication">
+    <div class="label">Что это значит для Life Choices</div>
+    Бинарные да/нет-карточки на двух кнопках — проверенный, а не рискованный путь;
+    сразу несколько независимых прецедентов (Dobotone, Canabalt, и Winnitron из
+    вопроса 6) подтверждают жизнеспособность минимального ввода для аркадных
+    сетапов. Ходящий персонаж почти наверняка потребовал бы джойстика и удлинил бы
+    вход в игру — но это дизайн-рассуждение по аналогии, а не подтверждённый факт:
+    прямых сравнений «карточки vs ходьба» ресерч не нашёл, и соответствующее
+    универсальное правило было отклонено при проверке (см. ниже).
+  </div>
+</div>
+
+<!-- ================= QUESTION 6 ================= -->
+<h2 class="section-title"><span class="num">6.</span> Формат аркадного автомата</h2>
+<p class="section-lede">
+  Есть ли референсы игр, сделанных под кабинет с двумя кнопками / простыми
+  контроллерами? Что там работает?
+</p>
+
+<div class="finding">
+  <h3>Winnitron: официальный дизайн-гайд для публичного кабинета</h3>
+  <div class="badges">
+    <span class="badge high">confidence: high</span>
+    <span class="badge vote">verify 3-0</span>
+  </div>
+  <p>
+    Официальная вики сети инди-кабинетов Winnitron прямо задаёт бюджет: сессия не
+    длиннее ~3 минут (чтобы у публичного автомата быстро ротировались игроки) и
+    максимум 2 кнопки на игрока — намеренно, чтобы кабинет не пугал случайных
+    прохожих.
+  </p>
+  <figure class="shot">
+    <img src="images/winnitron-cabinet.jpg" alt="Аркадный кабинет Winnitron 1000 в тёмном помещении, светящаяся вывеска Winnitron 1000, джойстик и кнопки на панели управления">
+    <figcaption>Winnitron 1000 — кабинет с подсвеченной вывеской и минималистичной панелью управления.
+      Источник: <a href="http://winnitron.com/" target="_blank" rel="noopener">winnitron.com</a> (официальный сайт проекта).</figcaption>
+  </figure>
+  <blockquote class="evidence">
+    <p>«have your game sessions last max 3 mins as people will be more likely to
+      let others play» — «there is only 2 buttons per player, to keep things
+      approachable and unintimidating.»</p>
+  </blockquote>
+  <p class="sources-line">Источник: <a href="https://github.com/winnitron/WinnitronLauncher/wiki/Game-Design-for-an-Arcade-Experience" target="_blank" rel="noopener">официальная вики Winnitron</a> (первичный источник). Оговорка: стандартная панель Winnitron включает ещё и джойстик на игрока — кабинет не чисто двухкнопочный.</p>
+  <div class="implication">
+    <div class="label">Что это значит для Life Choices</div>
+    Прямая валидация схемы «да/нет» на двух физических кнопках и готовый бюджет
+    длины одной «жизни» — около 3 минут. Это совпадает с ориентиром длины сессии из
+    Passage (вопрос 2).
+  </div>
+</div>
+
+<div class="finding">
+  <h3>Уроки портирования инди-игр на кабинеты</h3>
+  <div class="badges">
+    <span class="badge medium">confidence: medium</span>
+    <span class="badge vote">verify 3-0 (все три claim'а)</span>
+  </div>
+  <ul>
+    <li>Малое время игрока у автомата — полезное ограничение, которое заставляет
+      делать более компактный и элегантный дизайн (Santa Ragione о Wheels of
+      Aurelia).</li>
+    <li><b>Аркадный контекст меняет восприятие провала: игроки смеются над
+      неудачами вместо фрустрации</b> — потому что от аркады заранее ждут высокой
+      сложности. Это напрямую поддерживает юмористическую подачу провальных «жизней»
+      в Life Choices.</li>
+    <li>Игра должна читаться с первого взгляда; полноценному аркадному релизу
+      нужны attract mode и таблица рекордов (кейс Risky Bison).</li>
+  </ul>
+  <blockquote class="evidence">
+    <p>«knowing that people would have very little time… helped us focus on a
+      sharper, more elegant design.»</p>
+    <p>«we saw players laughing at their failures instead of getting frustrated.»</p>
+    <p>«players need to feel they can jump right in… know at a glance what your
+      game is.»</p>
+  </blockquote>
+  <p class="sources-line">Источник: Joel Couture, <a href="https://www.gamedeveloper.com/design/lessons-learned-from-porting-indie-games-onto-arcade-cabinets" target="_blank" rel="noopener">Game Developer, 2016</a>
+    (вторичный источник, интервью с разработчиками), требования attract mode + score
+    system подтверждены гайдлайнами <a href="https://fantasticarcade.com/cabinet-faq/" target="_blank" rel="noopener">Fantastic Arcade</a>. Оговорка: пункт про компактность дизайна — мнение одного разработчика, обобщённое статьёй; причинность «провал → смех» — вывод из соседних фраз, а не проверенный психологический механизм.</p>
+  <div class="implication">
+    <div class="label">Что это значит для Life Choices</div>
+    Юмористическая подача смерти/провала — не только тон сценариев, но и следствие
+    самого аркадного контекста: у автомата провал воспринимается как часть
+    развлечения. Открытый вопрос — что показывать в таблице рекордов, если игра
+    сознательно отказывается от плоского счёта (см. «Открытые вопросы»).</div>
+</div>
+
+<div class="finding">
+  <h3>Планка alt.ctrl.GDC: риск для голых двух кнопок</h3>
+  <div class="badges">
+    <span class="badge high">confidence: high</span>
+    <span class="badge vote">verify 3-0</span>
+  </div>
+  <p>
+    Официальные критерии отбора для шоукейса alt.ctrl.GDC требуют, чтобы связка игры
+    и физического железа давала взаимодействие, невоспроизводимое на стандартном
+    контроллере. Голые две кнопки «да/нет» — это по сути перенос экранной игры на
+    физические кнопки и сами по себе эту планку не проходят.
+  </p>
+  <blockquote class="evidence">
+    <p>«The combination of the game and hardware must deliver a unique interaction
+      that cannot be replicated with standard controllers.»</p>
+  </blockquote>
+  <p class="sources-line">Источник: <a href="https://gdconf.com/alt-ctrl-gdc-archive" target="_blank" rel="noopener">официальные критерии alt.ctrl.GDC</a> (первичный источник, актуальны на цикл 2026).</p>
+  <div class="implication">
+    <div class="label">Что это значит для Life Choices</div>
+    Если цель — не просто аркадный кабинет, а именно alt.ctrl-уровень заявки, ценность
+    должна идти из физической формы: «нервная» большая красная кнопка, физический
+    таймер, зрительский театр вокруг момента выбора и т. п. Просто две кнопки без
+    физического твиста этот стандарт не закрывают (но это не отменяет того, что
+    двухкнопочность — рабочий формат для обычного аркадного кабинета, см. Winnitron
+    и Dobotone/Canabalt в вопросе 5).
+  </div>
+</div>
+
+<!-- ================= REFUTED ================= -->
+<div class="danger-block">
+  <h2>⚠ На это опираться НЕЛЬЗЯ — отклонённые утверждения</h2>
+  <p style="color:var(--text-dim); margin-top:-6px;">
+    Эти три claim'а были извлечены из источников, но не прошли адверсарную проверку
+    (голосование верификаторов 0-3 — все трое независимо признали утверждение
+    неподтверждённым или ложным). Явно фиксируем их здесь, чтобы никто в команде не
+    процитировал их дальше как факт.
+  </p>
+
+  <div class="danger-item">
+    <div class="claim">1. Числа тайминга WarioWare: «24 микроигры по ~5 секунд»</div>
+    <p>Заявление, что каждый уровень WarioWare состоит из 24 микроигр и каждая длится
+      около 5 секунд, — не подтвердилось источником. Реальная статья (Gingold,
+      Game Studies) не даёт таких конкретных чисел. Вывод: точный тайминг окна
+      решения для Life Choices нельзя обосновывать «как в WarioWare» — этот эталон
+      придётся получить своими плейтестами.</p>
+    <div class="meta">Голосование: 0-3 · Источник claim'а: <a href="https://www.gamestudies.org/0501/gingold/" target="_blank" rel="noopener">gamestudies.org/0501/gingold</a></div>
+  </div>
+
+  <div class="danger-item">
+    <div class="claim">2. «Некролог со сменой рассказчика» в BitLife</div>
+    <p>Утверждение, что итог жизни в BitLife подан как нарратив-«некролог», меняющий
+      рассказчика в зависимости от прожитой жизни (например, от лица тюремного
+      надзирателя при тюремной биографии) — не подтвердилось. Реальный механизм
+      BitLife другой (см. вопрос 2 выше): надгробие + лента-ярлык + одно
+      конкретное воспоминание «друзей», без смены рассказчика/точки зрения.</p>
+    <div class="meta">Голосование: 0-3 · Источник claim'а: <a href="https://bitlife-life-simulator.fandom.com/wiki/Death/Final_Results" target="_blank" rel="noopener">BitLife Wiki</a></div>
+  </div>
+
+  <div class="danger-item">
+    <div class="claim">3. Универсальное правило walk-up-читаемости против ходящего персонажа</div>
+    <p>Заявление вида «игра под аркадный кабинет обязана быть понятна без инструкций
+      за секунды по визуальной обратной связи — и это аргумент за чистые бинарные
+      карточки против свободно ходящего персонажа» не подтвердилось как
+      универсальное правило. Источник (вики Winnitron) не даёт такого прямого
+      сравнения. Управление вопрос 5 остаётся дизайн-решением команды, а не фактом
+      из ресерча — см. оговорку в разделе 5.</p>
+    <div class="meta">Голосование: 0-3 · Источник claim'а: <a href="https://github.com/winnitron/WinnitronLauncher/wiki/Game-Design-for-an-Arcade-Experience" target="_blank" rel="noopener">Winnitron Wiki</a></div>
+  </div>
+</div>
+
+<!-- ================= OPEN QUESTIONS ================= -->
+<h2 class="section-title" style="margin-top:20px;">Открытые вопросы — «наподумать» команде</h2>
+<p class="section-lede">Ресерч не закрыл эти четыре вопроса — они остаются задачами для дизайн-решений и точечного дорезерча.</p>
+<ul class="oq-list">
+  <li>Какова оптимальная длительность окна решения в секундах? Числовой тайминг
+    WarioWare не подтвердился, эталона длины окна нет — нужен собственный
+    плейтест-тюнинг в рамках бюджета ~3 минуты на «жизнь».</li>
+  <li>Как устроены итоги жизни в Alter Ego и Death and Taxes, и сколько финалов
+    делает поток решений «пересобираемым»? Структура концовок самого Reigns тоже
+    осталась неисследованной — вопрос 2 закрыт в этом ресерче только BitLife и
+    Passage.</li>
+  <li>Какое физическое взаимодействие сделает кабинет Life Choices
+    «невоспроизводимым на стандартном контроллере» по критерию alt.ctrl.GDC — голые
+    две кнопки да/нет эту планку не проходят.</li>
+  <li>Что выводить в таблицу рекордов, если игра сознательно отказывается от
+    плоского счёта как мерила жизни (урок Passage)? Нужен формат «рекорда»,
+    совместимый с юмористическими ярлыками-итогами в духе лент BitLife.</li>
+</ul>
+
+<!-- ================= CAVEATS ================= -->
+<h2 class="section-title">Оговорки</h2>
+<div class="caveats-block">
+  <ol>
+    <li><b>Качество источников неравномерно.</b> Reigns, Passage, WarioWare,
+      Winnitron, alt.ctrl.GDC — первичные источники (авторские постмортемы,
+      официальные доки, рецензируемый журнал). BitLife держится на фан-вики (хотя и
+      проверенной напрямую через MediaWiki API и корроборированной прессой), а
+      Papers, Please и аркадные уроки — на игровой критике и интервью.</li>
+    <li><b>Часть выводов — обобщённые анекдоты одного разработчика</b> (польза
+      временного ограничения у автомата, смех над провалами) — причинные объяснения
+      там интерпретативны, а не проверенный психологический механизм.</li>
+    <li><b>Три claim'а отклонены при верификации</b> — см. блок «На это опираться
+      нельзя» выше: конкретные числа тайминга WarioWare, «некролог со сменой
+      рассказчика» в BitLife, универсальное правило walk-up-читаемости против
+      ходящего персонажа.</li>
+    <li><b>Непокрытые референсы.</b> Alter Ego и Death and Taxes, заявленные в
+      исходном вопросе про итог жизни, в подтверждённые находки не попали.
+      Количество и устройство финалов Reigns тоже не исследовано отдельно — вопрос 2
+      закрыт только BitLife и Passage.</li>
+    <li><b>Мелкие фактические оговорки:</b> панель Winnitron включает ещё и
+      джойстик (не чисто 2 кнопки); прецедент Risky Bison — джойстик + 1 кнопка, не
+      чисто кнопочный кейс; «ленты» BitLife — категориальные ярлыки без иерархии
+      (не «ранги»); статистика кнопок WarioWare относится к GBA-оригиналу 2003 г., а
+      не ко всей франшизе.</li>
+    <li><b>Времячувствительность низкая</b> — это исторические факты о вышедших
+      играх, кроме критериев alt.ctrl.GDC: они актуальны на цикл 2026 и могут
+      измениться к моменту заявки, если команда решит идти в этот трек.</li>
+  </ol>
+</div>
+
+<!-- ================= SOURCES ================= -->
+<h2 class="section-title">Все источники (21)</h2>
+<p class="section-lede">
+  Качество источника: <span class="qual primary">primary</span> — первоисточник
+  (автор игры, официальный документ, рецензируемый журнал); <span class="qual secondary">secondary</span> — игровая
+  журналистика/критика; <span class="qual blog">blog</span> — авторский блог/substack;
+  <span class="qual forum">forum</span> — вики/форум.
+</p>
+<div class="table-scroll">
+<table class="sources-table">
+  <thead>
+    <tr>
+      <th style="width:46%">Источник</th>
+      <th style="width:12%">Качество</th>
+      <th style="width:32%">Направление</th>
+      <th style="width:10%">Claims</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr><td><a href="https://www.gamedeveloper.com/design/game-design-deep-dive-creating-an-adaptive-narrative-in-i-reigns-i-" target="_blank" rel="noopener">Game Developer — Reigns postmortem</a></td><td><span class="qual primary">primary</span></td><td>Состояние жизни без плоской шкалы</td><td>5</td></tr>
+    <tr><td><a href="https://emshort.blog/2016/08/20/reigns/" target="_blank" rel="noopener">Emily Short's blog — Reigns</a></td><td><span class="qual blog">blog</span></td><td>Состояние жизни без плоской шкалы</td><td>5</td></tr>
+    <tr><td><a href="https://www.popmatters.com/183289-papers-please-morality-2495645423.html" target="_blank" rel="noopener">PopMatters — Papers, Please morality</a></td><td><span class="qual secondary">secondary</span></td><td>Состояние жизни без плоской шкалы</td><td>5</td></tr>
+    <tr><td><a href="https://dissectinggamedesign.substack.com/p/papers-please-and-non-diegetic-morality" target="_blank" rel="noopener">Dissecting Game Design — Papers, Please</a></td><td><span class="qual blog">blog</span></td><td>Состояние жизни без плоской шкалы</td><td>4</td></tr>
+    <tr><td><a href="https://videlais.com/2021/01/01/understanding-reigns-2016-through-storylet-design-terms/" target="_blank" rel="noopener">videlais.com — Reigns storylet design</a></td><td><span class="qual blog">blog</span></td><td>Состояние жизни без плоской шкалы</td><td>5</td></tr>
+    <tr><td><a href="https://thezvi.wordpress.com/2020/10/21/the-uncertainty-of-death-and-taxes/" target="_blank" rel="noopener">thezvi.wordpress.com — Death and Taxes</a></td><td><span class="qual blog">blog</span></td><td>Состояние жизни без плоской шкалы</td><td>5</td></tr>
+    <tr><td><a href="https://bitlife-life-simulator.fandom.com/wiki/Death/Final_Results" target="_blank" rel="noopener">BitLife Wiki — Death/Final Results</a></td><td><span class="qual secondary">secondary</span></td><td>Финал-«итог жизни»</td><td>5</td></tr>
+    <tr><td><a href="https://bitlife-life-simulator.fandom.com/wiki/Ribbons" target="_blank" rel="noopener">BitLife Wiki — Ribbons</a></td><td><span class="qual forum">forum</span></td><td>Финал-«итог жизни»</td><td>5</td></tr>
+    <tr><td><a href="https://hcsoftware.sourceforge.net/passage/statement.html" target="_blank" rel="noopener">Jason Rohrer — Passage statement</a></td><td><span class="qual primary">primary</span></td><td>Финал-«итог жизни»</td><td>5</td></tr>
+    <tr><td><a href="https://reigns.fandom.com/wiki/Deaths" target="_blank" rel="noopener">Reigns Wiki — Deaths</a></td><td><span class="qual forum">forum</span></td><td>Финал-«итог жизни»</td><td>5</td></tr>
+    <tr><td><a href="https://gamejuice.co.uk/resources/juice-it-or-lose-it" target="_blank" rel="noopener">Juice It or Lose It (resource page)</a></td><td><span class="qual blog">blog</span></td><td>Мгновенный фидбек / game feel</td><td>5</td></tr>
+    <tr><td><a href="https://valdemird.com/blog/game-feel-on-the-web/" target="_blank" rel="noopener">valdemird.com — Game feel on the web</a></td><td><span class="qual blog">blog</span></td><td>Мгновенный фидбек / game feel</td><td>5</td></tr>
+    <tr><td><a href="https://www.gamestudies.org/0501/gingold/" target="_blank" rel="noopener">Game Studies — Chaim Gingold, WarioWare</a></td><td><span class="qual primary">primary</span></td><td>Тайм-прессинг: окна решения</td><td>4</td></tr>
+    <tr><td><a href="https://www.gamedeveloper.com/design/time-for-a-timer---effective-use-of-timers-in-game-design" target="_blank" rel="noopener">Game Developer — Time for a Timer</a></td><td><span class="qual blog">blog</span></td><td>Тайм-прессинг: окна решения</td><td>5</td></tr>
+    <tr><td><a href="https://critical-gaming.com/blog/2009/1/3/tension-threats-timers.html" target="_blank" rel="noopener">critical-gaming.com — Tension, Threats, Timers</a></td><td><span class="qual blog">blog</span></td><td>Тайм-прессинг: окна решения</td><td>5</td></tr>
+    <tr><td><a href="https://github.com/winnitron/WinnitronLauncher/wiki/Game-Design-for-an-Arcade-Experience" target="_blank" rel="noopener">Winnitron Wiki — Game Design for an Arcade Experience</a></td><td><span class="qual primary">primary</span></td><td>Инди-игры под аркадный кабинет</td><td>4</td></tr>
+    <tr><td><a href="https://www.gamedeveloper.com/design/lessons-learned-from-porting-indie-games-onto-arcade-cabinets" target="_blank" rel="noopener">Game Developer — Lessons learned porting indie games onto arcade cabinets</a></td><td><span class="qual secondary">secondary</span></td><td>Инди-игры под аркадный кабинет</td><td>5</td></tr>
+    <tr><td><a href="https://gdconf.com/alt-ctrl-gdc-archive" target="_blank" rel="noopener">GDC — alt.ctrl.GDC archive / criteria</a></td><td><span class="qual primary">primary</span></td><td>Инди-игры под аркадный кабинет</td><td>5</td></tr>
+    <tr><td><a href="https://www.gamedeveloper.com/design/how-to-build-an-indie-arcade-cabinet" target="_blank" rel="noopener">Game Developer — How to build an indie arcade cabinet</a></td><td><span class="qual blog">blog</span></td><td>Инди-игры под аркадный кабинет</td><td>4</td></tr>
+    <tr><td><a href="https://www.gamedeveloper.com/design/alt-ctrl-gdc-showcase-videogamo-s-i-dobotone-i-" target="_blank" rel="noopener">Game Developer — alt.ctrl.GDC showcase: Dobotone</a></td><td><span class="qual secondary">secondary</span></td><td>Инди-игры под аркадный кабинет</td><td>5</td></tr>
+    <tr><td><a href="https://www.stuff.tv/features/weekend-read-how-canabalt-jumped-indie-game-jam-museum-modern-art/" target="_blank" rel="noopener">Stuff.tv — How Canabalt jumped from indie game jam to MoMA</a></td><td><span class="qual secondary">secondary</span></td><td>Инди-игры под аркадный кабинет</td><td>5</td></tr>
+  </tbody>
+</table>
+</div>
+
+<footer>
+  Отчёт собран из результатов автоматизированного ресерч-воркфлоу (5 направлений
+  поиска → 21 источник → 101 утверждение → адверсарная проверка топ-25 тройкой
+  независимых верификаторов на claim). Ресерч информирует варианты — решения
+  принимает команда. Исходные материалы: <code>docs/research/research-brief.md</code>,
+  <code>docs/research/reference-games.md</code>.
+</footer>
+
+</div>
