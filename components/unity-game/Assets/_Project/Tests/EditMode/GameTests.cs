@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using NUnit.Framework;
 using ThanksNoThanks;
@@ -227,6 +228,291 @@ namespace ThanksNoThanks.Tests
             Assert.AreEqual("Росли аккуратным, брезгливым ребёнком.", n.StoryLines[1],
                 "CH01 НЕТ line is the first real story line (age order, intro excluded)");
             Assert.AreEqual(13, n.StoryLines.Count, "parents + 12 choice lines");
+        }
+
+        // ---- CHAIN honesty: a gated child only appears if the parent resolved ДА ----
+
+        private static Card Gated(string id, int age, string parent)
+        {
+            var c = Plain(id, age, 0, null, "n");
+            c.RequiresParentYes = parent;
+            return c;
+        }
+
+        [Test]
+        public void ChainedChild_Drawn_WhenParentYes()
+        {
+            var deck = new[] { Plain("P", 4, noNec: "n"), Gated("C", 10, "P") };
+            var g = new Game(deck, coin: () => false);
+            g.StartLife();
+            Assert.AreEqual("P?", g.CurrentCard.Question);
+            g.HandleInput(GameInput.AnswerYes);            // parent ДА unlocks the child
+            Assert.AreEqual("C?", g.CurrentCard.Question, "gated child appears after parent ДА");
+        }
+
+        [Test]
+        public void ChainedChild_Skipped_WhenParentNo()
+        {
+            var deck = new[] { Plain("P", 4, noNec: "n"), Gated("C", 10, "P") };
+            var g = new Game(deck, coin: () => false);
+            g.StartLife();
+            g.HandleInput(GameInput.AnswerNo);             // parent НЕТ → child never drawn
+            Assert.AreEqual(GameState.Finale, g.State, "no more cards after skipping the gated child");
+        }
+
+        [Test]
+        public void ChainedChild_Skipped_WhenParentAbsent()
+        {
+            // Child gated on a parent that isn't in the deck at all → never drawn.
+            var deck = new[] { Plain("A", 4, noNec: "n"), Gated("C", 10, "MISSING") };
+            var g = new Game(deck, coin: () => false);
+            g.StartLife();
+            g.HandleInput(GameInput.AnswerNo);
+            Assert.AreEqual(GameState.Finale, g.State);
+        }
+
+        // ---- reserve top-up: a skipped gated card is replaced so the run length holds ----
+
+        [Test]
+        public void SkippedGatedChild_IsReplaced_FromReserve()
+        {
+            var deck = new[] { Plain("P", 4, noNec: "n"), Gated("C", 10, "P") };
+            var reserve = new[] { Plain("R", 12, noNec: "n") };
+            var g = new Game(deck, coin: () => false, reserve: reserve);
+            g.StartLife();
+            g.HandleInput(GameInput.AnswerNo);           // parent НЕТ → C skipped → R substituted
+            Assert.AreEqual(GameState.Playing, g.State, "run continues on the substitute");
+            Assert.AreEqual("R?", g.CurrentCard.Question, "reserve card replaced the gated child");
+            g.HandleInput(GameInput.AnswerNo);
+            Assert.AreEqual(GameState.Finale, g.State);
+        }
+
+        // Contract row 2: the ACTUALLY DRAWN count stays 25–30 regardless of the answer path.
+
+        private static int PlayCountingCards(Game g, Func<Card, bool> answerYes)
+        {
+            g.StartLife();
+            int drawn = 0, guard = 0;
+            while (g.State == GameState.Playing && g.CurrentCard != null && guard++ < 300)
+            {
+                drawn++;
+                bool yes = answerYes(g.CurrentCard);
+                g.HandleInput(yes ? GameInput.AnswerYes : GameInput.AnswerNo);
+            }
+            return drawn;
+        }
+
+        [Test]
+        public void DrawnCount_AllNo_StaysWithin25to30()
+        {
+            var asset = Resources.Load<TextAsset>("scenes");
+            Assert.IsNotNull(asset);
+            var all = CardLoader.ParseAll(asset.text);
+
+            for (int seed = 1; seed <= 10; seed++)
+            {
+                var g = new Game(() => DeckSampler.BuildPlan(all, new System.Random(seed)),
+                                 coin: () => false);
+                int drawn = PlayCountingCards(g, _ => false); // все НЕТ → all chains closed
+                Assert.AreEqual(GameState.Finale, g.State, $"all-НЕТ run ends (seed {seed})");
+                Assert.That(drawn, Is.InRange(DeckSampler.MinDeck, DeckSampler.MaxDeck),
+                    $"drawn count {drawn} within [25,30] on all-НЕТ (seed {seed})");
+            }
+        }
+
+        [Test]
+        public void DrawnCount_AllYes_StaysWithin25to30()
+        {
+            var asset = Resources.Load<TextAsset>("scenes");
+            Assert.IsNotNull(asset);
+            var all = CardLoader.ParseAll(asset.text);
+
+            for (int seed = 1; seed <= 10; seed++)
+            {
+                var g = new Game(() => DeckSampler.BuildPlan(all, new System.Random(seed)),
+                                 coin: () => false);
+                // ДА везде (все цепочки открыты), кроме фаталов — иначе забег легитимно короче.
+                int drawn = PlayCountingCards(g,
+                    c => !c.YesIsFatal && c.DelayedFatalYears == 0);
+                Assert.AreEqual(GameState.Finale, g.State, $"all-ДА run ends (seed {seed})");
+                Assert.That(drawn, Is.InRange(DeckSampler.MinDeck, DeckSampler.MaxDeck),
+                    $"drawn count {drawn} within [25,30] on all-ДА (seed {seed})");
+            }
+        }
+
+        // ---- delayed FATAL (RND01): ДА → «за вами пришли» ~3 event-years later, not immediately ----
+
+        private static Card DelayedFatal(string id, int age, int years, string cause)
+        {
+            var c = Plain(id, age, 0, "взяли деньги", "отказались");
+            c.DelayedFatalYears = years;
+            c.FatalCause = cause;
+            return c;
+        }
+
+        [Test]
+        public void Rnd01_DelayedFatal_FiresLater_NotImmediately()
+        {
+            var starter = Plain("I03", 1); starter.StartsAgeTimer = true;
+            var deck = new[]
+            {
+                starter,
+                DelayedFatal("RND01", 22, 3, "за вами пришли"),
+                Plain("F", 30, noNec: "n"),
+            };
+            var g = new Game(deck, coin: () => false);
+            g.StartLife();
+            g.HandleInput(GameInput.AnswerNo);             // resolve I03 → age running
+            Assert.AreEqual("RND01?", g.CurrentCard.Question);
+
+            g.HandleInput(GameInput.AnswerYes);            // take the money
+            Assert.AreEqual(GameState.Playing, g.State, "life continues — fatal is delayed, not instant");
+            Assert.AreEqual("F?", g.CurrentCard.Question);
+
+            g.Tick(3f);                                    // age catches up past 25 (22 + 3)
+            Assert.AreEqual(GameState.Finale, g.State, "delayed fatal fires once age crosses 25");
+            Assert.AreEqual("за вами пришли", g.Cause);
+        }
+
+        [Test]
+        public void Rnd01_AsLastCard_Yes_CoastsToDelayedFatal_NotInstantDeath()
+        {
+            var starter = Plain("I03", 1); starter.StartsAgeTimer = true;
+            var deck = new[] { starter, DelayedFatal("RND01", 40, 3, "за вами пришли") };
+            var g = new Game(deck, coin: () => false);
+            g.StartLife();
+            g.HandleInput(GameInput.AnswerNo);             // I03 → age running
+            Assert.AreEqual("RND01?", g.CurrentCard.Question, "RND01 is the final card");
+
+            g.HandleInput(GameInput.AnswerYes);            // deck exhausted with the fatal pending
+            Assert.AreEqual(GameState.Playing, g.State,
+                "no instant death and no «дожил» — the run coasts until the reckoning");
+            Assert.IsNull(g.CurrentCard, "no card up while coasting");
+
+            int guard = 0;
+            while (g.State == GameState.Playing && guard++ < 1000)
+                g.Tick(0.05f);                             // age fast-forwards at catch-up rate
+
+            Assert.AreEqual(GameState.Finale, g.State, "delayed fatal fired during the coast");
+            Assert.AreEqual("за вами пришли", g.Cause);
+            Assert.That(g.Age, Is.EqualTo(43f).Within(0.01f),
+                "death exactly at resolved age + 3 (40 + 3), not at answer time");
+        }
+
+        [Test]
+        public void Rnd01_AsLastCard_No_EndsNaturally()
+        {
+            var starter = Plain("I03", 1); starter.StartsAgeTimer = true;
+            var deck = new[] { starter, DelayedFatal("RND01", 40, 3, "за вами пришли") };
+            var g = new Game(deck, coin: () => false);
+            g.StartLife();
+            g.HandleInput(GameInput.AnswerNo);             // I03
+            g.HandleInput(GameInput.AnswerNo);             // decline RND01 → deck ends, nothing pending
+            Assert.AreEqual(GameState.Finale, g.State, "natural finale immediately — no coast");
+            Assert.AreEqual("спокойная старость", g.Cause, "tone ending, not «за вами пришли»");
+        }
+
+        [Test]
+        public void Rnd01_No_Schedule_When_Declined()
+        {
+            var starter = Plain("I03", 1); starter.StartsAgeTimer = true;
+            var deck = new[]
+            {
+                starter,
+                DelayedFatal("RND01", 22, 3, "за вами пришли"),
+                Plain("F", 30, noNec: "n"),
+            };
+            var g = new Game(deck, coin: () => false);
+            g.StartLife();
+            g.HandleInput(GameInput.AnswerNo);             // I03
+            g.HandleInput(GameInput.AnswerNo);             // decline RND01 → no schedule
+            g.Tick(5f);
+            g.HandleInput(GameInput.AnswerNo);             // answer F → deck ends
+            Assert.AreEqual(GameState.Finale, g.State);
+            Assert.AreNotEqual("за вами пришли", g.Cause, "declining RND01 never schedules the fatal");
+        }
+
+        // ---- natural old-age ending: tone by relationships ----
+
+        private static Card RelCard(string id, int age, int rel)
+        {
+            var yes = new List<ScaleDelta> { new(Scale.Relationships, DeltaKind.Add, rel) };
+            return new Card
+            {
+                Id = id, Question = id + "?", Age = age, Order = age,
+                YesDeltas = yes, NoDeltas = new List<ScaleDelta>(),
+                YesNecrolog = "y", NoNecrolog = "n", Flags = new List<string>(),
+            };
+        }
+
+        [Test]
+        public void NaturalEnding_JoyfulOldAge_WhenRelationshipsHigh()
+        {
+            var g = new Game(new[] { RelCard("R", 40, +10) }, coin: () => false); // 55 → 65 >= 60
+            g.StartLife();
+            g.HandleInput(GameInput.AnswerYes);
+            Assert.AreEqual(GameState.Finale, g.State);
+            Assert.AreEqual("весёлая старость", g.Cause);
+        }
+
+        [Test]
+        public void NaturalEnding_LonelyOldAge_WhenRelationshipsLow()
+        {
+            var g = new Game(new[] { RelCard("R", 40, -10) }, coin: () => false); // 55 → 45 <= 50
+            g.StartLife();
+            g.HandleInput(GameInput.AnswerYes);
+            Assert.AreEqual(GameState.Finale, g.State);
+            Assert.AreEqual("одинокая старость", g.Cause);
+        }
+
+        // ---- necrolog 15-cap exercised on a long run (ROND dropped first) ----
+
+        [Test]
+        public void LongRun_Necrolog_CapsAt15_DroppingRondFirst()
+        {
+            var deck = new List<Card>();
+            for (int i = 0; i < 8; i++)                    // 8 weighty (non-ROND)
+                deck.Add(Plain("W" + i, 20 + i, yesNec: "weighty" + i));
+            for (int i = 0; i < 12; i++)                   // 12 ROND (droppable)
+            {
+                var c = Plain("K" + i, 5 + i, yesNec: "kek" + i);
+                c.IsRond = true;
+                deck.Add(c);
+            }
+            var g = new Game(deck, coin: () => false);
+            g.StartLife();
+            int guard = 0;
+            while (g.State == GameState.Playing && guard++ < 100)
+                g.HandleInput(GameInput.AnswerYes);
+
+            var n = g.Necrolog;
+            Assert.AreEqual(GameState.Finale, g.State);
+            Assert.AreEqual(Necrolog.MaxLines, n.StoryLines.Count, "capped at 15 lines");
+            for (int i = 0; i < 8; i++)
+                CollectionAssert.Contains(n.StoryLines, "weighty" + i, "every weighty line survives");
+        }
+
+        // ---- full sampled run to a known ending with a fixed seed ----
+
+        [Test]
+        public void SampledFullRun_FixedSeed_AllNo_ReachesEnding()
+        {
+            var asset = Resources.Load<TextAsset>("scenes");
+            Assert.IsNotNull(asset);
+            var all = CardLoader.ParseAll(asset.text);
+
+            var g = new Game(() => DeckSampler.Build(all, new System.Random(4242)), coin: () => false);
+            Assert.That(g.DeckCount, Is.InRange(DeckSampler.MinDeck, DeckSampler.MaxDeck),
+                "sampled deck sized 25-30 already in the opener");
+
+            g.StartLife();
+            int guard = 0;
+            while (g.State == GameState.Playing && guard++ < 200)
+                g.HandleInput(GameInput.AnswerNo);
+
+            Assert.AreEqual(GameState.Finale, g.State, "seeded full run reaches an ending");
+            Assert.IsNotNull(g.Necrolog);
+            Assert.AreEqual(Necrolog.ParentsLine, g.Necrolog.StoryLines[0], "necrolog opens with parents");
         }
 
         [Test]

@@ -58,6 +58,13 @@ namespace ThanksNoThanks
                 list.RemoveAt(idx);
             }
 
+            // HARD cap: still over with no ROND left → drop from the middle of the remaining
+            // chronology. Deterministic; keeps the childhood opening and the late-life ending
+            // (the story's bookends read best) until real weights exist (GAME_SPEC «приоритет
+            // весомым выборам»).
+            while (1 + list.Count > MaxLines)
+                list.RemoveAt(list.Count / 2);
+
             var story = new List<string> { ParentsLine };
             story.AddRange(list.Select(e => e.Line));
 

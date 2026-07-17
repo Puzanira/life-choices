@@ -31,7 +31,10 @@ namespace ThanksNoThanks.Tests
             Assert.AreEqual(1, rnd01.NoDeltas.Count);
             Assert.AreEqual(-1, rnd01.NoDeltas[0].Value);
             Assert.AreEqual(2, rnd01.YesDeltas[0].Value);
-            Assert.IsTrue(rnd01.YesIsFatal, "FATAL flag recognised alongside unsupported DELAY(3)");
+            // DELAY(n)+FATAL is a *delayed* fatal (RND01): не мгновенно, а через n игровых лет.
+            Assert.IsFalse(rnd01.YesIsFatal, "DELAY+FATAL is delayed, not an immediate fatal");
+            Assert.AreEqual(3, rnd01.DelayedFatalYears, "DELAY(3) parsed into a 3-year delayed fatal");
+            Assert.AreEqual("за вами пришли", rnd01.FatalCause, "RND01 fatal cause still mapped");
 
             var ch04 = all.First(c => c.Id == "CH04");
             // unicode '−' minus parsed
@@ -68,6 +71,33 @@ namespace ThanksNoThanks.Tests
             Assert.AreEqual(2, subset.Count);
             Assert.AreEqual("CH01", subset[0].Id, "numeric age sorts first");
             Assert.AreEqual("RND06", subset[1].Id, "non-numeric 'любой' sorts last");
+        }
+
+        [Test]
+        public void ImmediateFatals_StayImmediate_OnlyRnd01IsDelayed()
+        {
+            // Regression guard for the DELAY+FATAL→delayed change: the three plain-FATAL cards
+            // must remain INSTANT deaths; only RND01 (DELAY(3)+FATAL) is deferred.
+            var asset = Resources.Load<TextAsset>("scenes");
+            Assert.IsNotNull(asset);
+            var all = CardLoader.ParseAll(asset.text);
+
+            var rnd06 = all.First(c => c.Id == "RND06");
+            Assert.IsTrue(rnd06.YesIsFatal, "RND06 (селфи) is an immediate fatal");
+            Assert.AreEqual(0, rnd06.DelayedFatalYears, "RND06 has no delay");
+            Assert.AreEqual("селфи на краю крыши", rnd06.FatalCause);
+
+            var ch02 = all.First(c => c.Id == "CH02");
+            Assert.IsTrue(ch02.YesIsFatal, "CH02 (розетка) still immediate");
+            Assert.AreEqual(0, ch02.DelayedFatalYears);
+
+            var rnd03 = all.First(c => c.Id == "RND03");
+            Assert.IsTrue(rnd03.YesIsFatal, "RND03 (порошок) still immediate");
+            Assert.AreEqual(0, rnd03.DelayedFatalYears);
+
+            var rnd01 = all.First(c => c.Id == "RND01");
+            Assert.IsFalse(rnd01.YesIsFatal, "RND01 is NOT immediate");
+            Assert.AreEqual(3, rnd01.DelayedFatalYears, "RND01 fatal deferred by 3 event-years");
         }
 
         [Test]

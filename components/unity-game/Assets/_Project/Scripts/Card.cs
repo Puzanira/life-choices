@@ -35,7 +35,8 @@ namespace ThanksNoThanks
     {
         public string Id;
         public string Question;       // "Съесть жука?"
-        public int Age;               // parsed leading number from the "Когда" column
+        public string When;           // raw "Когда" cell ("4–8", "20+", "любой", "свадьба +2")
+        public int Age;               // assigned event-age (leading number on load; window pick after sampling)
         public int Order;             // source-row index, for stable ordering on age ties
 
         public IReadOnlyList<ScaleDelta> YesDeltas = System.Array.Empty<ScaleDelta>();
@@ -51,6 +52,19 @@ namespace ThanksNoThanks
         public bool YesIsFatal;       // FATAL  — choosing ДА ends the run immediately
         public string FatalCause;     // cause phrase for the finale when this card is fatal
         public bool StartsAgeTimer;   // resolving this card (either answer) starts the age timer (I03)
+
+        /// <summary>
+        /// CHAIN gate: this card is only drawn if the card with this id resolved ДА earlier in
+        /// the run (null = ungated). Set by <see cref="DeckSampler"/>, honored by <see cref="Game"/>.
+        /// </summary>
+        public string RequiresParentYes;
+
+        /// <summary>
+        /// DELAY(n)+FATAL: choosing ДА does NOT end the run immediately; instead the finale
+        /// «за вами пришли» is scheduled for (this card's age + n) event-years (RND01 only).
+        /// 0 = no delayed fatal. When &gt; 0, <see cref="YesIsFatal"/> stays false.
+        /// </summary>
+        public int DelayedFatalYears;
 
         public override string ToString() => $"{Id}@{Age} \"{Question}\"";
     }

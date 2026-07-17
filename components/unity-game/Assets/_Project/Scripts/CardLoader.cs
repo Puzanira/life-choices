@@ -88,6 +88,7 @@ namespace ThanksNoThanks
                 {
                     Id = id,
                     Question = Field(row, ColQuestion).Trim(),
+                    When = Field(row, ColWhen).Trim(),
                     Age = ParseAge(Field(row, ColWhen)),
                     Order = order++,
                     YesDeltas = ParseDeltas(Field(row, ColYesDelta)),
@@ -98,12 +99,25 @@ namespace ThanksNoThanks
                 };
                 card.IsNoCons = flags.Contains("NOCONS");
                 card.IsRond = flags.Contains("ROND");
-                card.YesIsFatal = flags.Contains("FATAL");
+                bool hasFatal = flags.Contains("FATAL");
+                int delayYears = ParseDelayYears(flags);
+                // DELAY(n)+FATAL (RND01) is a *delayed* fatal: ДА doesn't end the run now, the
+                // finale is scheduled for card.Age + n. Plain FATAL (розетка/порошок/селфи) is
+                // immediate. Other DELAY-only flags stay no-ops (prose in the necrolog only).
+                if (hasFatal && delayYears > 0)
+                {
+                    card.DelayedFatalYears = delayYears;
+                    card.YesIsFatal = false;
+                }
+                else
+                {
+                    card.YesIsFatal = hasFatal;
+                }
                 // Canon (scenes.csv I03 row / GAME_SPEC core loop): "Сделать первый шаг?"
                 // starts the age timer regardless of the answer ("шаг всё равно происходит").
                 // Prose-only in the CSV (no machine flag), so mapped here by id.
                 card.StartsAgeTimer = id == "I03";
-                if (card.YesIsFatal)
+                if (hasFatal)
                     card.FatalCause = FatalCauses.TryGetValue(id, out var cause) ? cause : "неведомая дичь";
 
                 cards.Add(card);
@@ -174,6 +188,19 @@ namespace ThanksNoThanks
             var t = (cell ?? string.Empty).Trim();
             if (t.Length == 0 || t == "—" || t == "-" || t == "−") return null;
             return t;
+        }
+
+        // "DELAY(3)" → 3; absent → 0. Used only in combination with FATAL (RND01).
+        private static readonly Regex DelayRx = new(@"DELAY\s*\(\s*(\d+)\s*\)", RegexOptions.Compiled);
+
+        internal static int ParseDelayYears(IEnumerable<string> flags)
+        {
+            foreach (var f in flags)
+            {
+                var m = DelayRx.Match(f);
+                if (m.Success && int.TryParse(m.Groups[1].Value, out var n)) return n;
+            }
+            return 0;
         }
 
         private static List<string> ParseFlags(string cell)

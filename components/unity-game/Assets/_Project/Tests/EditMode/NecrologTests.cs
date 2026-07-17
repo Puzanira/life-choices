@@ -64,5 +64,26 @@ namespace ThanksNoThanks.Tests
                 if (line.StartsWith("rond")) rondKept++;
             Assert.AreEqual(4, rondKept, "1 parents + 10 weighty + 4 rond = 15");
         }
+
+        [Test]
+        public void HardCap_HoldsEvenWithoutRond_TruncatingFromTheMiddle()
+        {
+            // 20 non-ROND lines + 3 ROND: ROND go first, then the middle of the chronology is
+            // truncated deterministically until the hard 15-line cap holds.
+            var entries = new List<NecrologEntry>();
+            for (int i = 1; i <= 20; i++)
+                entries.Add(new NecrologEntry { Age = i, Order = i, Line = "weighty" + i });
+            for (int i = 0; i < 3; i++)
+                entries.Add(new NecrologEntry { Age = 50 + i, Order = 50 + i, Line = "rond" + i, IsRond = true });
+
+            var r = Necrolog.Build("весёлая старость", entries);
+
+            Assert.AreEqual(Necrolog.MaxLines, r.StoryLines.Count, "hard cap: exactly 15 lines");
+            foreach (var line in r.StoryLines)
+                StringAssert.DoesNotStartWith("rond", line, "every ROND line dropped first");
+            Assert.AreEqual(Necrolog.ParentsLine, r.StoryLines[0], "parents line always survives");
+            Assert.AreEqual("weighty1", r.StoryLines[1], "the childhood opening survives");
+            Assert.AreEqual("weighty20", r.StoryLines[^1], "the late-life ending survives");
+        }
     }
 }

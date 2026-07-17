@@ -78,12 +78,18 @@ namespace ThanksNoThanks
         private void LoadGame()
         {
             var csvAsset = Resources.Load<TextAsset>("scenes");
-            List<Card> deck = csvAsset != null
-                ? CardLoader.LoadSubset(csvAsset.text, CardLoader.DefaultSubset)
-                : new List<Card>();
             if (csvAsset == null)
+            {
                 Debug.LogError("[ThanksNoThanks] Resources/scenes.csv not found — deck is empty.");
-            _game = new Game(deck);
+                _game = new Game(new List<Card>());
+                return;
+            }
+
+            // Re-sample a fresh plan (deck + top-up reserve) for every life. Parse per run so each
+            // life gets its own Card instances (the sampler assigns ages/gates in place). Unseeded →
+            // each run differs. The reserve keeps the drawn count 25–30 when chain gates skip cards.
+            string csv = csvAsset.text;
+            _game = new Game(() => DeckSampler.PlanFromCsv(csv, new System.Random()));
         }
 
         private void Update()
