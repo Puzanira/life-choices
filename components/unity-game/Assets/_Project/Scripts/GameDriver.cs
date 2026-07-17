@@ -1,3 +1,4 @@
+using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
@@ -7,21 +8,31 @@ namespace ThanksNoThanks
     /// <summary>
     /// MonoBehaviour driver for «Спасибо, не надо». Owns the pure <see cref="Game"/>, wires an
     /// <see cref="IInputSource"/> (keyboard by default; a fake can be injected for tests), and
-    /// self-builds a rough TV-quiz HUD (16:9, 1920×1080) in Awake so the scene needs no fragile
-    /// hand-wired references. Placeholder art — full sprites are deferred.
+    /// self-builds the TV-show HUD (16:9, 1920×1080) in Awake from the team's P0 sprite set so the
+    /// scene needs no fragile hand-wired references. Visual-only layer: gameplay lives in <see cref="Game"/>.
+    ///
+    /// Assets are loaded from <c>Assets/_Project/Art/Resources</c> (a Resources root nested under Art):
+    /// sprites at <c>Sprites/*</c>, fonts at <c>Fonts/*</c>. Fonts are legacy uGUI dynamic fonts —
+    /// Russo One for display headlines, Rubik for the money pill (₽) and body copy.
     /// </summary>
     public sealed class GameDriver : MonoBehaviour
     {
-        // Palette from the styleframe / screens design tokens.
-        private static readonly Color Page = new(0.063f, 0.090f, 0.200f);      // #101733
+        // ---- palette tokens (#kit) — used for text only; sprites carry their own colour ----
         private static readonly Color Cobalt = new(0.184f, 0.329f, 0.784f);    // #2f54c8
         private static readonly Color CobaltDeep = new(0.122f, 0.227f, 0.588f);// #1f3a96
-        private static readonly Color Da = new(0.361f, 0.749f, 0.373f);        // #5cbf5f
-        private static readonly Color No = new(0.910f, 0.267f, 0.227f);        // #e8443a
-        private static readonly Color HealthRed = new(0.898f, 0.263f, 0.231f); // #e5433b
-        private static readonly Color Bulb = new(1f, 0.847f, 0.451f);          // #ffd873
-        private static readonly Color TextLight = new(0.918f, 0.941f, 1f);     // #eaf0ff
         private static readonly Color Ink = new(0.078f, 0.102f, 0.239f);       // #141a3d
+        private static readonly Color TextLight = new(0.918f, 0.941f, 1f);     // #eaf0ff
+        private static readonly Color Bulb = new(1f, 0.847f, 0.451f);          // #ffd873
+        private static readonly Color Energy = new(0.973f, 0.824f, 0.271f);    // #f8d24c
+        private static readonly Color Muted = new(0.62f, 0.69f, 0.91f);        // #9fb0e8
+        private static readonly Color TimerRed = new(0.910f, 0.267f, 0.227f);  // #e8443a
+        private static readonly Color TimerHot = new(1f, 0.32f, 0.18f);        // low-time shift
+
+        // ---- age gates (canon opening ages, S5 tutorial) : purely visual reveal ----
+        public const int MoneyAge = 18;
+        public const int RelationshipsAge = 20;
+        public const int EnergyAge = 25;
+        public const int HealthAge = 30;
 
         /// <summary>Optional input injection (tests). Defaults to a KeyboardInputSource in Start.</summary>
         public IInputSource Input;
@@ -29,29 +40,81 @@ namespace ThanksNoThanks
         private Game _game;
         public Game Game => _game;
 
-        private Font _font;
+        private Font _display; // Russo One
+        private Font _body;    // Rubik (has ₽ + Cyrillic)
 
         // Panels
         private GameObject _openerPanel;
         private GameObject _gamePanel;
         private GameObject _finalePanel;
 
-        // Gameplay widgets
+        // Shared background
+        private Image _bg;
+
+        // HUD widgets (gated by age)
+        private GameObject _ageBadge;
+        private GameObject _moneyPill;
+        private GameObject _healthGroup;
+        private GameObject _energyGroup;
+        private GameObject _balancerGroup;
+
         private Text _ageText;
+        private Text _moneyText;
         private Image _healthFill;
-        private Text _healthText;
-        private Text _statsText;
-        private Text _timerText;
+        private Image _energyFill;
+        private RectTransform _balancerMarker;
+        private float _balancerTrackWidth;
+
+        // Card
+        private RectTransform _cardRoot;
+        private Image _cardFrame;
         private Text _cardText;
 
-        // Finale widgets
+        // Answer plates
+        private Image _yesPlate;
+        private Image _noPlate;
+        private RectTransform _yesRect;
+        private RectTransform _noRect;
+        private const float YesTilt = -2f;
+        private const float NoTilt = 2f;
+
+        // Timer ring
+        private Image _timerFill;
+        private Text _timerText;
+
+        // Finale
         private Text _finaleTitle;
         private Text _finaleCause;
         private Text _finaleStory;
 
+        private Coroutine _cardAnim;
+
+        // ---- public inspection accessors (visual-assembly PlayMode tests) ----
+        public RectTransform CanvasRect { get; private set; }
+        public Image BackgroundImage => _bg;
+        public Image CardFrameImage => _cardFrame;
+        public RectTransform CardRect => _cardRoot;
+        public Image YesPlateImage => _yesPlate;
+        public Image NoPlateImage => _noPlate;
+        public GameObject AgeBadge => _ageBadge;
+        public GameObject MoneyPill => _moneyPill;
+        public GameObject HealthGroup => _healthGroup;
+        public GameObject EnergyGroup => _energyGroup;
+        public GameObject BalancerGroup => _balancerGroup;
+        public Image TimerRingFill => _timerFill;
+        public GameObject OpenerPanel => _openerPanel;
+        public GameObject GamePanel => _gamePanel;
+        public GameObject FinalePanel => _finalePanel;
+
+        /// <summary>Test hook: run the age-gated HUD visibility for an arbitrary age.</summary>
+        public void DebugApplyAgeGates(float age) => ApplyAgeGates(age);
+
         private void Awake()
         {
-            _font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+            _display = Resources.Load<Font>("Fonts/RussoOne");
+            _body = Resources.Load<Font>("Fonts/Rubik");
+            if (_display == null) _display = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+            if (_body == null) _body = _display;
             BuildHud();
             LoadGame();
         }
@@ -60,18 +123,23 @@ namespace ThanksNoThanks
         {
             Input ??= gameObject.AddComponent<KeyboardInputSource>();
             Input.Received += _game.HandleInput;
+            Input.Received += OnInputFx;
             _game.StateChanged += Refresh;
-            _game.CardChanged += Refresh;
+            _game.CardChanged += OnCardChanged;
             Refresh();
         }
 
         private void OnDestroy()
         {
-            if (Input != null) Input.Received -= _game.HandleInput;
+            if (Input != null)
+            {
+                Input.Received -= _game.HandleInput;
+                Input.Received -= OnInputFx;
+            }
             if (_game != null)
             {
                 _game.StateChanged -= Refresh;
-                _game.CardChanged -= Refresh;
+                _game.CardChanged -= OnCardChanged;
             }
         }
 
@@ -85,9 +153,6 @@ namespace ThanksNoThanks
                 return;
             }
 
-            // Re-sample a fresh plan (deck + top-up reserve) for every life. Parse per run so each
-            // life gets its own Card instances (the sampler assigns ages/gates in place). Unseeded →
-            // each run differs. The reserve keeps the drawn count 25–30 when chain gates skip cards.
             string csv = csvAsset.text;
             _game = new Game(() => DeckSampler.PlanFromCsv(csv, new System.Random()));
         }
@@ -98,12 +163,20 @@ namespace ThanksNoThanks
             _game.Tick(Time.deltaTime);
             if (_game.State == GameState.Playing)
             {
-                _ageText.text = "ВОЗРАСТ\n" + Mathf.FloorToInt(_game.Age);
-                _timerText.text = Mathf.CeilToInt(Mathf.Max(0f, _game.CardTimer)).ToString();
+                _ageText.text = Mathf.FloorToInt(_game.Age).ToString();
+                float remaining = Mathf.Max(0f, _game.CardTimer);
+                _timerText.text = Mathf.CeilToInt(remaining).ToString();
+                float t = Mathf.Clamp01(remaining / Game.CardSeconds);
+                _timerFill.fillAmount = t;
+                bool low = remaining <= 1.5f;
+                _timerFill.color = low ? TimerHot : TimerRed;
+                _timerText.transform.localScale = low
+                    ? Vector3.one * (1f + 0.08f * Mathf.Sin(Time.time * 12f))
+                    : Vector3.one;
             }
         }
 
-        // ---------------------------------------------------------------- HUD build
+        // ================================================================ HUD build
 
         private void BuildHud()
         {
@@ -116,136 +189,222 @@ namespace ThanksNoThanks
             scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
             scaler.referenceResolution = new Vector2(1920, 1080);
             scaler.matchWidthOrHeight = 0.5f;
+            CanvasRect = canvasGo.GetComponent<RectTransform>();
 
-            // Background
-            var bg = NewImage("Background", canvasGo.transform, Page);
-            Stretch(bg.rectTransform);
+            // Shared sunburst background + static star accents (on all screens, per increment §1).
+            _bg = NewSprite("Background", canvasGo.transform, Sprite("sunburst-bg"));
+            Stretch(_bg.rectTransform);
+            BuildStars(canvasGo.transform);
 
             BuildOpener(canvasGo.transform);
             BuildGamePanel(canvasGo.transform);
             BuildFinale(canvasGo.transform);
         }
 
+        private void BuildStars(Transform parent)
+        {
+            (Vector2 pos, string sprite, float size)[] stars =
+            {
+                (new Vector2(0.09f, 0.56f), "star-white",   84f),
+                (new Vector2(0.155f, 0.30f), "star-outline", 60f),
+                (new Vector2(0.87f, 0.66f), "star-white",   88f),
+                (new Vector2(0.905f, 0.38f), "star-outline", 64f),
+                (new Vector2(0.80f, 0.84f), "star-white",   54f),
+            };
+            foreach (var s in stars)
+            {
+                var star = NewSprite("Star", parent, Sprite(s.sprite));
+                Anchor(star.rectTransform, s.pos, new Vector2(s.size, s.size));
+            }
+        }
+
         private void BuildOpener(Transform parent)
         {
-            _openerPanel = NewPanel("Opener", parent, Cobalt);
-            Stretch(_openerPanel.GetComponent<RectTransform>());
+            _openerPanel = NewGroup("Opener", parent);
 
             var title = NewText("Title", _openerPanel.transform,
-                "«СПАСИБО, НЕ НАДО»", 84, TextAnchor.MiddleCenter, TextLight);
-            Anchor(title.rectTransform, new Vector2(0.5f, 0.80f), new Vector2(1500, 140));
+                "«СПАСИБО, НЕ НАДО»", 96, TextAnchor.MiddleCenter, TextLight, _display);
+            Anchor(title.rectTransform, new Vector2(0.5f, 0.83f), new Vector2(1600, 160));
+            DisplayFx(title);
 
-            var rules = NewText("Rules", _openerPanel.transform,
+            // Rules inside a marquee-frame content box (9-slice cobalt panel) for legibility.
+            var box = NewSprite("RulesBox", _openerPanel.transform, Sprite("marquee-frame"));
+            box.type = Image.Type.Sliced;
+            Anchor(box.rectTransform, new Vector2(0.5f, 0.50f), new Vector2(1360, 430));
+            var rules = NewText("Rules", box.transform,
                 "Проживите целую жизнь за пару минут — в прямом эфире!\n\n" +
                 "▸  На каждый вопрос — рычаг: ДА или СПАСИБО, НЕ НАДО.\n" +
                 "▸  На раздумья 5 секунд — дальше решаем за вас!\n" +
-                "▸  Правильного ответа нет. Есть только ваша жизнь.",
-                38, TextAnchor.MiddleCenter, TextLight);
-            Anchor(rules.rectTransform, new Vector2(0.5f, 0.52f), new Vector2(1400, 320));
+                "▸  С возрастом откроются ручки жизни. Рук две — всё удержать нельзя.",
+                38, TextAnchor.MiddleCenter, TextLight, _body);
+            Inset(rules.rectTransform, 90f);
 
-            var start = NewPanel("StartPlate", _openerPanel.transform, Da);
-            Anchor(start.GetComponent<RectTransform>(), new Vector2(0.5f, 0.26f), new Vector2(560, 120));
-            Outline(start.GetComponent<Image>());
+            var start = NewSprite("StartPlate", _openerPanel.transform, Sprite("plate-yes"));
+            start.type = Image.Type.Sliced;
+            Anchor(start.rectTransform, new Vector2(0.5f, 0.17f), new Vector2(520, 150));
             var startText = NewText("StartText", start.transform,
-                "▸ НАЧАТЬ ЖИЗНЬ", 48, TextAnchor.MiddleCenter, Ink);
+                "▸ НАЧАТЬ ЖИЗНЬ", 46, TextAnchor.MiddleCenter, Ink, _display);
             Stretch(startText.rectTransform);
 
             var hint = NewText("Hint", _openerPanel.transform,
-                "←  ДА        →  СПАСИБО, НЕ НАДО        Enter / Пробел — НАЧАТЬ",
-                28, TextAnchor.MiddleCenter, new Color(0.62f, 0.69f, 0.91f));
-            Anchor(hint.rectTransform, new Vector2(0.5f, 0.10f), new Vector2(1500, 60));
+                "←  ДА          →  СПАСИБО, НЕ НАДО          Enter / Пробел — НАЧАТЬ",
+                28, TextAnchor.MiddleCenter, Muted, _body);
+            Anchor(hint.rectTransform, new Vector2(0.5f, 0.06f), new Vector2(1500, 60));
         }
 
         private void BuildGamePanel(Transform parent)
         {
-            _gamePanel = NewPanel("Game", parent, new Color(0, 0, 0, 0));
-            Stretch(_gamePanel.GetComponent<RectTransform>());
+            _gamePanel = NewGroup("Game", parent);
 
-            // Age badge (top-left)
-            var badge = NewPanel("AgeBadge", _gamePanel.transform, Cobalt);
-            Anchor(badge.GetComponent<RectTransform>(), new Vector2(0.075f, 0.86f), new Vector2(190, 190));
-            Outline(badge.GetComponent<Image>(), Color.white, 4f);
-            _ageText = NewText("AgeText", badge.transform, "ВОЗРАСТ\n0", 40, TextAnchor.MiddleCenter, Color.white);
-            Stretch(_ageText.rectTransform);
+            // ---- Age badge (always visible during play) ----
+            _ageBadge = NewSprite("AgeBadge", _gamePanel.transform, Sprite("age-badge")).gameObject;
+            Anchor(_ageBadge.GetComponent<RectTransform>(), new Vector2(0.06f, 0.85f), new Vector2(160, 175));
+            var ageLbl = NewText("AgeLbl", _ageBadge.transform, "ВОЗРАСТ", 18, TextAnchor.MiddleCenter, TextLight, _display);
+            Anchor(ageLbl.rectTransform, new Vector2(0.5f, 0.70f), new Vector2(150, 28));
+            _ageText = NewText("AgeText", _ageBadge.transform, "0", 60, TextAnchor.MiddleCenter, Color.white, _display);
+            Anchor(_ageText.rectTransform, new Vector2(0.5f, 0.38f), new Vector2(150, 92));
+            DisplayFx(_ageText);
 
-            // Health bar (top, right of badge)
-            var hpPanel = NewPanel("HealthPanel", _gamePanel.transform, Color.white);
-            Anchor(hpPanel.GetComponent<RectTransform>(), new Vector2(0.30f, 0.90f), new Vector2(420, 120));
-            _healthText = NewText("HealthLabel", hpPanel.transform, "♥ ЗДОРОВЬЕ", 26, TextAnchor.UpperLeft, CobaltDeep);
-            Anchor(_healthText.rectTransform, new Vector2(0.5f, 0.72f), new Vector2(380, 40));
-            var barBg = NewImage("HealthBarBg", hpPanel.transform, new Color(0.906f, 0.914f, 0.961f));
-            Anchor(barBg.rectTransform, new Vector2(0.5f, 0.30f), new Vector2(380, 44));
-            _healthFill = NewImage("HealthFill", barBg.transform, HealthRed);
-            var fillRt = _healthFill.rectTransform;
-            fillRt.anchorMin = new Vector2(0, 0);
-            fillRt.anchorMax = new Vector2(1, 1);
-            fillRt.offsetMin = Vector2.zero;
-            fillRt.offsetMax = Vector2.zero;
-            _healthFill.type = Image.Type.Filled;
-            _healthFill.fillMethod = Image.FillMethod.Horizontal;
-            _healthFill.fillAmount = 1f;
+            // ---- Money pill (age 18+) ----
+            _moneyPill = NewSprite("MoneyPill", _gamePanel.transform, Sprite("money-pill")).gameObject;
+            var moneyImg = _moneyPill.GetComponent<Image>();
+            moneyImg.type = Image.Type.Sliced;
+            Anchor(_moneyPill.GetComponent<RectTransform>(), new Vector2(0.215f, 0.875f), new Vector2(360, 150));
+            var coin = NewSprite("Coin", _moneyPill.transform, Sprite("icon-coin"));
+            Anchor(coin.rectTransform, new Vector2(0.16f, 0.5f), new Vector2(58, 58));
+            _moneyText = NewText("MoneyText", _moneyPill.transform, "₽ 0", 34, TextAnchor.MiddleLeft, CobaltDeep, _body);
+            Anchor(_moneyText.rectTransform, new Vector2(0.60f, 0.5f), new Vector2(220, 70));
 
-            // Passive scales readout (observability for the still-hidden scales)
-            _statsText = NewText("Stats", _gamePanel.transform,
-                "", 24, TextAnchor.UpperRight, TextLight);
-            Anchor(_statsText.rectTransform, new Vector2(0.82f, 0.86f), new Vector2(460, 190));
+            // ---- Health bar (age 30+) ----
+            _healthGroup = BuildBar("HealthGroup", new Vector2(0.375f, 0.885f),
+                "ЗДОРОВЬЕ", "icon-heart", "bar-health-fill", out _healthFill);
 
-            // Timer (top center)
-            var timerPanel = NewPanel("Timer", _gamePanel.transform, No);
-            Anchor(timerPanel.GetComponent<RectTransform>(), new Vector2(0.5f, 0.90f), new Vector2(120, 120));
-            Outline(timerPanel.GetComponent<Image>(), Color.white, 4f);
-            _timerText = NewText("TimerText", timerPanel.transform, "5", 60, TextAnchor.MiddleCenter, Color.white);
+            // ---- Energy bar (age 25+) ----
+            _energyGroup = BuildBar("EnergyGroup", new Vector2(0.545f, 0.885f),
+                "ЭНЕРГИЯ", "icon-lightning", "bar-energy-fill", out _energyFill);
+
+            // ---- Relationships balancer (age 20+) ----
+            BuildBalancer(new Vector2(0.775f, 0.875f));
+
+            // ---- Timer ring (top centre) ----
+            var ringGroup = NewGroup("Timer", _gamePanel.transform);
+            Anchor(ringGroup.GetComponent<RectTransform>(), new Vector2(0.5f, 0.875f), new Vector2(150, 150));
+            var ringTrack = NewSprite("RingTrack", ringGroup.transform, Sprite("timer-ring-track"));
+            Stretch(ringTrack.rectTransform);
+            _timerFill = NewSprite("RingFill", ringGroup.transform, Sprite("timer-ring"));
+            Stretch(_timerFill.rectTransform);
+            _timerFill.type = Image.Type.Filled;
+            _timerFill.fillMethod = Image.FillMethod.Radial360;
+            _timerFill.fillOrigin = (int)Image.Origin360.Top;
+            _timerFill.fillClockwise = false;
+            _timerFill.fillAmount = 1f;
+            _timerFill.color = TimerRed;
+            _timerText = NewText("TimerText", ringGroup.transform, "5", 56, TextAnchor.MiddleCenter, Color.white, _display);
             Stretch(_timerText.rectTransform);
+            DisplayFx(_timerText);
 
-            // Card marquee (center)
-            var card = NewPanel("Card", _gamePanel.transform, Cobalt);
-            Anchor(card.GetComponent<RectTransform>(), new Vector2(0.5f, 0.50f), new Vector2(1000, 420));
-            Outline(card.GetComponent<Image>(), Color.white, 10f);
-            var inner = NewImage("Bulbs", card.transform, new Color(1f, 0.847f, 0.451f, 0.12f));
-            Inset(inner.rectTransform, 22f);
-            _cardText = NewText("CardText", card.transform, "", 64, TextAnchor.MiddleCenter, Color.white);
-            Inset(_cardText.rectTransform, 60f);
+            // ---- Card marquee (centre) ----
+            _cardRoot = NewGroup("Card", _gamePanel.transform).GetComponent<RectTransform>();
+            Anchor(_cardRoot, new Vector2(0.5f, 0.53f), new Vector2(940, 600));
+            _cardFrame = NewSprite("CardFrame", _cardRoot, Sprite("marquee-frame-bulbs"));
+            Stretch(_cardFrame.rectTransform);
+            _cardText = NewText("CardText", _cardRoot, "", 64, TextAnchor.MiddleCenter, Color.white, _display);
+            Inset(_cardText.rectTransform, 130f);
+            DisplayFx(_cardText);
 
-            // Answer plates (bottom)
-            var yes = NewPanel("YesPlate", _gamePanel.transform, Da);
-            Anchor(yes.GetComponent<RectTransform>(), new Vector2(0.30f, 0.14f), new Vector2(430, 150));
-            Outline(yes.GetComponent<Image>());
-            var yesText = NewText("YesText", yes.transform, "ДА", 60, TextAnchor.MiddleCenter, Ink);
+            // ---- Answer plates (bottom) ----
+            _yesPlate = NewSprite("YesPlate", _gamePanel.transform, Sprite("plate-yes"));
+            _yesPlate.type = Image.Type.Sliced;
+            _yesRect = _yesPlate.rectTransform;
+            Anchor(_yesRect, new Vector2(0.31f, 0.145f), new Vector2(380, 220));
+            _yesRect.localRotation = Quaternion.Euler(0, 0, YesTilt);
+            var yesText = NewText("YesText", _yesPlate.transform, "ДА", 64, TextAnchor.MiddleCenter, Ink, _display);
             Stretch(yesText.rectTransform);
+            DisplayFx(yesText);
 
-            var no = NewPanel("NoPlate", _gamePanel.transform, No);
-            Anchor(no.GetComponent<RectTransform>(), new Vector2(0.70f, 0.14f), new Vector2(430, 150));
-            Outline(no.GetComponent<Image>());
-            var noText = NewText("NoText", no.transform, "СПАСИБО,\nНЕ НАДО", 44, TextAnchor.MiddleCenter, Color.white);
+            _noPlate = NewSprite("NoPlate", _gamePanel.transform, Sprite("plate-no"));
+            _noPlate.type = Image.Type.Sliced;
+            _noRect = _noPlate.rectTransform;
+            Anchor(_noRect, new Vector2(0.69f, 0.145f), new Vector2(380, 220));
+            _noRect.localRotation = Quaternion.Euler(0, 0, NoTilt);
+            var noText = NewText("NoText", _noPlate.transform, "СПАСИБО,\nНЕ НАДО", 46, TextAnchor.MiddleCenter, Color.white, _display);
             Stretch(noText.rectTransform);
+            DisplayFx(noText);
+        }
+
+        private GameObject BuildBar(string name, Vector2 anchor, string label, string icon,
+            string fillSprite, out Image fill)
+        {
+            var group = NewGroup(name, _gamePanel.transform);
+            Anchor(group.GetComponent<RectTransform>(), anchor, new Vector2(300, 110));
+
+            var ico = NewSprite("Icon", group.transform, Sprite(icon));
+            Anchor(ico.rectTransform, new Vector2(0.07f, 0.70f), new Vector2(46, 46));
+            var lbl = NewText("Label", group.transform, label, 22, TextAnchor.MiddleLeft, TextLight, _display);
+            Anchor(lbl.rectTransform, new Vector2(0.58f, 0.78f), new Vector2(230, 34));
+
+            var track = NewSprite("Track", group.transform, Sprite("bar-track"));
+            track.type = Image.Type.Sliced;
+            Anchor(track.rectTransform, new Vector2(0.5f, 0.25f), new Vector2(300, 46));
+            fill = NewSprite("Fill", track.transform, Sprite(fillSprite));
+            fill.type = Image.Type.Sliced;
+            var fr = fill.rectTransform;
+            fr.anchorMin = Vector2.zero;
+            fr.anchorMax = Vector2.one;
+            fr.offsetMin = Vector2.zero;
+            fr.offsetMax = Vector2.zero;
+            fill.type = Image.Type.Filled;
+            fill.fillMethod = Image.FillMethod.Horizontal;
+            fill.fillOrigin = (int)Image.OriginHorizontal.Left;
+            fill.fillAmount = 1f;
+            return group;
+        }
+
+        private void BuildBalancer(Vector2 anchor)
+        {
+            _balancerGroup = NewGroup("Balancer", _gamePanel.transform);
+            Anchor(_balancerGroup.GetComponent<RectTransform>(), anchor, new Vector2(340, 120));
+
+            var lbl = NewText("Label", _balancerGroup.transform, "ОТНОШЕНИЯ", 22, TextAnchor.MiddleCenter, TextLight, _display);
+            Anchor(lbl.rectTransform, new Vector2(0.5f, 0.82f), new Vector2(320, 34));
+
+            _balancerTrackWidth = 320f;
+            var track = NewSprite("Track", _balancerGroup.transform, Sprite("balancer-track"));
+            Anchor(track.rectTransform, new Vector2(0.5f, 0.34f), new Vector2(_balancerTrackWidth, 46));
+            _balancerMarker = NewSprite("Marker", track.transform, Sprite("balancer-marker")).rectTransform;
+            Anchor(_balancerMarker, new Vector2(0.5f, 0.5f), new Vector2(58, 78));
         }
 
         private void BuildFinale(Transform parent)
         {
-            _finalePanel = NewPanel("Finale", parent, Cobalt);
-            Stretch(_finalePanel.GetComponent<RectTransform>());
+            _finalePanel = NewGroup("Finale", parent);
 
             _finaleTitle = NewText("FinaleTitle", _finalePanel.transform,
-                "СПАСИБО ЗА ИГРУ!", 90, TextAnchor.MiddleCenter, Bulb);
-            Anchor(_finaleTitle.rectTransform, new Vector2(0.5f, 0.80f), new Vector2(1600, 150));
+                "СПАСИБО ЗА ИГРУ!", 92, TextAnchor.MiddleCenter, Energy, _display);
+            Anchor(_finaleTitle.rectTransform, new Vector2(0.5f, 0.85f), new Vector2(1700, 160));
+            DisplayFx(_finaleTitle);
 
-            _finaleCause = NewText("FinaleCause", _finalePanel.transform,
-                "", 44, TextAnchor.MiddleCenter, Color.white);
-            Anchor(_finaleCause.rectTransform, new Vector2(0.5f, 0.63f), new Vector2(1500, 80));
+            var box = NewSprite("StoryBox", _finalePanel.transform, Sprite("marquee-frame"));
+            box.type = Image.Type.Sliced;
+            Anchor(box.rectTransform, new Vector2(0.5f, 0.46f), new Vector2(1400, 540));
 
-            _finaleStory = NewText("FinaleStory", _finalePanel.transform,
-                "", 34, TextAnchor.UpperCenter, TextLight);
-            Anchor(_finaleStory.rectTransform, new Vector2(0.5f, 0.38f), new Vector2(1300, 380));
+            _finaleCause = NewText("FinaleCause", box.transform,
+                "", 40, TextAnchor.UpperCenter, Bulb, _body);
+            Anchor(_finaleCause.rectTransform, new Vector2(0.5f, 0.70f), new Vector2(1160, 90));
 
-            var again = NewPanel("AgainPlate", _finalePanel.transform, Da);
-            Anchor(again.GetComponent<RectTransform>(), new Vector2(0.5f, 0.10f), new Vector2(560, 110));
-            Outline(again.GetComponent<Image>());
+            _finaleStory = NewText("FinaleStory", box.transform,
+                "", 32, TextAnchor.UpperCenter, TextLight, _body);
+            Anchor(_finaleStory.rectTransform, new Vector2(0.5f, 0.36f), new Vector2(1160, 300));
+
+            var again = NewSprite("AgainPlate", _finalePanel.transform, Sprite("plate-yes"));
+            again.type = Image.Type.Sliced;
+            Anchor(again.rectTransform, new Vector2(0.5f, 0.10f), new Vector2(560, 140));
             var againText = NewText("AgainText", again.transform,
-                "▸ НАЧАТЬ ЗАНОВО", 44, TextAnchor.MiddleCenter, Ink);
+                "▸ НАЧАТЬ ЗАНОВО", 44, TextAnchor.MiddleCenter, Ink, _display);
             Stretch(againText.rectTransform);
         }
 
-        // ---------------------------------------------------------------- refresh
+        // ================================================================ refresh / events
 
         private void Refresh()
         {
@@ -260,16 +419,8 @@ namespace ThanksNoThanks
 
             if (playing)
             {
-                var c = _game.CurrentCard;
-                _cardText.text = c != null ? c.Question : "";
-                _ageText.text = "ВОЗРАСТ\n" + Mathf.FloorToInt(_game.Age);
-                _timerText.text = Mathf.CeilToInt(Mathf.Max(0f, _game.CardTimer)).ToString();
-                _healthFill.fillAmount = Mathf.Clamp01(_game.Scales.Health / 100f);
-                _healthText.text = "♥ ЗДОРОВЬЕ  " + _game.Scales.Health;
-                _statsText.text =
-                    "⚡ Энергия  " + _game.Scales.Energy + "\n" +
-                    "₽ Деньги  " + _game.Scales.Money + "\n" +
-                    "♾ Отношения  " + _game.Scales.Relationships;
+                UpdateHudValues();
+                ApplyAgeGates(_game.Age);
             }
             else if (finale && _game.Necrolog != null)
             {
@@ -280,39 +431,148 @@ namespace ThanksNoThanks
             }
         }
 
-        // ---------------------------------------------------------------- UI helpers
+        private void OnCardChanged()
+        {
+            if (_game == null || _game.State != GameState.Playing) return;
+            var c = _game.CurrentCard;
+            _cardText.text = c != null ? c.Question : "";
+            UpdateHudValues();
+            ApplyAgeGates(_game.Age);
+            if (c != null && isActiveAndEnabled)
+            {
+                if (_cardAnim != null) StopCoroutine(_cardAnim);
+                _cardAnim = StartCoroutine(CardEntry());
+            }
+        }
 
-        private Image NewImage(string name, Transform parent, Color color)
+        private void UpdateHudValues()
+        {
+            var s = _game.Scales;
+            _ageText.text = Mathf.FloorToInt(_game.Age).ToString();
+            _moneyText.text = "₽ " + FormatThousands(s.Money);
+            _healthFill.fillAmount = Mathf.Clamp01(s.Health / 100f);
+            _energyFill.fillAmount = Mathf.Clamp01(s.Energy / 100f);
+            float rel = Mathf.Clamp01(s.Relationships / 100f);
+            _balancerMarker.anchoredPosition = new Vector2((rel - 0.5f) * _balancerTrackWidth, 0f);
+        }
+
+        /// <summary>Reveal HUD widgets by age (visual only — the scales themselves stay passive).</summary>
+        private void ApplyAgeGates(float age)
+        {
+            int a = Mathf.FloorToInt(age);
+            _ageBadge.SetActive(true);
+            _moneyPill.SetActive(a >= MoneyAge);
+            _balancerGroup.SetActive(a >= RelationshipsAge);
+            _energyGroup.SetActive(a >= EnergyAge);
+            _healthGroup.SetActive(a >= HealthAge);
+        }
+
+        private void OnInputFx(GameInput input)
+        {
+            if (_game == null || _game.State != GameState.Playing || !isActiveAndEnabled) return;
+            if (input == GameInput.AnswerYes) StartCoroutine(PunchPlate(_yesRect, YesTilt));
+            else if (input == GameInput.AnswerNo) StartCoroutine(PunchPlate(_noRect, NoTilt));
+        }
+
+        // ================================================================ transitions
+
+        private IEnumerator CardEntry()
+        {
+            const float dur = 0.24f;
+            float t = 0f;
+            var rt = _cardRoot;
+            while (t < dur)
+            {
+                t += Time.deltaTime;
+                float k = Mathf.Clamp01(t / dur);
+                // ease-out-back overshoot
+                float s = 1f + 2.2f * Mathf.Pow(k - 1f, 3) + 1.2f * Mathf.Pow(k - 1f, 2);
+                float scale = Mathf.Lerp(0.82f, 1f, s);
+                rt.localScale = new Vector3(scale, scale, 1f);
+                rt.anchoredPosition = new Vector2(0f, Mathf.Lerp(-60f, 0f, k));
+                yield return null;
+            }
+            rt.localScale = Vector3.one;
+            rt.anchoredPosition = Vector2.zero;
+            _cardAnim = null;
+        }
+
+        private static IEnumerator PunchPlate(RectTransform rt, float tilt)
+        {
+            const float dur = 0.16f;
+            float t = 0f;
+            while (t < dur)
+            {
+                t += Time.deltaTime;
+                float k = Mathf.Clamp01(t / dur);
+                float scale = 1f - 0.14f * Mathf.Sin(k * Mathf.PI); // dip and return
+                rt.localScale = new Vector3(scale, scale, 1f);
+                yield return null;
+            }
+            rt.localScale = Vector3.one;
+        }
+
+        // ================================================================ UI helpers
+
+        private static Sprite Sprite(string name)
+        {
+            var s = Resources.Load<Sprite>("Sprites/" + name);
+            if (s == null) Debug.LogError("[ThanksNoThanks] sprite not found: Sprites/" + name);
+            return s;
+        }
+
+        private static string FormatThousands(int value)
+        {
+            return value.ToString("#,0", System.Globalization.CultureInfo.InvariantCulture).Replace(',', ' ');
+        }
+
+        private Image NewSprite(string name, Transform parent, Sprite sprite)
         {
             var go = new GameObject(name, typeof(RectTransform), typeof(Image));
             go.transform.SetParent(parent, false);
             var img = go.GetComponent<Image>();
-            img.color = color;
+            img.sprite = sprite;
+            img.color = Color.white;
+            img.raycastTarget = false;
             return img;
         }
 
-        private GameObject NewPanel(string name, Transform parent, Color color)
+        /// <summary>Transparent full-rect container (a panel that groups children without drawing).</summary>
+        private GameObject NewGroup(string name, Transform parent)
         {
-            var img = NewImage(name, parent, color);
-            return img.gameObject;
+            var go = new GameObject(name, typeof(RectTransform));
+            go.transform.SetParent(parent, false);
+            Stretch(go.GetComponent<RectTransform>());
+            return go;
         }
 
         private Text NewText(string name, Transform parent, string content, int size,
-            TextAnchor anchor, Color color)
+            TextAnchor anchor, Color color, Font font)
         {
             var go = new GameObject(name, typeof(RectTransform), typeof(Text));
             go.transform.SetParent(parent, false);
             var t = go.GetComponent<Text>();
-            t.font = _font;
+            t.font = font;
             t.text = content;
             t.fontSize = size;
-            t.fontStyle = FontStyle.Bold;
             t.alignment = anchor;
             t.color = color;
             t.horizontalOverflow = HorizontalWrapMode.Wrap;
             t.verticalOverflow = VerticalWrapMode.Overflow;
             t.raycastTarget = false;
+            t.supportRichText = true;
             return t;
+        }
+
+        /// <summary>Mockup letter treatment: thick ink outline + downward drop shadow.</summary>
+        private static void DisplayFx(Graphic g)
+        {
+            var o = g.gameObject.AddComponent<Outline>();
+            o.effectColor = new Color(0.078f, 0.102f, 0.239f, 1f);
+            o.effectDistance = new Vector2(3f, -3f);
+            var sh = g.gameObject.AddComponent<Shadow>();
+            sh.effectColor = new Color(0f, 0f, 0f, 0.32f);
+            sh.effectDistance = new Vector2(0f, -6f);
         }
 
         private static void Stretch(RectTransform rt)
@@ -331,7 +591,7 @@ namespace ThanksNoThanks
             rt.offsetMax = new Vector2(-pad, -pad);
         }
 
-        // Anchor a rect at a normalized screen point with a fixed pixel size.
+        // Anchor a rect at a normalized point of its parent with a fixed pixel size.
         private static void Anchor(RectTransform rt, Vector2 anchor, Vector2 size)
         {
             rt.anchorMin = anchor;
@@ -339,13 +599,6 @@ namespace ThanksNoThanks
             rt.pivot = new Vector2(0.5f, 0.5f);
             rt.anchoredPosition = Vector2.zero;
             rt.sizeDelta = size;
-        }
-
-        private static void Outline(Graphic g, Color? color = null, float dist = 6f)
-        {
-            var o = g.gameObject.AddComponent<Outline>();
-            o.effectColor = color ?? new Color(0.078f, 0.102f, 0.239f, 1f);
-            o.effectDistance = new Vector2(dist, -dist);
         }
     }
 }
