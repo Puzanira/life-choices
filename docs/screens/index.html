@@ -281,6 +281,10 @@
     <a href="#s9">Ребёнок</a>
     <a href="#s10">Нет денег</a>
     <a href="#s11">Финал</a>
+    <a href="#more">Ещё</a>
+    <a href="#assets">Ассеты</a>
+    <a href="#anim">Анимации</a>
+    <a href="#input">Ввод</a>
     <a href="#unity">Unity</a>
   </nav>
 </div></header>
@@ -677,11 +681,181 @@
     </div>
   </div>
 
+  <!-- S13 Импульс-раунд -->
+  <div class="screen" id="more">
+    <div class="cap"><span class="tag">S13</span><h3>Импульс-раунд (INVERT)</h3><span class="st">молчание = ДА · дави «СПАСИБО, НЕ НАДО»</span></div>
+    <div class="grid2 spec">
+      <div class="frame blitz">
+        <div class="stars"><i>★</i><i class="o">★</i><i>★</i><i class="o">★</i><i>★</i></div>
+        <div class="hud"><div class="badge"><div class="lbl">ВОЗРАСТ</div><div class="num">48</div></div></div>
+        <div class="timer hot"><b>2</b></div>
+        <div class="bubble left" style="top:22cqh">Ну-ну…</div>
+        <div class="card"><q>КУПИТЬ МОТОЦИКЛ<br>И ГНАТЬ 200?!</q><div class="sub" style="color:#ffd;opacity:.95">⚠ молчание = ДА</div></div>
+        <div class="answers">
+          <div class="plate no" style="transform:none;box-shadow:0 1cqw 0 rgba(0,0,0,.28),0 0 0 .5cqw #fff">СПАСИБО,<br>НЕ НАДО</div>
+          <div class="plate yes" style="transform:none;opacity:.6">ДА</div>
+        </div>
+      </div>
+      <div class="spec-box">
+        <h5>Механика</h5>
+        <ul><li>Запускается при ≥2 промахах в блице</li><li><code>INVERT</code>: не нажал → засчитывается <b>ДА</b></li><li>Надо срочно давить «СПАСИБО, НЕ НАДО»</li><li>Карточки: бросить партнёра / мотоцикл / Шри-Ланка</li></ul>
+        <div class="prompt"><b>Промпт:</b> "Impulsive midlife crisis card «КУПИТЬ МОТОЦИКЛ И ГНАТЬ 200?!», warning «молчание = ДА», the СПАСИБО НЕ НАДО button highlighted, 2s timer, tense, 16:9".</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- S14 Второй шанс -->
+  <div class="screen" id="s14">
+    <div class="cap"><span class="tag">S14</span><h3>Второй шанс (MD06)</h3><span class="st">если отношения потеряны · балансир снова открыт</span></div>
+    <div class="grid2 spec">
+      <div class="frame">
+        <div class="stars"><i>★</i><i class="o">★</i><i>★</i><i class="o">★</i><i>★</i></div>
+        <div class="hud">
+          <div class="badge"><div class="lbl">ВОЗРАСТ</div><div class="num">40</div></div>
+          <div class="pill money"><div class="val">₽ 5 200</div><div class="cap">ДЕНЬГИ ◎</div></div>
+          <div class="pill rel"><div class="cap">♾ ОТНОШЕНИЯ</div><div class="relbar" style="opacity:.5"><div class="zone">HOLD ZONE</div><div class="mark" style="left:50%"></div></div></div>
+        </div>
+        <div class="timer"><b>5</b></div>
+        <div class="bubble right" style="top:26cqh">Ещё разок?</div>
+        <div class="card"><q>Дать любви<br>второй шанс?</q></div>
+        <div class="answers"><div class="plate yes">ДА</div><div class="plate no">СПАСИБО,<br>НЕ НАДО</div></div>
+      </div>
+      <div class="spec-box">
+        <h5>Роль</h5>
+        <ul><li>Появляется ~40, если первые отношения порваны</li><li>ДА → балансир снова открывается (старт 55%)</li><li>Полу-погашенный балансир подсвечивается заново</li></ul>
+        <div class="prompt"><b>Промпт:</b> "TV quiz card «Дать любви второй шанс?», the dimmed relationship balancer re-lighting, host bubble «Ещё разок?», 16:9".</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- S15 Дети выросли -->
+  <div class="screen" id="s15">
+    <div class="cap"><span class="tag">S15</span><h3>Дети выросли (LT04)</h3><span class="st">кнопка-ребёнок гаснет</span></div>
+    <div class="grid2 spec">
+      <div class="frame">
+        <div class="stars"><i>★</i><i class="o">★</i><i>★</i><i class="o">★</i><i>★</i></div>
+        <div class="hud">
+          <div class="badge"><div class="lbl">ВОЗРАСТ</div><div class="num">60</div></div>
+          <div class="pill rel"><div class="cap">♾ ОТНОШЕНИЯ</div><div class="relbar"><div class="zone">HOLD ZONE</div><div class="mark" style="left:60%"></div></div></div>
+        </div>
+        <div class="timer"><b>5</b></div>
+        <div class="childbtn" style="right:6cqw;bottom:10cqh;left:auto;top:auto;opacity:.4">☺</div>
+        <div class="card"><q>Ребёнок вырос.<br>Помочь всё равно?</q></div>
+        <div class="answers"><div class="plate yes">ДА</div><div class="plate no">СПАСИБО,<br>НЕ НАДО</div></div>
+      </div>
+      <div class="spec-box">
+        <h5>Исход</h5>
+        <ul><li>ДА (навязчивая опека) → Отн −1, «Оу, как навязчиво!»</li><li>НЕТ (отпустил) → всё в порядке</li><li>В любом случае кнопка/шкала ребёнка гаснут</li></ul>
+        <div class="prompt"><b>Промпт:</b> "TV quiz card «Ваш ребёнок вырос. Помочь всё равно?», the child button fading out, older age, 16:9".</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- S16 Стартап-развилка -->
+  <div class="screen" id="s16">
+    <div class="cap"><span class="tag">S16</span><h3>Развилка денег — стартап (YA02)</h3><span class="st">×5 или в ноль · крутилка в фокусе</span></div>
+    <div class="grid2 spec">
+      <div class="frame">
+        <div class="stars"><i>★</i><i class="o">★</i><i>★</i><i class="o">★</i><i>★</i></div>
+        <div class="hud">
+          <div class="badge"><div class="lbl">ВОЗРАСТ</div><div class="num">21</div></div>
+          <div class="pill money" style="box-shadow:0 0 0 .6cqw var(--energy),0 .7cqw 0 rgba(0,0,0,.18)"><div class="val">₽ 1 500</div><div class="cap">ДЕНЬГИ ◎ ×1</div></div>
+        </div>
+        <div class="timer"><b>5</b></div>
+        <div class="bubble right" style="top:28cqh">Смело!</div>
+        <div class="card"><q>Бросить универ<br>ради стартапа?</q><div class="sub">ДА: доход ×5 … или деньги обнуляются</div></div>
+        <div class="answers"><div class="plate yes">ДА</div><div class="plate no">СПАСИБО,<br>НЕ НАДО</div></div>
+      </div>
+      <div class="spec-box">
+        <h5>Эффект</h5>
+        <ul><li>ДА → рандом: множитель <b>×5</b> или деньги <b>в ноль</b></li><li>Счётчик денег подсвечен (фокус на крутилке)</li><li>Множитель показан в лейбле пилюли</li></ul>
+        <div class="prompt"><b>Промпт:</b> "TV quiz card «Бросить универ ради стартапа?», money counter glowing with ×multiplier label, high-risk vibe, 16:9".</div>
+      </div>
+    </div>
+  </div>
+
+</div></section>
+
+<!-- ================= ЧЕК-ЛИСТ АССЕТОВ ================= -->
+<section id="assets"><div class="wrap">
+  <div class="sec-head"><span class="sec-num">02</span><h2>Чек-лист ассетов</h2></div>
+  <p class="sec-sub">Каждый спрайт → приоритет, размер (для 1920×1080), промпт-подсказка. P0 — нужно для играбельного среза, P1 — полный набор, P2 — полировка.</p>
+  <div class="spec-box" style="overflow-x:auto">
+    <table style="width:100%;border-collapse:collapse;font-size:13px">
+      <thead><tr style="text-align:left;color:var(--accent);font-family:var(--display)">
+        <th style="padding:6px 10px">Ассет</th><th style="padding:6px 10px">P</th><th style="padding:6px 10px">Размер</th><th style="padding:6px 10px">Заметка / промпт</th></tr></thead>
+      <tbody style="color:var(--text)">
+        <tr><td style="padding:6px 10px">Санбёрст-задник</td><td>P0</td><td>1920×1080</td><td>тёплые лучи + звёзды, приглушён под UI</td></tr>
+        <tr><td style="padding:6px 10px">Рамка-маркиза с лампочками</td><td>P0</td><td>9-slice ~1000×540</td><td>кобальт + белая обводка + золотые лампочки</td></tr>
+        <tr><td style="padding:6px 10px">Плашка «ДА»</td><td>P0</td><td>9-slice ~420×220</td><td>зелёная, чёрный контур, искры</td></tr>
+        <tr><td style="padding:6px 10px">Плашка «СПАСИБО, НЕ НАДО»</td><td>P0</td><td>9-slice ~460×220</td><td>красная, тот же кегль</td></tr>
+        <tr><td style="padding:6px 10px">Бейдж возраста</td><td>P0</td><td>~220×240</td><td>кобальт + белая обводка, цифра — TMP</td></tr>
+        <tr><td style="padding:6px 10px">Иконки: сердце, молния, монета, ₽</td><td>P0</td><td>~120×120</td><td>толстый контур, чистые цвета</td></tr>
+        <tr><td style="padding:6px 10px">Балансир отношений (зоны)</td><td>P0</td><td>~640×90</td><td>красный→зелёный→красный + бегунок</td></tr>
+        <tr><td style="padding:6px 10px">Таймер-кольцо</td><td>P0</td><td>~200×200</td><td>radial fill, состояния 5с/2с</td></tr>
+        <tr><td style="padding:6px 10px">Экран-опенер</td><td>P1</td><td>1920×1080</td><td>заставка с правилами</td></tr>
+        <tr><td style="padding:6px 10px">Баннеры-рубрики (×5)</td><td>P1</td><td>1920×1080</td><td>ЗАРАБАТЫВАТЬ / ЛЮБОВЬ / БЛИЦ / ВЫГОРАНИЕ / ДЕПРЕССИЯ</td></tr>
+        <tr><td style="padding:6px 10px">Облачко Ведущего</td><td>P1</td><td>9-slice</td><td>жёлтое, хвостик</td></tr>
+        <tr><td style="padding:6px 10px">Кнопка-ребёнок (2 состояния)</td><td>P1</td><td>~200×200</td><td>погашена / вспышка</td></tr>
+        <tr><td style="padding:6px 10px">Блиц-кнопки О НЕТ / ВСЁ НОРМАЛЬНО</td><td>P1</td><td>9-slice</td><td>найти нужную</td></tr>
+        <tr><td style="padding:6px 10px">Экран-финал (некролог)</td><td>P1</td><td>1920×1080</td><td>под причину + историю</td></tr>
+        <tr><td style="padding:6px 10px">Оверлей «Депрессия» (ч/б + зерно)</td><td>P2</td><td>fullscreen</td><td>пост-эффект/материал</td></tr>
+        <tr><td style="padding:6px 10px">Конфетти / искры / фанфара</td><td>P2</td><td>частицы</td><td>можно кодом</td></tr>
+        <tr><td style="padding:6px 10px">Иконки карточек (жук, кот, розетка…)</td><td>P2</td><td>~256×256</td><td>по мере наполнения</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div></section>
+
+<!-- ================= АНИМАЦИИ ================= -->
+<section id="anim"><div class="wrap">
+  <div class="sec-head"><span class="sec-num">03</span><h2>Анимации и переходы</h2></div>
+  <p class="sec-sub">Что оживляет экраны — коротко, чтобы «сочность» была заложена, а не добавлялась в конце.</p>
+  <div class="grid2" style="grid-template-columns:1fr;gap:14px">
+    <div class="spec-box"><h5>Появление карточки</h5><ul>
+      <li>Влёт снизу/сбоку + лёгкий overshoot (~0.25с), лампочки маркизы «загораются» бегущей волной.</li>
+      <li>Возраст плавно «догоняет» возраст карточки (событийное время).</li></ul></div>
+    <div class="spec-box"><h5>Ответ ДА / НЕТ</h5><ul>
+      <li>Плашка вдавливается + вспышка искр; карточка улетает в сторону выбора.</li>
+      <li>Затронутая шкала коротко пульсирует (видимое последствие).</li></ul></div>
+    <div class="spec-box"><h5>Баннер-рубрика</h5><ul>
+      <li>Зум-ин 3D-букв + фанфара + конфетти (~1.2с), затем уход, открывается новая ручка.</li></ul></div>
+    <div class="spec-box"><h5>Вход в «Депрессию» / «Выгорание»</h5><ul>
+      <li>Депрессия: обесцвечивание за ~0.8с, музыка минорит, реплики гаснут.</li>
+      <li>Выгорание: лёгкое приглушение + «тяжёлая» крутилка (тактильно).</li></ul></div>
+    <div class="spec-box"><h5>Фатал</h5><ul>
+      <li>Резкая тряска экрана + вспышка → чёрный → финал-некролог.</li></ul></div>
+    <div class="spec-box"><h5>Реакция шоу (глобально)</h5><ul>
+      <li>Хорошо: ярче, конфетти чаще. Плохо (Здр+Отн+Эн вниз): тускнеет, звук проседает. Плавный лерп, не рывками.</li></ul></div>
+  </div>
+</div></section>
+
+<!-- ================= ВВОД ================= -->
+<section id="input"><div class="wrap">
+  <div class="sec-head"><span class="sec-num">04</span><h2>Маппинг ввода</h2></div>
+  <p class="sec-sub">Игра слушает <b>смысловые события</b>, а не клавиши/порт. Клавиатура сейчас → COM/Arduino потом — меняется один слой.</p>
+  <div class="spec-box" style="overflow-x:auto">
+    <table style="width:100%;border-collapse:collapse;font-size:13px">
+      <thead><tr style="text-align:left;color:var(--accent);font-family:var(--display)">
+        <th style="padding:6px 10px">Событие</th><th style="padding:6px 10px">Механика</th><th style="padding:6px 10px">Клавиатура (прототип)</th><th style="padding:6px 10px">Железо (потом)</th></tr></thead>
+      <tbody style="color:var(--text)">
+        <tr><td style="padding:6px 10px"><code>ANSWER_YES</code></td><td>ответ ДА</td><td>← влево</td><td>рычаг влево</td></tr>
+        <tr><td style="padding:6px 10px"><code>ANSWER_NO</code></td><td>СПАСИБО НЕ НАДО</td><td>→ вправо</td><td>рычаг вправо</td></tr>
+        <tr><td style="padding:6px 10px"><code>MONEY_TICK</code></td><td>+1 щелчок дохода</td><td>Пробел (долбить/зажать)</td><td>энкодер-крутилка</td></tr>
+        <tr><td style="padding:6px 10px"><code>RELATION_AXIS(v)</code></td><td>балансир отношений</td><td>↑ / ↓</td><td>джойстик (ось)</td></tr>
+        <tr><td style="padding:6px 10px"><code>ENERGY_PULSE</code></td><td>«вдох» — энергия</td><td>E (ритмично)</td><td>дыхательный рычаг</td></tr>
+        <tr><td style="padding:6px 10px"><code>CHILD_PRESS</code></td><td>реакция на вспышку</td><td>Enter</td><td>кнопка с подсветкой</td></tr>
+        <tr><td style="padding:6px 10px"><code>CONFIRM</code></td><td>старт / рестарт экрана</td><td>Enter / Пробел</td><td>любая кнопка</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="sec-sub" style="margin-top:16px">Слой <code>InputSource</code>: смена «клавиатура → COM-порт» = замена одного класса, логика не трогается.
+    Вариант «Arduino как HID-клавиатура» вообще ничего в игре не меняет. Точный COM-протокол — согласовать с тем, кто паяет.</p>
 </div></section>
 
 <!-- ================= UNITY ================= -->
 <section id="unity"><div class="wrap">
-  <div class="sec-head"><span class="sec-num">02</span><h2>Заметки под реализацию в Unity</h2></div>
+  <div class="sec-head"><span class="sec-num">05</span><h2>Заметки под реализацию в Unity</h2></div>
   <p class="sec-sub">Чтобы макеты перенеслись 1-в-1, а не «на глаз».</p>
   <div class="grid2" style="grid-template-columns:1fr;gap:14px">
     <div class="spec-box">
