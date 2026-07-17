@@ -1,0 +1,729 @@
+<title>«Спасибо, не надо» — Дизайн экранов</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  /* ============ ТОКЕНЫ (визуальный язык из styleframe-03) ============ */
+  :root{
+    --cobalt:#2f54c8; --cobalt-deep:#1f3a96; --cobalt-ink:#16296b;
+    --sun-orange:#f2a23e; --sun-yellow:#f8d24c; --sun-green:#aacd68; --sun-peach:#f4b878;
+    --da:#5cbf5f; --da-dark:#3f9e46;
+    --no:#e8443a; --no-dark:#c9322a;
+    --health:#e5433b; --energy:#f6c945;
+    --rel-red:#e8443a; --rel-yellow:#f6c945; --rel-green:#5cbf5f;
+    --bulb:#ffd873; --ink:#141a3d; --paper:#ffffff; --star:#ffffff;
+    --page:#101733; --page-2:#161f45; --edge:#28336b;
+    --text:#eaf0ff; --muted:#9fb0e8; --accent:#f8d24c;
+    --display:"Arial Black","Helvetica Neue",system-ui,sans-serif;
+    --body:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    --mono:"SF Mono",ui-monospace,"Cascadia Code",Menlo,monospace;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:
+      radial-gradient(1200px 600px at 80% -10%, #1c2a63 0%, transparent 60%),
+      var(--page);
+    color:var(--text);font-family:var(--body);line-height:1.55;
+    font-feature-settings:"tnum";text-rendering:optimizeLegibility}
+  a{color:var(--accent)}
+  h1,h2,h3{text-wrap:balance;line-height:1.05;margin:0}
+  .wrap{max-width:1180px;margin:0 auto;padding:0 24px}
+
+  /* ============ ШАПКА ============ */
+  header.top{position:sticky;top:0;z-index:50;
+    background:rgba(16,23,51,.86);backdrop-filter:blur(10px);
+    border-bottom:1px solid var(--edge)}
+  header.top .wrap{display:flex;align-items:center;gap:18px;height:60px}
+  .logo{font-family:var(--display);font-weight:900;letter-spacing:.5px;
+    font-size:18px;color:#fff;white-space:nowrap}
+  .logo b{color:var(--accent)}
+  nav.toc{display:flex;gap:4px;flex-wrap:wrap;margin-left:auto}
+  nav.toc a{font-size:12.5px;color:var(--muted);text-decoration:none;
+    padding:6px 10px;border-radius:8px;white-space:nowrap}
+  nav.toc a:hover{background:var(--page-2);color:#fff}
+
+  /* ============ HERO ============ */
+  .hero{padding:56px 0 26px}
+  .eyebrow{font-family:var(--display);font-weight:900;letter-spacing:2px;
+    text-transform:uppercase;font-size:12px;color:var(--accent)}
+  .hero h1{font-family:var(--display);font-weight:900;font-size:clamp(34px,6vw,66px);
+    margin:12px 0 8px;color:#fff;letter-spacing:.5px}
+  .hero p.lead{font-size:18px;color:var(--muted);max-width:60ch}
+  .meta-row{display:flex;flex-wrap:wrap;gap:10px;margin-top:22px}
+  .chip{font-size:12.5px;color:var(--text);background:var(--page-2);
+    border:1px solid var(--edge);border-radius:999px;padding:6px 13px}
+  .chip b{color:var(--accent)}
+  .callout{margin-top:24px;border:1px solid var(--edge);border-left:4px solid var(--accent);
+    background:linear-gradient(180deg,rgba(248,210,76,.06),transparent);
+    border-radius:12px;padding:16px 18px;font-size:14.5px;color:var(--text);max-width:80ch}
+
+  /* ============ СЕКЦИИ ============ */
+  section{padding:40px 0;border-top:1px solid var(--edge)}
+  .sec-head{display:flex;align-items:baseline;gap:14px;margin-bottom:6px}
+  .sec-num{font-family:var(--mono);font-size:13px;color:var(--accent)}
+  .sec-head h2{font-family:var(--display);font-weight:900;font-size:clamp(22px,3.4vw,34px);color:#fff}
+  .sec-sub{color:var(--muted);font-size:15px;max-width:75ch;margin:4px 0 26px}
+
+  /* ============ САНБЁРСТ + ЗВЁЗДЫ (фон игровых кадров) ============ */
+  .frame{position:relative;width:100%;aspect-ratio:16/9;border-radius:14px;overflow:hidden;
+    container-type:size;box-shadow:0 18px 46px rgba(0,0,0,.5),0 0 0 1px var(--edge);
+    background:
+      repeating-conic-gradient(from 8deg at 50% 42%,
+        var(--sun-orange) 0 11deg, var(--sun-yellow) 11deg 22deg,
+        var(--sun-green) 22deg 33deg, var(--sun-peach) 33deg 44deg)}
+  .frame::after{content:"";position:absolute;inset:0;pointer-events:none;
+    background:radial-gradient(120% 90% at 50% 42%, transparent 40%, rgba(255,255,255,.14) 78%, rgba(0,0,0,.10) 100%)}
+  .stars{position:absolute;inset:0;pointer-events:none}
+  .stars i{position:absolute;color:#fff;font-size:4.5cqw;line-height:1;
+    filter:drop-shadow(0 1px 0 rgba(0,0,0,.15))}
+  .stars i.o{color:transparent;-webkit-text-stroke:.4cqw var(--cobalt)}
+  .stars i:nth-child(1){left:8%;top:44%}
+  .stars i:nth-child(2){left:15%;top:64%;font-size:3cqw}
+  .stars i:nth-child(3){left:85%;top:34%}
+  .stars i:nth-child(4){left:90%;top:60%;font-size:3.2cqw}
+  .stars i:nth-child(5){left:78%;top:16%;font-size:2.6cqw}
+
+  /* ============ HUD (верхний ряд) ============ */
+  .hud{position:absolute;top:3cqh;left:2.4cqw;right:2.4cqw;display:flex;gap:1.6cqw;align-items:flex-start;z-index:6}
+  .badge{background:var(--cobalt);border:.7cqw solid #fff;border-radius:2.2cqw;
+    box-shadow:0 .8cqw 0 rgba(0,0,0,.22);padding:.7cqw 1.2cqw;text-align:center;color:#fff}
+  .badge .lbl{font-family:var(--display);font-weight:900;font-size:1.5cqw;letter-spacing:.15cqw}
+  .badge .num{font-family:var(--display);font-weight:900;font-size:5.4cqw;line-height:.92}
+  .pill{background:#fff;border:.6cqw solid var(--ink);border-radius:2.4cqw;
+    box-shadow:0 .7cqw 0 rgba(0,0,0,.18);padding:.5cqw .9cqw;display:flex;flex-direction:column;gap:.4cqw;min-width:16cqw}
+  .pill .cap{font-family:var(--display);font-weight:900;font-size:1.5cqw;color:var(--cobalt-ink);
+    letter-spacing:.1cqw;display:flex;align-items:center;gap:.5cqw}
+  .money{align-items:flex-start}
+  .money .val{font-family:var(--display);font-weight:900;font-size:3cqw;color:var(--cobalt-ink);
+    display:flex;align-items:center;gap:.6cqw}
+  .bar{height:2.3cqw;border-radius:2cqw;background:#e7e9f5;border:.35cqw solid rgba(0,0,0,.15);overflow:hidden;position:relative}
+  .bar>span{position:absolute;inset:0;border-radius:2cqw;transform-origin:left}
+  .bar.hp>span{background:linear-gradient(180deg,#ff5b52,var(--health))}
+  .bar.en>span{background:linear-gradient(180deg,#ffe27a,var(--energy))}
+  .ico{width:2.6cqw;height:2.6cqw;flex:0 0 auto}
+  /* балансир отношений */
+  .rel{min-width:19cqw}
+  .relbar{position:relative;height:2.6cqw;border-radius:2cqw;overflow:hidden;border:.35cqw solid rgba(0,0,0,.18);
+    background:linear-gradient(90deg,var(--rel-red) 0 18%,var(--rel-yellow) 18% 34%,var(--rel-green) 34% 66%,var(--rel-yellow) 66% 82%,var(--rel-red) 82% 100%)}
+  .relbar .zone{position:absolute;top:0;bottom:0;left:34%;width:32%;
+    display:flex;align-items:center;justify-content:center;
+    font-family:var(--display);font-weight:900;font-size:1.15cqw;color:#1c4a1e;letter-spacing:.05cqw}
+  .relbar .mark{position:absolute;top:-.2cqw;bottom:-.2cqw;width:.7cqw;background:#fff;border:.25cqw solid var(--ink);border-radius:.4cqw;transform:translateX(-50%)}
+
+  /* ============ КАРТОЧКА (маркиза) ============ */
+  .card{position:absolute;left:50%;top:46%;transform:translate(-50%,-50%);
+    width:52cqw;min-height:20cqh;background:var(--cobalt);
+    border:1cqw solid #fff;border-radius:3cqw;
+    box-shadow:0 1.6cqw 0 rgba(0,0,0,.22),0 0 0 .3cqw var(--cobalt-deep) inset;
+    display:flex;align-items:center;justify-content:center;text-align:center;padding:4cqw 4cqw;z-index:5}
+  /* лампочки по периметру */
+  .card::before{content:"";position:absolute;inset:1.1cqw;border-radius:2cqw;
+    background:
+      radial-gradient(circle,var(--bulb) 38%,transparent 42%) 0 0/2.6cqw 2.6cqw round;
+    -webkit-mask:linear-gradient(#000,#000) content-box,linear-gradient(#000,#000);
+    -webkit-mask-composite:xor;mask-composite:exclude;
+    padding:0;border:1.3cqw solid transparent;pointer-events:none;opacity:.95}
+  .card q{font-family:var(--display);font-weight:900;font-size:5.2cqw;color:#fff;quotes:none;
+    text-shadow:0 .4cqw 0 rgba(0,0,0,.28);letter-spacing:.1cqw}
+  .card .sub{position:absolute;bottom:1.4cqw;left:0;right:0;font-size:1.6cqw;color:#cfe;opacity:.85}
+
+  /* ============ ПЛАШКИ ОТВЕТА ============ */
+  .answers{position:absolute;left:0;right:0;bottom:6cqh;display:flex;justify-content:center;gap:6cqw;z-index:6}
+  .plate{position:relative;font-family:var(--display);font-weight:900;color:#123;
+    border:.7cqw solid var(--ink);border-radius:2.4cqw;padding:2.2cqw 3.4cqw;
+    box-shadow:0 1cqw 0 rgba(0,0,0,.28);font-size:3.4cqw;letter-spacing:.1cqw;text-align:center;line-height:1}
+  .plate.yes{background:var(--da);transform:rotate(-2deg)}
+  .plate.no{background:var(--no);color:#fff;transform:rotate(2deg);font-size:2.7cqw}
+  .plate .spark{position:absolute;color:#fff;font-size:2.4cqw;-webkit-text-stroke:.3cqw var(--ink)}
+  .plate.yes .spark{left:-1.6cqw;top:-1.6cqw}
+  .plate.no .spark{right:-1.4cqw;bottom:-1.6cqw;color:var(--no);-webkit-text-stroke:.3cqw var(--ink)}
+  .plate .bulb{position:absolute;right:-2.2cqw;top:-2.4cqw;font-size:2.8cqw}
+
+  /* таймер-кольцо */
+  .timer{position:absolute;top:3cqh;left:50%;transform:translateX(-50%);
+    width:7cqw;height:7cqw;border-radius:50%;z-index:7;
+    background:conic-gradient(var(--no) 0 68%, rgba(255,255,255,.55) 68% 100%);
+    display:grid;place-items:center;box-shadow:0 0 0 .5cqw #fff,0 .6cqw 0 rgba(0,0,0,.2)}
+  .timer::after{content:"";position:absolute;inset:1.1cqw;border-radius:50%;background:var(--cobalt)}
+  .timer b{position:relative;z-index:2;font-family:var(--display);font-weight:900;color:#fff;font-size:3cqw}
+
+  /* реплика Ведущего */
+  .bubble{position:absolute;z-index:8;background:var(--bulb);color:#3a2a00;
+    border:.55cqw solid var(--ink);border-radius:2cqw;padding:1.1cqw 1.6cqw;
+    font-family:var(--display);font-weight:900;font-size:2.2cqw;
+    box-shadow:0 .7cqw 0 rgba(0,0,0,.22)}
+  .bubble::after{content:"";position:absolute;bottom:-1.6cqw;left:3cqw;
+    border:.9cqw solid transparent;border-top-color:var(--bulb);
+    filter:drop-shadow(0 .3cqw 0 var(--ink))}
+  .bubble.right{right:6cqw;top:30cqh}
+  .bubble.left{left:6cqw;top:22cqh}
+
+  /* кнопка-ребёнок */
+  .childbtn{position:absolute;z-index:6;width:8cqw;height:8cqw;border-radius:2.4cqw;
+    background:#fff;border:.6cqw solid var(--ink);box-shadow:0 .8cqw 0 rgba(0,0,0,.2);
+    display:grid;place-items:center;font-size:4cqw}
+  .childbtn.lit{background:var(--energy);box-shadow:0 0 0 .8cqw rgba(246,201,69,.5),0 .8cqw 0 rgba(0,0,0,.2)}
+
+  /* ============ ПОЛНОЭКРАННЫЕ СОСТОЯНИЯ ============ */
+  .banner{position:absolute;inset:0;background:var(--cobalt);display:grid;place-items:center;text-align:center;z-index:9}
+  .banner .rays{position:absolute;inset:0;opacity:.5;
+    background:repeating-conic-gradient(from 0deg at 50% 50%, rgba(255,255,255,.16) 0 6deg, transparent 6deg 12deg)}
+  .banner h3{position:relative;font-family:var(--display);font-weight:900;color:var(--energy);
+    font-size:8.5cqw;text-shadow:0 .7cqw 0 var(--no),0 1.4cqw 0 rgba(0,0,0,.3);letter-spacing:.2cqw;padding:0 6cqw}
+  .banner .kick{position:relative;color:#fff;font-family:var(--display);font-weight:900;font-size:3cqw;margin-top:2cqw}
+
+  .opener{position:absolute;inset:0;background:var(--cobalt);display:flex;flex-direction:column;
+    align-items:center;justify-content:center;gap:2.4cqw;text-align:center;z-index:9;padding:5cqw}
+  .opener .rays{position:absolute;inset:0;opacity:.42;
+    background:repeating-conic-gradient(from 0deg at 50% 40%, rgba(255,255,255,.18) 0 5deg, transparent 5deg 10deg)}
+  .opener h3{position:relative;font-family:var(--display);font-weight:900;color:#fff;font-size:7cqw;
+    text-shadow:0 .7cqw 0 rgba(0,0,0,.3)}
+  .opener h3 span{color:var(--energy)}
+  .opener ul{position:relative;list-style:none;margin:0;padding:0;max-width:70cqw;text-align:left;
+    display:flex;flex-direction:column;gap:1.2cqw}
+  .opener li{color:#eaf0ff;font-size:2.2cqw;display:flex;gap:1.2cqw;align-items:flex-start}
+  .opener li b{color:var(--energy)}
+  .opener .start{position:relative;margin-top:1cqw;background:var(--da);color:#123;
+    font-family:var(--display);font-weight:900;font-size:3.4cqw;border:.7cqw solid var(--ink);
+    border-radius:2.4cqw;padding:1.8cqw 4cqw;box-shadow:0 1cqw 0 rgba(0,0,0,.28)}
+
+  .tut{position:absolute;inset:0;background:rgba(16,23,51,.62);display:grid;place-items:center;z-index:12}
+  .tut .card2{background:var(--bulb);color:#3a2a00;border:.7cqw solid var(--ink);border-radius:3cqw;
+    width:56cqw;padding:3.4cqw;text-align:center;box-shadow:0 1.6cqw 0 rgba(0,0,0,.3)}
+  .tut h4{font-family:var(--display);font-weight:900;font-size:3.6cqw;margin:0 0 1.2cqw}
+  .tut p{font-size:2.1cqw;margin:0 0 2cqw;color:#4a3600}
+  .tut .ok{background:var(--cobalt);color:#fff;font-family:var(--display);font-weight:900;
+    font-size:2.4cqw;border:.6cqw solid var(--ink);border-radius:2cqw;padding:1.2cqw 3cqw;box-shadow:0 .8cqw 0 rgba(0,0,0,.25);display:inline-block}
+
+  /* Блиц */
+  .blitz .card q{font-size:4.4cqw}
+  .blitz .answers{gap:4cqw;bottom:8cqh}
+  .plate.ff{background:var(--da);color:#123;transform:none;font-size:3cqw}
+  .plate.oh{background:#d8dcf0;color:#333;transform:none;font-size:3cqw}
+  .timer.hot{background:conic-gradient(var(--no) 0 90%, rgba(255,255,255,.55) 90% 100%);width:6cqw;height:6cqw}
+  .timer.hot b{font-size:2.6cqw}
+
+  /* Финал */
+  .finale{position:absolute;inset:0;background:var(--cobalt);display:flex;flex-direction:column;
+    align-items:center;justify-content:center;gap:2cqw;text-align:center;z-index:9;padding:5cqw}
+  .finale .rays{position:absolute;inset:0;opacity:.4;
+    background:repeating-conic-gradient(from 0deg at 50% 45%, rgba(255,255,255,.16) 0 6deg, transparent 6deg 12deg)}
+  .finale h3{position:relative;font-family:var(--display);font-weight:900;color:var(--energy);font-size:6cqw;
+    text-shadow:0 .7cqw 0 var(--no),0 1.3cqw 0 rgba(0,0,0,.3)}
+  .finale .cause{position:relative;color:#fff;font-family:var(--display);font-weight:900;font-size:2.8cqw}
+  .finale .story{position:relative;color:#eaf0ff;font-size:2.15cqw;max-width:66cqw;line-height:1.5}
+  .finale .story b{color:var(--energy)}
+  .finale .again{position:relative;margin-top:1cqw;background:var(--da);color:#123;font-family:var(--display);
+    font-weight:900;font-size:2.6cqw;border:.6cqw solid var(--ink);border-radius:2cqw;padding:1.4cqw 3.4cqw;box-shadow:0 .9cqw 0 rgba(0,0,0,.28)}
+
+  /* модификаторы состояний */
+  .is-depressed{filter:grayscale(1) contrast(1.05) brightness(.82)}
+  .is-depressed::before{content:"";position:absolute;inset:0;z-index:20;pointer-events:none;mix-blend-mode:overlay;
+    background:repeating-linear-gradient(0deg,rgba(255,255,255,.05) 0 1px,transparent 1px 3px)}
+  .dim .card{opacity:.55}
+  .block-tag{position:absolute;left:50%;top:70%;transform:translateX(-50%);z-index:7;background:var(--no);color:#fff;
+    font-family:var(--display);font-weight:900;font-size:2.2cqw;border:.5cqw solid var(--ink);border-radius:1.6cqw;
+    padding:1cqw 2cqw;box-shadow:0 .7cqw 0 rgba(0,0,0,.25)}
+
+  /* ============ КАРТОЧКА-ЭКРАН В ГАЛЕРЕЕ ============ */
+  .screen{margin:26px 0 8px}
+  .screen .cap{display:flex;align-items:baseline;gap:12px;margin-bottom:12px}
+  .screen .cap .tag{font-family:var(--mono);font-size:12px;color:#0a0f26;background:var(--accent);
+    border-radius:6px;padding:2px 8px;font-weight:700}
+  .screen .cap h3{font-family:var(--display);font-weight:900;font-size:20px;color:#fff}
+  .screen .cap .st{margin-left:auto;font-size:12px;color:var(--muted)}
+  .grid2{display:grid;grid-template-columns:1fr;gap:16px}
+  @media(min-width:900px){.grid2.spec{grid-template-columns:1fr 300px}}
+  .spec-box{background:var(--page-2);border:1px solid var(--edge);border-radius:12px;padding:14px 16px;font-size:13px}
+  .spec-box h5{font-family:var(--display);font-weight:900;font-size:12px;letter-spacing:1px;text-transform:uppercase;
+    color:var(--accent);margin:0 0 8px}
+  .spec-box ul{margin:0 0 12px;padding-left:16px;color:var(--text)}
+  .spec-box li{margin:3px 0}
+  .spec-box .prompt{color:var(--muted);font-style:italic;border-top:1px dashed var(--edge);padding-top:10px;margin-top:4px;font-size:12.5px}
+  .spec-box code{font-family:var(--mono);font-size:11.5px;color:#cfe0ff;background:#0d1436;padding:1px 5px;border-radius:5px}
+
+  /* ============ UI-КИТ ============ */
+  .kit{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:16px}
+  .kit .item{background:var(--page-2);border:1px solid var(--edge);border-radius:12px;padding:16px;
+    display:flex;flex-direction:column;gap:12px;min-height:150px}
+  .kit .item .demo{flex:1;display:grid;place-items:center;background:
+      repeating-conic-gradient(from 8deg at 50% 50%, var(--sun-orange) 0 11deg, var(--sun-yellow) 11deg 22deg, var(--sun-green) 22deg 33deg, var(--sun-peach) 33deg 44deg);
+    border-radius:8px;padding:14px;container-type:size;min-height:96px;overflow:hidden}
+  .kit .item .demo.plain{background:#0d1436}
+  .kit .item .name{font-family:var(--display);font-weight:900;font-size:14px;color:#fff}
+  .kit .item .note{font-size:12px;color:var(--muted)}
+  .swrow{display:flex;flex-wrap:wrap;gap:10px}
+  .sw{width:100%;display:flex;align-items:center;gap:10px;font-size:12.5px;color:var(--text)}
+  .sw i{width:34px;height:34px;border-radius:8px;border:1px solid rgba(255,255,255,.15);flex:0 0 auto}
+  .sw code{font-family:var(--mono);color:var(--muted);margin-left:auto}
+  .type-scale div{font-family:var(--display);font-weight:900;color:#fff;line-height:1.1;margin:6px 0}
+
+  footer{border-top:1px solid var(--edge);padding:30px 0 60px;color:var(--muted);font-size:13px}
+
+  @media (prefers-reduced-motion:no-preference){
+    .frame{animation:none}
+    .timer::before{content:"";position:absolute;inset:-.5cqw;border-radius:50%;
+      box-shadow:0 0 0 .3cqw rgba(255,255,255,.25);animation:pulse 1.4s ease-in-out infinite}
+    @keyframes pulse{50%{box-shadow:0 0 0 1cqw rgba(255,255,255,0)}}
+  }
+</style>
+
+<header class="top"><div class="wrap">
+  <div class="logo">СПАСИБО, <b>НЕ&nbsp;НАДО</b> · экраны</div>
+  <nav class="toc">
+    <a href="#kit">UI-кит</a>
+    <a href="#s1">Опенер</a>
+    <a href="#s2">Детство</a>
+    <a href="#s3">Взрослая</a>
+    <a href="#s4">Рубрика</a>
+    <a href="#s5">Туториал</a>
+    <a href="#s6">Блиц</a>
+    <a href="#s7">Выгорание</a>
+    <a href="#s8">Депрессия</a>
+    <a href="#s9">Ребёнок</a>
+    <a href="#s10">Нет денег</a>
+    <a href="#s11">Финал</a>
+    <a href="#unity">Unity</a>
+  </nav>
+</div></header>
+
+<div class="wrap">
+  <div class="hero">
+    <div class="eyebrow">Дизайн экранов · 2026-07-17</div>
+    <h1>«Спасибо, не надо»</h1>
+    <p class="lead">Полный набор экранов и состояний игры в визуальном языке телевикторины 70–80-х —
+      как реализуемые макеты 16:9, а не только текст. Каждый экран собран из общего UI-кита,
+      сопровождён спекой компонентов, заметками под Unity и промптом генерации арта.</p>
+    <div class="meta-row">
+      <span class="chip">Экран <b>16:9</b> (1920×1080)</span>
+      <span class="chip">Стайлфрейм-эталон: <b>styleframe-03</b></span>
+      <span class="chip">Ответ: <b>ДА / СПАСИБО, НЕ НАДО</b></span>
+      <span class="chip"><b>12</b> экранов + UI-кит</span>
+    </div>
+    <div class="callout">
+      <b>Как пользоваться.</b> Открой в браузере — все кадры рендерятся вживую и масштабируются; можно
+      скриншотить под задачу. Макеты <b>плейсхолдерные по контенту, но точные по раскладке, цветам и
+      компонентам</b> — цель снизить «сырость» на входе в Unity. Финальный арт генерится по промптам
+      (Higgsfield / nano_banana, reference = <code>styleframe-03.png</code>) и кладётся в ту же раскладку.
+      Шрифт в макете — системный тяжёлый санс как заглушка; в проде — Fredoka / Anton / Shrikhand
+      (проверить кириллицу), инлайнить как @font-face.
+    </div>
+  </div>
+</div>
+
+<!-- ================= UI-КИТ ================= -->
+<section id="kit"><div class="wrap">
+  <div class="sec-head"><span class="sec-num">00</span><h2>UI-кит и токены</h2></div>
+  <p class="sec-sub">Единый источник компонентов и цветов. Все экраны ниже собраны только из этих деталей —
+    так Unity-сборка выходит консистентной.</p>
+
+  <div class="kit">
+    <div class="item">
+      <div class="name">Палитра</div>
+      <div class="swrow">
+        <div class="sw"><i style="background:#2f54c8"></i>Кобальт (панели, бейджи)<code>#2f54c8</code></div>
+        <div class="sw"><i style="background:#1f3a96"></i>Кобальт глубокий<code>#1f3a96</code></div>
+        <div class="sw"><i style="background:#f2a23e"></i>Санбёрст оранж<code>#f2a23e</code></div>
+        <div class="sw"><i style="background:#f8d24c"></i>Санбёрст жёлтый / энергия<code>#f8d24c</code></div>
+        <div class="sw"><i style="background:#aacd68"></i>Санбёрст зелёный<code>#aacd68</code></div>
+        <div class="sw"><i style="background:#5cbf5f"></i>ДА (green)<code>#5cbf5f</code></div>
+        <div class="sw"><i style="background:#e8443a"></i>СПАСИБО НЕ НАДО / здоровье<code>#e8443a</code></div>
+        <div class="sw"><i style="background:#ffd873"></i>Лампочки маркизы<code>#ffd873</code></div>
+        <div class="sw"><i style="background:#141a3d"></i>Контур (ink)<code>#141a3d</code></div>
+      </div>
+    </div>
+    <div class="item">
+      <div class="name">Типографика</div>
+      <div class="type-scale">
+        <div style="font-size:30px">ВОПРОС 5.4cqw</div>
+        <div style="font-size:22px;color:var(--energy)">РУБРИКА 8.5cqw</div>
+        <div style="font-size:16px">Лейбл HUD 1.5cqw · +letter-spacing</div>
+        <div style="font-size:13px;color:var(--muted);font-family:var(--body);font-weight:400">Тело/пояснения — обычный санс, tabular-nums для чисел</div>
+      </div>
+      <div class="note">Дисплейный — вес 900, обводка контуром, тень вниз. Кандидаты: Fredoka / Anton / Shrikhand.</div>
+    </div>
+    <div class="item">
+      <div class="name">Бейдж возраста</div>
+      <div class="demo"><div class="badge" style="container-type:normal"><div class="lbl" style="font-size:11px">ВОЗРАСТ</div><div class="num" style="font-size:40px">7</div></div></div>
+      <div class="note">Кобальт + белая обводка + нижняя тень. Крупная цифра легко подменяется.</div>
+    </div>
+    <div class="item">
+      <div class="name">Счётчик денег</div>
+      <div class="demo"><div class="pill money" style="min-width:0"><div class="val" style="font-size:22px">₽ 10 000</div><div class="cap" style="font-size:11px">ДЕНЬГИ ◎</div></div></div>
+      <div class="note">Белая плашка, кобальт-текст, иконка монет. Большие числа, tabular-nums.</div>
+    </div>
+    <div class="item">
+      <div class="name">Полоса здоровья / энергии</div>
+      <div class="demo plain"><div style="width:70%"><div class="pill" style="min-width:0"><div class="cap" style="font-size:11px">♥ ЗДОРОВЬЕ</div><div class="bar hp" style="height:14px"><span style="width:72%"></span></div></div></div></div>
+      <div class="note">Сердце — красная заливка, молния — жёлтая. Одинаковая геометрия.</div>
+    </div>
+    <div class="item">
+      <div class="name">Балансир отношений</div>
+      <div class="demo plain"><div style="width:82%"><div class="relbar" style="height:16px"><div class="zone" style="font-size:8px">HOLD ZONE</div><div class="mark" style="left:52%"></div></div></div></div>
+      <div class="note">Зоны красный→жёлтый→<b>зелёный (цель 40–75%)</b>→жёлтый→красный + бегунок.</div>
+    </div>
+    <div class="item">
+      <div class="name">Плашки ответа</div>
+      <div class="demo"><div style="display:flex;gap:16px;container-type:normal"><div class="plate yes" style="font-size:18px;padding:12px 20px">ДА</div><div class="plate no" style="font-size:14px;padding:12px 18px">СПАСИБО,<br>НЕ НАДО</div></div></div>
+      <div class="note">Зелёная / красная, <b>одинаковый кегль</b>, чёрный контур, лёгкий поворот, искры.</div>
+    </div>
+    <div class="item">
+      <div class="name">Таймер-кольцо</div>
+      <div class="demo"><div class="timer" style="width:56px;height:56px;position:relative"><b style="font-size:22px">5</b></div></div>
+      <div class="note">Кольцо-отсчёт 5 сек (в блице — 2 сек, красное почти полное).</div>
+    </div>
+    <div class="item">
+      <div class="name">Реплика Ведущего</div>
+      <div class="demo"><div class="bubble" style="position:relative;font-size:16px;top:0;right:0">Красавчик!</div></div>
+      <div class="note">Жёлтое облачко с хвостиком, 1–3 слова, ~30–40% выборов.</div>
+    </div>
+    <div class="item">
+      <div class="name">Кнопка-ребёнок</div>
+      <div class="demo"><div style="display:flex;gap:14px;container-type:normal"><div class="childbtn" style="width:44px;height:44px;position:relative;font-size:22px">☺</div><div class="childbtn lit" style="width:44px;height:44px;position:relative;font-size:22px">!</div></div></div>
+      <div class="note">Два состояния: погашена / вспышка (жёлтое свечение).</div>
+    </div>
+    <div class="item">
+      <div class="name">Панель-карточка</div>
+      <div class="demo"><div style="width:80%;background:var(--cobalt);border:5px solid #fff;border-radius:14px;color:#fff;text-align:center;padding:16px;font-family:var(--display);font-weight:900;font-size:15px;box-shadow:0 6px 0 rgba(0,0,0,.25)">Маркиза с лампочками</div></div>
+      <div class="note">Кобальт + белая обводка + золотые лампочки по периметру + тень.</div>
+    </div>
+  </div>
+</div></section>
+
+<!-- ================= ЭКРАНЫ ================= -->
+<section><div class="wrap">
+  <div class="sec-head"><span class="sec-num">01</span><h2>Экраны и состояния</h2></div>
+  <p class="sec-sub">Поток: Опенер → Core loop (детство → взрослая жизнь, рубрики, туториалы, блиц/депрессия) → Финал-некролог.
+    Ниже — каждый ключевой экран как кадр 16:9 со спекой и промптом.</p>
+
+  <!-- S1 Опенер -->
+  <div class="screen" id="s1">
+    <div class="cap"><span class="tag">S1</span><h3>Опенер — «Начать жизнь»</h3><span class="st">таймер стоит · CONFIRM запускает I02</span></div>
+    <div class="grid2 spec">
+      <div class="frame">
+        <div class="stars"><i>★</i><i class="o">★</i><i>★</i><i class="o">★</i><i>★</i></div>
+        <div class="opener">
+          <div class="rays"></div>
+          <h3><span>«СПАСИБО,</span> НЕ НАДО»</h3>
+          <ul>
+            <li><b>▸</b> Проживите <b>целую жизнь за пару минут</b> — в прямом эфире!</li>
+            <li><b>▸</b> На каждый вопрос — рычаг: <b>ДА</b> или <b>СПАСИБО, НЕ НАДО</b>. 5 секунд — дальше решаем за вас!</li>
+            <li><b>▸</b> С возрастом откроются ручки жизни. Рук две — <b>всё удержать нельзя</b>, и это нормально!</li>
+          </ul>
+          <div class="start">▸ НАЧАТЬ ЖИЗНЬ</div>
+        </div>
+      </div>
+      <div class="spec-box">
+        <h5>Компоненты</h5>
+        <ul><li>Санбёрст-задник + звёзды</li><li>Титул шоу (жёлтый акцент)</li><li>3 правила в тоне Ведущего</li><li>Кнопка старта (зелёная плашка)</li></ul>
+        <h5>Ввод</h5>
+        <ul><li><code>CONFIRM</code> (Enter / рычаг) → старт</li><li>Таймер и дренажи ещё не идут</li></ul>
+        <div class="prompt"><b>Промпт:</b> "70s-80s TV game show welcome screen, warm sunburst rays, bold 3D title «СПАСИБО, НЕ НАДО», three rule lines, big green START lever button, thick white outlines, confetti, 16:9, reference styleframe-03".</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- S2 Детство -->
+  <div class="screen" id="s2">
+    <div class="cap"><span class="tag">S2</span><h3>Карточка — детство</h3><span class="st">минимальный HUD: только возраст</span></div>
+    <div class="grid2 spec">
+      <div class="frame">
+        <div class="stars"><i>★</i><i class="o">★</i><i>★</i><i class="o">★</i><i>★</i></div>
+        <div class="hud">
+          <div class="badge"><div class="lbl">ВОЗРАСТ</div><div class="num">7</div></div>
+        </div>
+        <div class="timer"><b>5</b></div>
+        <div class="card"><q>Съесть жука?</q></div>
+        <div class="answers">
+          <div class="plate yes"><span class="spark">✦</span>ДА</div>
+          <div class="plate no">СПАСИБО,<br>НЕ НАДО<span class="spark">✦</span></div>
+        </div>
+      </div>
+      <div class="spec-box">
+        <h5>Компоненты</h5>
+        <ul><li>Бейдж возраста (единственная шкала открыта)</li><li>Карточка-маркиза</li><li>Таймер 5 сек</li><li>Плашки ДА / СПАСИБО НЕ НАДО</li></ul>
+        <h5>Смысл</h5>
+        <ul><li>Детство ~7–8 карточек ≈ 45 сек</li><li>Много времени на чтение, кек-выборы</li><li>Влияет только на некролог (<code>ROND</code>)</li></ul>
+        <div class="prompt"><b>Промпт:</b> "TV quiz gameplay card «Съесть жука?» on cobalt marquee panel with light bulbs, only AGE badge in HUD, green ДА + red СПАСИБО НЕ НАДО plates, sunburst bg, 16:9".</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- S3 Взрослая -->
+  <div class="screen" id="s3">
+    <div class="cap"><span class="tag">S3</span><h3>Карточка — взрослая жизнь</h3><span class="st">полный HUD + реплика Ведущего</span></div>
+    <div class="grid2 spec">
+      <div class="frame">
+        <div class="stars"><i>★</i><i class="o">★</i><i>★</i><i class="o">★</i><i>★</i></div>
+        <div class="hud">
+          <div class="badge"><div class="lbl">ВОЗРАСТ</div><div class="num">34</div></div>
+          <div class="pill money"><div class="val">₽ 10 000</div><div class="cap">ДЕНЬГИ ◎</div></div>
+          <div class="pill"><div class="cap">♥ ЗДОРОВЬЕ</div><div class="bar hp"><span style="width:68%"></span></div></div>
+          <div class="pill"><div class="cap">⚡ ЭНЕРГИЯ</div><div class="bar en"><span style="width:52%"></span></div></div>
+          <div class="pill rel"><div class="cap">♾ ОТНОШЕНИЯ</div><div class="relbar"><div class="zone">HOLD ZONE</div><div class="mark" style="left:56%"></div></div></div>
+        </div>
+        <div class="timer"><b>5</b></div>
+        <div class="bubble right">А вот это зря…</div>
+        <div class="card"><q>Взять ипотеку<br>на 30 лет?</q><div class="sub">…мелким шрифтом: −40 ₽ взнос, затем −0.3 ₽/сек ×20 лет</div></div>
+        <div class="answers">
+          <div class="plate yes"><span class="spark">✦</span>ДА</div>
+          <div class="plate no">СПАСИБО,<br>НЕ НАДО<span class="spark">✦</span></div>
+        </div>
+      </div>
+      <div class="spec-box">
+        <h5>HUD (все ручки открыты)</h5>
+        <ul><li>Возраст · Деньги (крутилка) · Здоровье · Энергия · Отношения (балансир)</li><li>«Рук две» — держать всё нельзя</li></ul>
+        <h5>Слои</h5>
+        <ul><li>Реплика Ведущего (~30–40%)</li><li>Мелкий шрифт договора в подписи</li><li>Δшкал/флаги — из <code>scenes.csv</code></li></ul>
+        <div class="prompt"><b>Промпт:</b> "TV quiz life game, full HUD (age, money ₽, red health bar, yellow energy bar, red-green relationship balancer), card «Взять ипотеку на 30 лет?», host yellow speech bubble «А вот это зря…», 16:9, styleframe-03".</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- S4 Рубрика -->
+  <div class="screen" id="s4">
+    <div class="cap"><span class="tag">S4</span><h3>Баннер-рубрика</h3><span class="st">одноразовое событие · фанфары</span></div>
+    <div class="grid2 spec">
+      <div class="frame">
+        <div class="banner"><div class="rays"></div><h3>ПОРА ЗАРАБАТЫВАТЬ!</h3><div class="kick">★ теперь у вас есть работа ★</div></div>
+      </div>
+      <div class="spec-box">
+        <h5>Варианты баннеров</h5>
+        <ul><li>ПОРА ЗАРАБАТЫВАТЬ!</li><li>ПЕРВАЯ ЛЮБОВЬ!</li><li>КРИЗИС СРЕДНЕГО ВОЗРАСТА! БЛИЦ!</li><li>ВЫГОРАНИЕ! · ДЕПРЕССИЯ!</li></ul>
+        <h5>Роль</h5>
+        <ul><li>Объявляет «рубрику» жизни (Ведущий)</li><li>Часто сопровождает <code>OPEN:шкала</code></li></ul>
+        <div class="prompt"><b>Промпт:</b> "Explosive TV show rubric banner «ПОРА ЗАРАБАТЫВАТЬ!», huge 3D yellow letters with red+black shadow, radiating white rays on cobalt, confetti, 16:9".</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- S5 Туториал -->
+  <div class="screen" id="s5">
+    <div class="cap"><span class="tag">S5</span><h3>Обучающая подсказка</h3><span class="st">оверлей · таймер и дренажи на паузе</span></div>
+    <div class="grid2 spec">
+      <div class="frame">
+        <div class="stars"><i>★</i><i class="o">★</i><i>★</i><i class="o">★</i><i>★</i></div>
+        <div class="hud"><div class="badge"><div class="lbl">ВОЗРАСТ</div><div class="num">18</div></div>
+          <div class="pill money"><div class="val">₽ 0</div><div class="cap">ДЕНЬГИ ◎</div></div></div>
+        <div class="card" style="opacity:.25"><q>…</q></div>
+        <div class="tut"><div class="card2">
+          <h4>Поздравляем, теперь у вас есть работа!</h4>
+          <p>Крутите вот эту ручку — и у вас будут деньги. Не крутите — денег не будет. Всё просто!</p>
+          <div class="ok">ПОНЯТНО ▸</div>
+        </div></div>
+      </div>
+      <div class="spec-box">
+        <h5>Когда</h5>
+        <ul><li>Деньги (18) · Отношения (20) · Энергия (25)</li><li>Здоровье (30) · Ребёнок (свадьба+2) · Выгорание</li></ul>
+        <h5>Правила</h5>
+        <ul><li>Это <b>не карточка</b> — нет выбора</li><li>Таймер возраста и дренажи <b>на паузе</b></li><li>Закрытие — <code>CONFIRM</code></li></ul>
+        <div class="prompt"><b>Промпт:</b> "TV show tutorial overlay, yellow rounded card with host text about the money crank, «ПОНЯТНО» button, dimmed gameplay behind, 16:9".</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- S6 Блиц -->
+  <div class="screen" id="s6">
+    <div class="cap"><span class="tag">S6</span><h3>Кризис — Блиц</h3><span class="st">2 сек · найти «ВСЁ НОРМАЛЬНО»</span></div>
+    <div class="grid2 spec">
+      <div class="frame blitz">
+        <div class="stars"><i>★</i><i class="o">★</i><i>★</i><i class="o">★</i><i>★</i></div>
+        <div class="hud"><div class="badge"><div class="lbl">ВОЗРАСТ</div><div class="num">47</div></div></div>
+        <div class="timer hot"><b>2</b></div>
+        <div class="card"><q>А чего ты вообще<br>достиг?</q></div>
+        <div class="answers">
+          <div class="plate oh">О НЕТ</div>
+          <div class="plate ff">ВСЁ НОРМАЛЬНО</div>
+        </div>
+      </div>
+      <div class="spec-box">
+        <h5>Механика</h5>
+        <ul><li>5 кризис-мыслей подряд, <b>2 сек</b> каждая</li><li>Кнопки «О НЕТ» / «ВСЁ НОРМАЛЬНО»</li><li>Позиция «ВСЁ НОРМАЛЬНО» <b>меняется</b></li><li>≥2 промаха → импульс-раунд (<code>INVERT</code>)</li></ul>
+        <div class="prompt"><b>Промпт:</b> "Frantic midlife-crisis blitz round, dark-tinted TV quiz, intrusive thought «А чего ты достиг?», two buttons «О НЕТ» and «ВСЁ НОРМАЛЬНО», 2-second red timer, 16:9".</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- S7 Выгорание -->
+  <div class="screen" id="s7">
+    <div class="cap"><span class="tag">S7</span><h3>Состояние «Выгорание»</h3><span class="st">временное · крутилка денег «тяжелеет»</span></div>
+    <div class="grid2 spec">
+      <div class="frame">
+        <div class="banner" style="background:#243a86"><div class="rays"></div><h3 style="font-size:7cqw">ВЫГОРАНИЕ!</h3><div class="kick">крутите деньги — идёт туго · подышите рычагом</div></div>
+      </div>
+      <div class="spec-box">
+        <h5>Триггер / выход</h5>
+        <ul><li>Энергия падает до <b>~10%</b></li><li>Доход за тик <b>×0.5</b>, всё тяжелее</li><li>Проходит само при энергии <b>&gt;40%</b> (ритм-рычаг)</li></ul>
+        <h5>Тон</h5>
+        <ul><li>Заголовок радостный, звук слегка проседает</li><li><b>Не</b> полноценная Депрессия</li></ul>
+        <div class="prompt"><b>Промпт:</b> "TV show «ВЫГОРАНИЕ!» banner, slightly muted cobalt, tired sparkles, hint to breathe with the lever, 16:9".</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- S8 Депрессия -->
+  <div class="screen" id="s8">
+    <div class="cap"><span class="tag">S8</span><h3>Состояние «Депрессия»</h3><span class="st">та же графика в жёстком ч/б + зерно</span></div>
+    <div class="grid2 spec">
+      <div class="frame is-depressed">
+        <div class="stars"><i>★</i><i class="o">★</i><i>★</i><i class="o">★</i><i>★</i></div>
+        <div class="hud">
+          <div class="badge"><div class="lbl">ВОЗРАСТ</div><div class="num">51</div></div>
+          <div class="pill"><div class="cap">♥ ЗДОРОВЬЕ</div><div class="bar hp"><span style="width:30%"></span></div></div>
+          <div class="pill"><div class="cap">⚡ ЭНЕРГИЯ</div><div class="bar en"><span style="width:18%"></span></div></div>
+        </div>
+        <div class="timer"><b>5</b></div>
+        <div class="card"><q>Встать сегодня<br>с кровати?</q></div>
+        <div class="answers"><div class="plate yes">ДА</div><div class="plate no">СПАСИБО,<br>НЕ НАДО</div></div>
+      </div>
+      <div class="spec-box">
+        <h5>Подача</h5>
+        <ul><li>Тот же лейаут, <code>grayscale(1)</code> + зерно</li><li>Один акцент допустим</li><li>Музыка минорит, реплики Ведущего гаснут</li></ul>
+        <h5>Выход</h5>
+        <ul><li>Мини-игра (иной ритм кнопки)</li></ul>
+        <div class="prompt"><b>Промпт:</b> "Same TV quiz screen desaturated to harsh black-and-white with film grain, one faint accent, melancholic, card «Встать с кровати?», 16:9".</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- S9 Ребёнок -->
+  <div class="screen" id="s9">
+    <div class="cap"><span class="tag">S9</span><h3>Ребёнок — вспышка</h3><span class="st">сигнал-реакция · окно ~2 сек</span></div>
+    <div class="grid2 spec">
+      <div class="frame">
+        <div class="stars"><i>★</i><i class="o">★</i><i>★</i><i class="o">★</i><i>★</i></div>
+        <div class="hud">
+          <div class="badge"><div class="lbl">ВОЗРАСТ</div><div class="num">39</div></div>
+          <div class="pill money"><div class="val">₽ 8 400</div><div class="cap">ДЕНЬГИ ◎</div></div>
+          <div class="pill rel"><div class="cap">♾ ОТНОШЕНИЯ</div><div class="relbar"><div class="zone">HOLD ZONE</div><div class="mark" style="left:48%"></div></div></div>
+        </div>
+        <div class="timer"><b>5</b></div>
+        <div class="card" style="width:44cqw"><q>Обычная жизнь<br>идёт…</q></div>
+        <div class="childbtn lit" style="right:6cqw;bottom:10cqh;left:auto;top:auto">!</div>
+        <div class="bubble left">Скорее!</div>
+        <div class="answers" style="bottom:4cqh"><div class="plate yes" style="font-size:2.6cqw">ДА</div><div class="plate no" style="font-size:2.1cqw">СПАСИБО,<br>НЕ НАДО</div></div>
+      </div>
+      <div class="spec-box">
+        <h5>Механика</h5>
+        <ul><li>Кнопка вспыхивает каждые ~15–25 сек</li><li>Окно ~2 сек, мин. задержка ~1 сек</li><li>Пропустил 2+ → «плохой родитель» (Отн −10%)</li></ul>
+        <div class="prompt"><b>Промпт:</b> "TV quiz HUD with a glowing lit child-care button flashing in the corner, «press now» urgency, ordinary card in background, 16:9".</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- S10 Нет денег -->
+  <div class="screen" id="s10">
+    <div class="cap"><span class="tag">S10</span><h3>Карточка заблокирована — нет денег</h3><span class="st"><code>BLOCK$</code></span></div>
+    <div class="grid2 spec">
+      <div class="frame dim">
+        <div class="stars"><i>★</i><i class="o">★</i><i>★</i><i class="o">★</i><i>★</i></div>
+        <div class="hud">
+          <div class="badge"><div class="lbl">ВОЗРАСТ</div><div class="num">58</div></div>
+          <div class="pill money"><div class="val">₽ 30</div><div class="cap">ДЕНЬГИ ◎</div></div>
+          <div class="pill"><div class="cap">♥ ЗДОРОВЬЕ</div><div class="bar hp"><span style="width:22%"></span></div></div>
+        </div>
+        <div class="card"><q>Пора подлечиться!</q><div class="sub">цена 100 ₽</div></div>
+        <div class="block-tag">Как жаль, у вас нет денег на это!</div>
+      </div>
+      <div class="spec-box">
+        <h5>Поведение</h5>
+        <ul><li>Денег меньше цены → карточка недоступна</li><li>Цена показана, плашки притушены</li><li>Связка деньги ↔ здоровье: не крутил — лечиться нечем</li></ul>
+        <div class="prompt"><b>Промпт:</b> "TV quiz card «Пора подлечиться!» greyed out, price 100₽ shown, red banner «Как жаль, у вас нет денег на это!», low health bar, 16:9".</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- S11 Финал весёлый -->
+  <div class="screen" id="s11">
+    <div class="cap"><span class="tag">S11</span><h3>Финал-некролог — весёлая старость</h3><span class="st">склейка из решений забега</span></div>
+    <div class="grid2 spec">
+      <div class="frame">
+        <div class="stars"><i>★</i><i class="o">★</i><i>★</i><i class="o">★</i><i>★</i></div>
+        <div class="finale">
+          <div class="rays"></div>
+          <h3>СПАСИБО ЗА ИГРУ!</h3>
+          <div class="cause">Причина конца: весёлая старость</div>
+          <div class="story">Но не переживайте! Ведь вы <b>родились у прекрасных родителей</b>. В детстве ели жуков и ничего не боялись. Рыжий кот, его котята и их котята прожили с вами всю жизнь. Взяли ипотеку — и выплатили. Под старость раздали сбережения внукам.</div>
+          <div class="again">▸ НАЧАТЬ ЗАНОВО</div>
+        </div>
+      </div>
+      <div class="spec-box">
+        <h5>Склейка (3 части)</h5>
+        <ul><li>«СПАСИБО ЗА ИГРУ!» (фикс)</li><li>Причина конца (по концовке)</li><li>История: зачин + строки карточек по возрасту</li></ul>
+        <h5>Правила строк</h5>
+        <ul><li>Начинать по-разному, не «Вы…»</li><li>Кек/интро/блиц → не в некролог</li><li>Лимит ~15 строк</li></ul>
+        <div class="prompt"><b>Промпт:</b> "TV show finale «СПАСИБО ЗА ИГРУ!», cause line, glued life-story paragraph, «НАЧАТЬ ЗАНОВО» button, celebratory sunburst, 16:9".</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- S12 Финал фатал -->
+  <div class="screen" id="s12">
+    <div class="cap"><span class="tag">S12</span><h3>Финал-некролог — фатал / выгорел</h3><span class="st">вариант концовки</span></div>
+    <div class="grid2 spec">
+      <div class="frame">
+        <div class="stars"><i>★</i><i class="o">★</i><i>★</i><i class="o">★</i><i>★</i></div>
+        <div class="finale">
+          <div class="rays"></div>
+          <h3 style="color:#fff">СПАСИБО ЗА ИГРУ!</h3>
+          <div class="cause" style="color:var(--energy)">Причина конца: вы сунули палец в розетку</div>
+          <div class="story">Но не переживайте! Ведь вы <b>родились у прекрасных родителей</b>. И это, пожалуй, всё, что вы успели.</div>
+          <div class="again">▸ НАЧАТЬ ЗАНОВО</div>
+        </div>
+      </div>
+      <div class="spec-box">
+        <h5>Причины (примеры)</h5>
+        <ul><li>Розетка · порошок · селфи на крыше</li><li>«За вами пришли» (криминал)</li><li>Здоровье=0 · Энергия=0 (выгорел)</li><li>100 лет: весёлая / спокойная / одинокая</li></ul>
+        <div class="prompt"><b>Промпт:</b> "TV show finale with absurd death cause «вы сунули палец в розетку», very short life story, «НАЧАТЬ ЗАНОВО», 16:9".</div>
+      </div>
+    </div>
+  </div>
+
+</div></section>
+
+<!-- ================= UNITY ================= -->
+<section id="unity"><div class="wrap">
+  <div class="sec-head"><span class="sec-num">02</span><h2>Заметки под реализацию в Unity</h2></div>
+  <p class="sec-sub">Чтобы макеты перенеслись 1-в-1, а не «на глаз».</p>
+  <div class="grid2" style="grid-template-columns:1fr;gap:14px">
+    <div class="spec-box">
+      <h5>Холст и раскладка</h5>
+      <ul>
+        <li>Canvas <b>1920×1080</b>, CanvasScaler = Scale With Screen Size, reference 1920×1080, match 0.5.</li>
+        <li>HUD-ряд — верхний якорь, горизонтальный Layout Group, gap ≈ 1.6% ширины.</li>
+        <li>Карточка-маркиза — центр (anchor 0.5/0.5, чуть выше центра). Плашки ответа — нижний якорь, HorizontalLayout.</li>
+        <li>Таймер-кольцо — верхний центр; реплика Ведущего — свободный якорь у края.</li>
+      </ul>
+    </div>
+    <div class="spec-box">
+      <h5>Спрайт vs код</h5>
+      <ul>
+        <li><b>Спрайты (из промптов / арта):</b> санбёрст-задник, звёзды, рамка-маркиза с лампочками, иконки (сердце, молния, монета, ₽), баннеры-рубрики.</li>
+        <li><b>Код/UI:</b> заполнение полос (Image fill), балансир-бегунок, таймер-кольцо (radial fill), счётчик денег (TMP tabular), реплики/конфетти (частицы).</li>
+        <li>Плашки ДА/НЕТ — 9-slice спрайт + TMP; лёгкий поворот ±2°.</li>
+      </ul>
+    </div>
+    <div class="spec-box">
+      <h5>Цвета и шрифт (перенести как токены)</h5>
+      <ul>
+        <li>Кобальт <code>#2f54c8</code> / глубокий <code>#1f3a96</code> / контур <code>#141a3d</code>.</li>
+        <li>ДА <code>#5cbf5f</code> · НЕТ/здоровье <code>#e8443a</code> · энергия/лампочки <code>#f6c945</code>/<code>#ffd873</code>.</li>
+        <li>Санбёрст: оранж <code>#f2a23e</code> · жёлтый <code>#f8d24c</code> · зелёный <code>#aacd68</code>.</li>
+        <li>Шрифт — тяжёлый дисплейный санс с кириллицей (Fredoka / Anton / Shrikhand); проверить глифы, задать outline+shadow как в макете.</li>
+      </ul>
+    </div>
+    <div class="spec-box">
+      <h5>Состояния экрана (материал/пост-эффект)</h5>
+      <ul>
+        <li><b>Норма:</b> полная насыщенность, конфетти при хорошем состоянии.</li>
+        <li><b>Выгорание:</b> лёгкое приглушение + «тяжёлая» крутилка (геймплей, не только визуал).</li>
+        <li><b>Депрессия:</b> grayscale + зерно (полноэкранный пост-эффект/материал), звук минорит.</li>
+        <li>Реакция шоу на состояние (яркость↔уныние) — общий контроллер поверх сцены.</li>
+      </ul>
+    </div>
+  </div>
+</div></section>
+
+<footer><div class="wrap">
+  «Спасибо, не надо» · дизайн экранов · плейсхолдерный контент, точная раскладка.
+  Канон дизайна — <code>docs/GAME_SPEC.md</code>; данные карточек — <code>docs/new_concept/scenes.csv</code>;
+  стайлфрейм-эталон — <code>docs/assets/style/styleframe-03.png</code>.
+</div></footer>
