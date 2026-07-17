@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>«Спасибо, не надо» — Таблица сцен</title>
+<style>
+  :root{
+    --cobalt:#1b3fd4; --yellow:#ffd400; --red:#e2231a; --orange:#ff7a00;
+    --ink:#141414; --paper:#fffdf7; --line:#e6e0cf;
+    --pos:#127a2e; --neg:#c0261e;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; background:var(--paper); color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    font-size:14px; line-height:1.45;
+  }
+  header{background:var(--cobalt); color:#fff; padding:18px 22px; box-shadow:0 2px 0 var(--yellow);}
+  header h1{margin:0; font-size:22px; letter-spacing:.5px; text-transform:uppercase;}
+  header p{margin:6px 0 0; opacity:.9; font-size:13px;}
+  .toolbar{
+    position:sticky; top:0; z-index:5; background:var(--paper);
+    padding:12px 22px; border-bottom:1px solid var(--line);
+    display:flex; gap:10px; flex-wrap:wrap; align-items:center;
+  }
+  .toolbar input[type=search]{
+    padding:8px 12px; border:1px solid var(--line); border-radius:8px;
+    font-size:14px; min-width:240px; flex:1;
+  }
+  .chips{display:flex; gap:6px; flex-wrap:wrap}
+  .chip{
+    padding:6px 11px; border-radius:999px; border:1px solid var(--line);
+    background:#fff; cursor:pointer; font-size:12px; font-weight:600; user-select:none;
+  }
+  .chip.active{background:var(--cobalt); color:#fff; border-color:var(--cobalt)}
+  .count{font-size:12px; opacity:.6; margin-left:auto}
+  .src{font-size:11px; opacity:.6; margin-left:8px}
+  .wrap{overflow:auto; max-height:calc(100vh - 150px); padding:0 22px 40px}
+  table{border-collapse:separate; border-spacing:0; width:100%; min-width:1500px}
+  thead th{
+    position:sticky; top:0; z-index:3; background:var(--ink); color:#fff;
+    text-align:left; padding:10px 10px; font-size:12px; text-transform:uppercase;
+    letter-spacing:.3px; border-right:1px solid #333;
+  }
+  tbody td{padding:9px 10px; border-bottom:1px solid var(--line); vertical-align:top; border-right:1px solid #f0ead9;}
+  tbody tr:nth-child(even){background:#faf6ea}
+  tbody tr:hover{background:#fff6cf}
+  td.id{font-weight:700; font-family:ui-monospace,Menlo,monospace; white-space:nowrap}
+  td.card{font-weight:600; min-width:200px}
+  td.when{white-space:nowrap; font-size:12px; opacity:.85}
+  td.cons{min-width:210px; font-size:13px}
+  td.delta{white-space:nowrap; font-weight:600; font-size:13px}
+  td.delta .pos{color:var(--pos)} td.delta .neg{color:var(--neg)}
+  td.host{font-style:italic; color:#7a4a00}
+  td.host .bubble{
+    display:inline-block; background:var(--yellow); color:var(--ink);
+    padding:2px 9px; border-radius:12px 12px 12px 3px; font-style:normal;
+    font-weight:600; font-size:12px; border:1px solid #e6bd00;
+  }
+  td.necro{min-width:210px; font-size:13px; color:#333}
+  td.flags{white-space:normal; min-width:130px}
+  .flag{
+    display:inline-block; font-family:ui-monospace,Menlo,monospace; font-size:11px;
+    background:#eef; color:#1b3fd4; padding:1px 6px; border-radius:4px; margin:1px 2px 1px 0;
+  }
+  .flag.fatal{background:#fdecea; color:var(--red)}
+  .flag.open{background:#eafbea; color:var(--pos)}
+  .flag.chain{background:#fff0e0; color:var(--orange)}
+  tr[data-phase="Интро"] td.id{box-shadow:inset 4px 0 var(--yellow)}
+  tr[data-phase="Детство"] td.id{box-shadow:inset 4px 0 var(--orange)}
+  tr[data-phase="Юность"] td.id{box-shadow:inset 4px 0 #17a2b8}
+  tr[data-phase="Взрослая"] td.id{box-shadow:inset 4px 0 var(--cobalt)}
+  tr[data-phase="Кризис"] td.id{box-shadow:inset 4px 0 var(--red)}
+  tr[data-phase="Поздняя"] td.id{box-shadow:inset 4px 0 #6f42c1}
+  tr[data-phase="Случайные"] td.id{box-shadow:inset 4px 0 #333}
+  tr[data-phase="Кек"] td.id{box-shadow:inset 4px 0 #d63384}
+  .empty{opacity:.3}
+  footer{padding:14px 22px; font-size:12px; opacity:.65}
+</style>
+</head>
+<body>
+<header>
+  <h1>«Спасибо, не надо»</h1>
+  <p>Правь <code>scenes.csv</code> в любом текстовом редакторе — таблица обновится после перезагрузки (Cmd+R). Запускай через <code>open-table.command</code>.</p>
+</header>
+
+<div class="toolbar">
+  <input type="search" id="q" placeholder="Поиск по тексту, ID, флагам…">
+  <div class="chips" id="phaseChips"></div>
+  <span class="count" id="count"></span>
+  <span class="src" id="src"></span>
+</div>
+
+<div class="wrap">
+  <table>
+    <thead><tr id="head"></tr></thead>
+    <tbody id="body"></tbody>
+  </table>
+</div>
+
+<footer>Цвет полоски у ID = фаза жизни. Жёлтое облачко = реплика Ведущего. Δшкалы — качественно (+/−); точные числа в <code>game-design.md</code>.</footer>
+
+<!-- Запасная копия данных: используется, если scenes.csv не удалось прочитать (напр. открыт двойным кликом без сервера). Актуальный источник — scenes.csv. -->
+<script id="csv" type="text/plain">
+ID,Карточка (как звучит),Когда,Тип,ДА — последствия (механика),ДА — Δшкалы,НЕТ — последствия (механика),НЕТ — Δшкалы,Ведущий (ДА),Ведущий (НЕТ),Некролог ДА,Некролог НЕТ,Флаги
+I02,Улыбнуться в камеру?,"0–3, старт игры",Интро,Нет последствий (учим рычаг ответа),—,Нет последствий,—,,,—,—,NOCONS
+I03,Сделать первый шаг?,"1–4, после I02",Интро,"Запускается таймер возраста; включается музыка и анимация движения вперёд; игра начинается",—,"То же: шаг всё равно происходит, игра начинается",—,Поехали!,Поехали!,—,—,"NOCONS, TIMELINE"
+CH01,Съесть жука?,4–8,Детство,Нет последствий (влияет на некролог),Здр +1,Нет последствий,—,Крепкий орешек!,,В детстве ели жуков и ничего на свете не боялись.,"Росли аккуратным, брезгливым ребёнком.",ROND
+CH02,Засунуть палец в розетку?,4–10,Детство/Дичь,Мгновенный конец игры (причина финала: розетка),—,Нет последствий,—,"Ну, спасибо за игру!",Пронесло!,—,В детстве чуть не тронули розетку — но вовремя одумались.,FATAL
+CH03,Поиграть с рыжим котом?,5–12,Детство,Нет последствий (влияет на некролог),—,Нет последствий,—,,,"Рыжий кот из детства, его котята и их котята прожили с вами всю жизнь.",Домашних животных так и не завели.,ROND
+CH04,Залезть на самое высокое дерево?,6–12,Детство,Нет последствий (влияет на некролог),Эн +1,Нет последствий,—,Вот это по-нашему!,Осторожничаем?,Выше всех лазили по деревьям и не боялись высоты.,Высоты сторонились с самого детства.,ROND
+CH05,Поделиться последней конфетой?,5–10,Детство,Нет последствий (влияет на некролог),Отн +1,Нет последствий,—,,,Легко делились последним — и друзья это помнили.,Своим делиться не любили.,ROND
+CH06,"Соврать, что вазу разбил не ты?",6–12,Детство,Нет последствий (влияет на некролог),—,Нет последствий,—,Хитрюга!,,Рано научились выкручиваться и привирать.,Даже про вазу сказали правду — честность вошла в привычку.,ROND
+CH07,Завести дневник?,8–14,Детство,Разблокирует карточку LT07 (мемуары),—,Карточка LT07 не появится,—,,,Каждый день заносили в дневник.,Свою жизнь нигде не записывали.,"ROND, CHAIN→LT07"
+CH08,Записаться в кружок?,9–15,Детство,Разблокирует карточку MD07 (блог),Эн +1,Карточка MD07 не появится,—,,,С детства у вас было любимое дело.,Ничем особенным в детстве не увлеклись.,CHAIN→MD07
+YA01,ПОРА ЗАРАБАТЫВАТЬ! Поступить в универ?,18,Развилка,"После ~25 доход-множитель ×2; разблокирует YA02 (крутилка денег открывается подсказкой в 18)",Дн −1,"Доход-множитель ×1 (сразу работаешь)","Дн +1, Эн −1",Умница!,"Бунтарь, обожаю!",Отучились в универе — и это со временем окупилось.,"Учиться не пошли: жили небогато, зато свободно.","OPEN:Дн, TIMELINE, CHAIN→YA02, DELAY(7)"
+YA02,Бросить универ ради стартапа?,"19–21, если YA01=ДА",Развилка,Рандом: доход-множитель ×5 или обнуление денег,Дн ±3,Нет последствий (доучиваешься),—,Смело!,,Бросили всё ради своего дела — вот это была авантюра.,"Доучились спокойно, до конца.",RANDOM
+YA03,ПЕРВАЯ ЛЮБОВЬ! Начать встречаться?,20,Таймлайн,Открывает балансир отношений (шкала Отн) + подсказка,Отн +2,Шкала Отн пока не открывается; предложат позже,—,"Ах, любовь!",,Была в вашей жизни первая любовь.,Первую любовь отложили на потом.,"OPEN:Отн, TIMELINE, ZONE"
+YA04,Взять первый кредит на мечту?,"21–25, если Дн открыта",Соблазн,+40₽ сразу; через ~10 лет долг −0.3₽/сек на 10 лет,Дн +2,Нет последствий,Дн −1,Живём один раз!,,"Жили в долг, но ярко.",В долги принципиально не залезали.,DELAY(10)
+YA05,Что это? ПЕРВАЯ УСТАЛОСТЬ!,25,Таймлайн,Открывает крутилку энергии (шкала Эн) + подсказка,—,Отказаться нельзя; крутилка всё равно открывается,Эн −1,,,—,—,"OPEN:Эн, TIMELINE"
+YA06,Уехать работать в другой город?,22–27,Развилка,Доход-множитель ×1.5 (карьера в городе),"Дн +2, Отн −1",Нет последствий,"Отн +1, Дн −1",Покоритель!,,Уехали в большой город и там пробились.,"Остались дома, среди своих.",—
+MD01,СВАДЬБА! Сказать «да»?,"28–32, если Отн открыта",Таймлайн,"Отн переходит в режим «реже балансировать» (дрейф вдвое медленнее); через 2 года разблокирует MD02",Отн +2,"Отн начинает таять даже при поддержке и со временем рвётся",Отн −2,ГОРЬКО!,Свобода — тоже выбор!,Создали семью и держались вместе.,Своей семьёй так и не обзавелись.,"TIMELINE, CHAIN→MD02, DELAY(5)"
+MD02,РЕБЁНОК! Завести?,свадьба +2,Таймлайн,Открывает шкалу ребёнка и кнопку-тамагочи (+ подсказка); разблокирует LT04,"Реб +2, Эн −1",Нет последствий,—,Поздравляем!,,Появились дети — и всё изменилось.,Детей не завели — и это тоже был выбор.,"OPEN:Реб, TIMELINE, CHAIN→LT04"
+MD03,Отпуск на море?,"30+, если на счету ≥ 60₽",Сцена,"Стоит 60₽; пока в отпуске заработок заблокирован, деньги тают","Эн +2, Дн −2",Нет последствий (карточка гаснет),Эн −1,Красиво жить не запретишь!,,Умели отдыхать — на снимках это видно.,Отпуска себе почти не позволяли.,BLOCK$
+MD04,Взять ипотеку на своё жильё?,"30–40, если на счету ≥ 40₽",Развилка,Первый взнос 40₽; затем −0.3₽/сек на 20 лет,Дн −2,Нет последствий,Дн +1,Домовладелец!,,Обзавелись своим домом.,Своего жилья так и не нажили.,DELAY(20)
+MD05,Помочь стареющим родителям?,40–55,Сцена,Нет последствий (только эффект шкал),"Дн −1, Эн −1",Нет последствий,—,Золотое сердце!,Ну и ну…,Были опорой родителям до конца.,Родителям почти не помогали — и потом это грызло.,—
+MD06,Второй шанс на любовь?,"~40, если Отн потеряна",Таймлайн,Снова открывает балансир отношений,Отн +2,Нет последствий,—,Вторая молодость!,,Любовь встретили во второй раз.,После расставания больше никого не подпустили.,"TIMELINE, ZONE"
+MD07,Завести блог и снимать контент?,"30–45, если CH08=ДА",Хобби,Нет последствий (только эффект шкал),"Эн +1, Дн −1",Нет последствий,—,Контент!,,Годами вели свой блог — и кому-то это правда заходило.,Свой блог так и не завели.,ROND
+CR00,КРИЗИС СРЕДНЕГО ВОЗРАСТА! БЛИЦ!,45–50,Блиц-старт,"Запускает блиц: 5 мыслей подряд, на ответ по 2 сек; надо жать «ВСЁ НОРМАЛЬНО»",—,Отказаться нельзя,—,БЛИЦ!,,—,—,"TIMELINE, BLITZ"
+CR01,«А чего ты вообще достиг?»,блиц,Блиц-мысль,"Нажал «ВСЁ НОРМАЛЬНО» (позиция случайна) — мысль уходит",—,"Промах или «О НЕТ» → провал +1 (2 провала запускают импульс-раунд)",—,,,—,—,BLITZ
+CR02,«Зачем всё это вообще?»,блиц,Блиц-мысль,Нажал «ВСЁ НОРМАЛЬНО» — мысль уходит,—,Промах → провал +1,—,,,—,—,BLITZ
+CR03,«Жизнь проходит мимо?»,блиц,Блиц-мысль,Нажал «ВСЁ НОРМАЛЬНО» — мысль уходит,—,Промах → провал +1,—,,,—,—,BLITZ
+CR04,«Ты вообще счастлив?»,блиц,Блиц-мысль,Нажал «ВСЁ НОРМАЛЬНО» — мысль уходит,—,Промах → провал +1,—,,,—,—,BLITZ
+CR05,«Уже поздно что-то менять?»,блиц,Блиц-мысль,Нажал «ВСЁ НОРМАЛЬНО» — мысль уходит,—,Промах → провал +1,—,,,—,—,BLITZ
+CR06,БРОСИТЬ ПАРТНЁРА ПРЯМО СЕЙЧАС!,"импульс-раунд (если ≥2 промаха)",Импульс,Немедленный развод; отношения рвутся,Отн −3,Импульс погашен,—,Оу! Радикально!,Выдержка!,В кризис всё сожгли и ушли.,В трудный момент удержались и остались.,INVERT
+CR07,КУПИТЬ МОТОЦИКЛ И ГНАТЬ 200?,импульс-раунд,Импульс,Нет последствий (только эффект шкал),"Эн +2, Дн −2",Импульс погашен,—,ГАЗУЕМ!,Скучно…,В сорок с лишним купили тот самый мотоцикл.,От безумных затей вовремя отказались.,"INVERT, RANDOM"
+CR08,ПОБРИТЬСЯ НАЛЫСО И УЕХАТЬ НА ШРИ-ЛАНКУ?,импульс-раунд,Импульс,Разовый минус деньгам; временный отрыв,Дн −2,Импульс погашен,—,Дзен!,,Побрились налысо и укатили на Шри-Ланку.,От побега на край света удержались.,INVERT
+CR09,ДЕПРЕССИЯ!,после кризиса (рандом),Событие,"Включает состояние «Депрессия» (экран ч/б, звук искажён) до прохождения мини-игры",Эн −1,Отказаться нельзя,—,,,Прошли через тёмную полосу — и выбрались.,—,"RANDOM, TIMELINE"
+LT01,Заняться здоровьем всерьёз?,55–65,Сцена,Замедляет падение здоровья (декей ×0.5),"Здр +2, Дн −1",Болезни ускоряют падение здоровья (декей ×2),"Здр −2, Дн −1",Ещё повоюем!,А вот это зря…,Под старость взялись за здоровье всерьёз.,На здоровье махнули рукой.,—
+LT02,Лечь на операцию?,"55–70, если здоровье забивал",Сцена,Стоит 120₽; здоровье +40%; игра продолжается,Здр +2,Риск: здоровье может уйти в ноль,Здр −2,,,Врачи собрали вас заново.,От операции отказались.,BLOCK$
+LT03,Выйти на пенсию?,60–65,Развилка,Заработок прекращается; деньги тают,"Эн +1, Дн −1",Нет последствий,"Дн +1, Эн −1",Заслуженный отдых!,,Ушли на покой и наконец выдохнули.,Работали до последнего.,—
+LT04,Ваш ребёнок вырос и больше не нуждается в помощи. Помочь всё равно?,"55–65, если MD02=ДА",Событие,Гасит шкалу ребёнка; портит отношения (навязчивость),Отн −1,Гасит шкалу ребёнка; всё в порядке,—,"Оу, как навязчиво!",,Опекали детей даже когда они давно выросли.,Выросших детей отпустили с миром.,TIMELINE
+LT05,Помириться со старым другом?,60–80,Сцена,Нет последствий (только эффект шкалы),Отн +1,Нет последствий,—,,,Старые обиды под конец отпустили.,С кем-то так и не помирились.,ROND
+LT07,Издать свои дневники книгой?,"75+, если CH07=ДА",Флейвор,Нет последствий (влияет на некролог),—,Нет последствий,—,Писатель!,,Свои дневники под старость издали книгой.,Записи так и остались лежать в столе.,ROND
+LT08,ПОРА ПОДЛЕЧИТЬСЯ! Оплатить?,"когда здоровье < 40% (возраст ≥ 30)",Здоровье/Система,Стоит 100₽; здоровье мгновенно до 80%,Здр → 80%,Ничего; риск смерти растёт,—,Как новенький!,,—,—,"BLOCK$, RANDOM"
+RND01,Лёгкие деньги от мутного типа?,20+,Соблазн,Через ~3 года — фатальный финал «За тобой пришли» (причина финала: криминал),Дн +2,Нет последствий,—,А вот это зря…,Мудро!,Ради денег играли с огнём.,Мутные схемы обходили стороной.,"DELAY(3), FATAL"
+RND03,"Кто-то предлагает тебе странный белый порошок. Интересно, что это?",18+,Соблазн,Мгновенный конец игры (причина финала: белый порошок),—,Нет последствий,—,,И правильно!,—,Опасный соблазн отвели рукой.,FATAL
+RND04,Вложиться в крипту? Это должно выстрелить!,25+,Соблазн,Рандом: деньги ×3 или в ноль,Дн ±3,Нет последствий,—,Ва-банк!,,Поверили в лёгкие иксы — та ещё лотерея.,В крипту так и не полезли.,RANDOM
+RND05,Роман на стороне?,если Отн открыта,Соблазн,Через ~2 года разбивает отношения → развод,Отн −3,Нет последствий,Отн +1,Ай-яй-яй!,,Один роман на стороне разрушил семью.,Верность сохранили.,DELAY(2)
+RND06,Селфи на краю крыши ради эффектного кадра?,любой,Фатальная,Мгновенный конец игры (причина финала: селфи на крыше),—,Нет последствий,—,"Ну, спасибо за игру!",,—,Ради лайков жизнью не рисковали.,"FATAL, RANDOM"
+KEK01,"Коуч: «раскрой потенциал за 3 дня»?",25+,Кек,−10₽; эффекта нет (кек),Дн −1,Нет последствий,—,Оно и видно!,,—,—,"NOCONS, ROND"
+KEK02,"Курс «как перестать покупать курсы»?",25+,Кек,−10₽; эффекта нет (кек),Дн −1,Нет последствий,—,Гениально! (нет),,—,—,"NOCONS, ROND"
+KEK03,Сетевой маркетинг: стать партнёром?,25+,Кек,−10₽; эффекта нет (кек),Дн −1,Нет последствий,—,,,—,—,"NOCONS, ROND"
+KEK04,Секта ЗОЖ: только сельдерей?,25+,Кек,Эффекта нет (кек),Здр +1,Нет последствий,—,,,—,—,"NOCONS, ROND"
+KEK05,Экстрасенс снимет порчу?,25+,Кек,−10₽; эффекта нет (кек),Дн −1,Нет последствий,—,,,—,—,"NOCONS, ROND"
+</script>
+
+<script>
+const PHASE = {I:"Интро",CH:"Детство",YA:"Юность",MD:"Взрослая",CR:"Кризис",LT:"Поздняя",RND:"Случайные",KEK:"Кек"};
+function phaseOf(id){const m=id.match(/^[A-Z]+/);return PHASE[m?m[0]:""]||"—";}
+
+function parseCSV(text){
+  const rows=[]; let row=[], field="", i=0, inQ=false;
+  text=text.replace(/\r/g,"");
+  while(i<text.length){
+    const c=text[i];
+    if(inQ){
+      if(c==='"'){ if(text[i+1]==='"'){field+='"';i+=2;continue;} inQ=false;i++;continue;}
+      field+=c;i++;continue;
+    }
+    if(c==='"'){inQ=true;i++;continue;}
+    if(c===','){row.push(field);field="";i++;continue;}
+    if(c==='\n'){row.push(field);field="";if(row.length>1||row[0]!=="")rows.push(row);row=[];i++;continue;}
+    field+=c;i++;
+  }
+  if(field!==""||row.length){row.push(field);if(row.length>1||row[0]!=="")rows.push(row);}
+  return rows;
+}
+
+const colClass=["id","card","when","type","cons","delta","cons","delta","host","host","necro","necro","flags"];
+
+function deltaHTML(v){
+  if(!v||v==="—")return '<span class="empty">—</span>';
+  return v.replace(/([+])(\d|\S)/g,'<span class="pos">$1$2</span>')
+          .replace(/([−-])(\d|\S)/g,'<span class="neg">$1$2</span>')
+          .replace(/±/g,'<span class="neg">±</span>');
+}
+function hostHTML(v){ return v?('<span class="bubble">'+v+'</span>'):'<span class="empty">—</span>'; }
+function flagsHTML(v){
+  if(!v||v==="—")return '<span class="empty">—</span>';
+  return v.split(/,\s*/).map(f=>{
+    let cls="flag";
+    if(/FATAL/.test(f))cls+=" fatal";
+    else if(/OPEN/.test(f))cls+=" open";
+    else if(/CHAIN/.test(f))cls+=" chain";
+    return '<span class="'+cls+'">'+f+'</span>';
+  }).join(" ");
+}
+function cell(v){ return (!v||v==="—")?'<span class="empty">—</span>':v; }
+
+let headers=[], data=[];
+const head=document.getElementById('head');
+const body=document.getElementById('body');
+
+function build(text){
+  const rows=parseCSV(text.trim());
+  headers=rows[0];
+  data=rows.slice(1).map(r=>{const o={};headers.forEach((h,i)=>o[h]=(r[i]||"").trim());return o;});
+  head.innerHTML="";
+  headers.forEach(h=>{const th=document.createElement('th');th.textContent=h;head.appendChild(th);});
+  buildChips();
+  apply();
+}
+
+function render(list){
+  body.innerHTML="";
+  list.forEach(o=>{
+    const tr=document.createElement('tr');
+    tr.dataset.phase=phaseOf(o.ID);
+    headers.forEach((h,i)=>{
+      const td=document.createElement('td');
+      td.className=colClass[i];
+      const v=o[h];
+      if(colClass[i]==="delta")td.innerHTML=deltaHTML(v);
+      else if(colClass[i]==="host")td.innerHTML=hostHTML(v);
+      else if(colClass[i]==="flags")td.innerHTML=flagsHTML(v);
+      else td.innerHTML=cell(v);
+      tr.appendChild(td);
+    });
+    body.appendChild(tr);
+  });
+  document.getElementById('count').textContent=list.length+" из "+data.length+" карточек";
+}
+
+let activePhase="Все", query="";
+const chipBox=document.getElementById('phaseChips');
+function buildChips(){
+  chipBox.innerHTML="";
+  ["Все",...Object.values(PHASE)].forEach(p=>{
+    const c=document.createElement('span');
+    c.className="chip"+(p==="Все"?" active":"");
+    c.textContent=p;
+    c.onclick=()=>{activePhase=p;[...chipBox.children].forEach(x=>x.classList.remove('active'));c.classList.add('active');apply();};
+    chipBox.appendChild(c);
+  });
+}
+function apply(){
+  const q=query.toLowerCase();
+  render(data.filter(o=>{
+    const okPhase=activePhase==="Все"||phaseOf(o.ID)===activePhase;
+    const okQ=!q||Object.values(o).some(v=>v.toLowerCase().includes(q));
+    return okPhase&&okQ;
+  }));
+}
+document.getElementById('q').addEventListener('input',e=>{query=e.target.value;apply();});
+
+(async function init(){
+  let text=null, src="встроенная копия";
+  try{
+    const r=await fetch('scenes.csv',{cache:'no-store'});
+    if(r.ok){ text=await r.text(); src="scenes.csv (live)"; }
+  }catch(e){}
+  if(!text){ text=document.getElementById('csv').textContent; }
+  document.getElementById('src').textContent="источник: "+src;
+  build(text);
+})();
+</script>
+</body>
+</html>
