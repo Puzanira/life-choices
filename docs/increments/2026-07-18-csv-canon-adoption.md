@@ -69,4 +69,4 @@
 ## 6. Playtest verdict
 
 `Playtest ok:` — (утренний плейтест, ночной режим)
-`Landed:` —
+`Landed:` 9b3d450 (bookkeeping-коммитом; авторитетно — в handoff)
