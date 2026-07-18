@@ -73,5 +73,5 @@
 
 ## 6. Playtest verdict
 
-`Playtest ok:` —
-`Landed:` —
+`Playtest ok:` — (жду плейтест основательницы)
+`Landed:` 023aedf
