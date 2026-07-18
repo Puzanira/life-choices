@@ -62,6 +62,7 @@ namespace ThanksNoThanks.Tests.PlayMode
                         break;
                     }
                     fake.Confirm();                      // dismiss the earlier money hint and press on
+                    yield return null;                   // let Update clear the same-frame dismiss guard
                     continue;
                 }
                 fake.Fire(GameInput.MoneyTick);
@@ -71,6 +72,62 @@ namespace ThanksNoThanks.Tests.PlayMode
             }
 
             Assert.IsTrue(sawEnergyHint, "the energy tutorial appeared when energy opened at 25");
+
+            // Same-card liveness (founder Gate-2): the energy bar had the same one-card reveal lag as
+            // the money pill — dismissing the hint must reveal the bar IMMEDIATELY, not one card later.
+            fake.Confirm();                              // Enter dismisses (the only dismiss key)
+            Assert.IsFalse(driver.TutorialShowing, "energy hint closed on Enter");
+            Assert.IsTrue(driver.EnergyGroup.activeSelf,
+                "energy bar visible the moment the hint closes — no one-card lag");
+
+            Object.Destroy(go);
+            yield return null;
+        }
+
+        [UnityTest]
+        public IEnumerator HealthHint_Dismiss_SameFrameChord_DoesNotLeak_Crank_Or_EnergyPulse()
+        {
+            // The EnergyPulse variant of the same-frame chord (skeptic HIGH), at the HEALTH hint (age 30)
+            // where energy is open and money is bankable — so a leaked crank/pulse would be observable.
+            var driver = Boot(out var go, out var fake);
+            yield return null;
+            fake.Confirm();                              // → playing
+
+            // Drive to the HEALTH hint (age 30), dismissing the money(18) + energy(25) hints on the way.
+            bool atHealth = false;
+            int guard = 0;
+            while (guard++ < 20000 && driver.Game.State == GameState.Playing && !atHealth)
+            {
+                if (driver.TutorialShowing)
+                {
+                    if (driver.TutorialText.text.Contains("ТАЯТЬ")) { atHealth = true; break; }
+                    fake.Confirm();                      // dismiss money/energy hint
+                    yield return null;                   // let Update clear the same-frame dismiss guard
+                    continue;
+                }
+                fake.Fire(GameInput.MoneyTick);
+                driver.Game.Tick(0.25f);
+                if (driver.Game.CurrentCard != null && driver.Game.CardTimer < 3.5f)
+                    fake.No();
+            }
+            Assert.IsTrue(atHealth, "reached the health hint at 30");
+            Assert.IsTrue(driver.Game.Paused, "health hint paused the game");
+            Assert.IsTrue(driver.Game.EnergyOpen, "energy is open (drained below full) by 30");
+
+            // Cap breathes while paused so a leaked crank WOULD land — proving the guard, not the cap.
+            yield return new WaitForSeconds(0.3f);
+            double money0 = driver.Game.Money;
+            int energy0 = driver.Game.Scales.Energy;
+
+            // The chord in source order: Confirm FIRST, then MoneyTick + EnergyPulse the SAME frame.
+            fake.Confirm();
+            Assert.IsFalse(driver.TutorialShowing, "Enter dismissed the health hint");
+            fake.Fire(GameInput.MoneyTick);
+            fake.Fire(GameInput.EnergyPulse);
+            Assert.AreEqual(money0, driver.Game.Money,
+                "no crank leaked onto the dismiss frame (strong observable — cap was armed)");
+            Assert.AreEqual(energy0, driver.Game.Scales.Energy,
+                "no energy pulse leaked onto the dismiss frame (same guarded path)");
 
             Object.Destroy(go);
             yield return null;

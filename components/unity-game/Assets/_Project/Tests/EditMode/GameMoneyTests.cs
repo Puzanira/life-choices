@@ -360,15 +360,24 @@ namespace ThanksNoThanks.Tests
             return new Game(deck, coin: () => false);
         }
 
+        // «active» = a COMPETENT player working all their hands: cranks money AND breathes to hold
+        // energy (post-Gate-2-r3 energy needs breathing or you burn out and die). «lazy» does neither —
+        // it coasts, so it slides into burnout/energy death and ends in the red. This keeps the smoke a
+        // clean money-balance contrast (engaged banks money over a full life; disengaged does not).
         private static double RunLifeMoney(bool active)
         {
             var g = FillerLife();
             g.StartLife(); No(g);                     // start the age timer
-            int guard = 0;
+            int guard = 0, sinceBreath = 0;
             while (g.State == GameState.Playing && guard++ < 100000)
             {
                 g.Tick(0.25f);                        // 0.25s steps
                 if (active && g.MoneyOpen) g.HandleInput(GameInput.MoneyTick);  // ≈4 ticks/s focused
+                if (active && g.EnergyOpen && ++sinceBreath >= 5)              // ≈ every 1.25s
+                {
+                    g.HandleInput(GameInput.EnergyPulse);
+                    sinceBreath = 0;
+                }
             }
             return g.Money;
         }

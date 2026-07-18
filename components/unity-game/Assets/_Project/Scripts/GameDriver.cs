@@ -96,6 +96,11 @@ namespace ThanksNoThanks
         private GameObject _tutorialOverlay;
         private Text _tutorialText;
         private bool _tutorialShowing;
+        // Same-frame swallow guard: in one input poll the source yields Confirm BEFORE MoneyTick/E, so an
+        // Enter+Space chord could dismiss a hint then leak the later same-frame crank into gameplay. When
+        // a Confirm dismisses a hint we arm this; the rest of THIS frame's non-Confirm input is swallowed.
+        // Reset at the top of Update so the next frame behaves normally.
+        private bool _dismissedThisFrame;
         private bool _moneyTutorialSeen;   // one-shot per life; reset on a fresh life
         private bool _energyTutorialSeen;
         private bool _healthTutorialSeen;
@@ -116,8 +121,8 @@ namespace ThanksNoThanks
         private Coroutine _cardAnim;
         private Coroutine _moneyPulse;
 
-        // Income cap (~5/s): applied ONLY on the gameplay-crank branch in OnInput — Space-as-CONFIRM
-        // (opener/finale/tutorial) bypasses it entirely, so a recent crank can never eat a confirm.
+        // Income cap (~5/s): applied ONLY on the gameplay-crank branch in OnInput. Space does nothing
+        // outside Playing (crank-only), so the cap never interacts with any confirm.
         private readonly MoneyTickThrottle _crankCap = new();
 
         private const string MoneyTutorialText =
@@ -213,33 +218,37 @@ namespace ThanksNoThanks
         }
 
         /// <summary>
-        /// Input funnel. The ONLY place the state-dependent Space re-map lives (contract): a Space crank
-        /// (MONEY_TICK) doubles as CONFIRM in the Opener/Finale and while the tutorial overlay is up —
-        /// those paths are INSTANT and unthrottled (the source never swallows a discrete keydown).
-        /// The ~5/s income cap applies only when the tick actually cranks money during gameplay.
-        /// While the overlay is up, all other input is swallowed. Pure <see cref="Game"/> never sees
-        /// any of this — it gets a clean semantic event.
+        /// Input funnel. Space (MONEY_TICK / repeat) is the money crank and ONLY that: it cranks during
+        /// Playing and is fully inert everywhere else — opener, finale AND tutorial (founder Gate-2:
+        /// holding/mashing the crank must never confirm, start, restart, or skip a hint). Enter /
+        /// Numpad-Enter (CONFIRM) is the sole key that starts the game, dismisses a hint, and restarts
+        /// from the finale. The ~5/s income cap applies only on the gameplay-crank branch. While the
+        /// overlay is up, all other input is swallowed. Pure <see cref="Game"/> gets a clean semantic event.
         /// </summary>
         private void OnInput(GameInput input)
         {
+            // A hint just closed THIS frame (Confirm dismiss): swallow every later same-frame event so a
+            // chorded Enter+Space/E can't leak a crank/pulse onto the frame the overlay closed. Only a
+            // further Confirm passes (harmless during Playing). Cleared next frame in Update.
+            if (_dismissedThisFrame && input != GameInput.Confirm) return;
+
             if (_tutorialShowing)
             {
-                // Only a FRESH press (or Enter) dismisses; held-Space repeats are inert here —
-                // holding through money-open must not insta-dismiss the hint.
-                if (input == GameInput.Confirm || input == GameInput.MoneyTick) DismissTutorial();
+                // FOUNDER DECISION (Gate-2 playtest): hints dismiss on Enter ONLY. She holds/mashes
+                // Space for the crank — fresh Space presses AND repeats are both inert here, so a
+                // hint can never be skipped unread. (Overrides the earlier «fresh Space dismisses».)
+                if (input == GameInput.Confirm) { DismissTutorial(); _dismissedThisFrame = true; }
                 return;
             }
 
             if (input == GameInput.MoneyTick || input == GameInput.MoneyTickRepeat)
             {
-                if (_game.State != GameState.Playing)
-                {
-                    // Fresh Space = CONFIRM on opener/finale — instant. Autorepeat is inert: holding
-                    // Space through a life ending must never auto-confirm screens into a new life.
-                    if (input == GameInput.MoneyTick)
-                        _game.HandleInput(GameInput.Confirm);
-                    return;
-                }
+                // FOUNDER DECISION (Gate-2 round 2): Space is the money crank and NOTHING else — it must
+                // never confirm/start/restart. Outside Playing it is fully inert (she holds Space through
+                // the necrolog and it must not skip the payoff screen). This also matches the hardware
+                // abstraction: the crank encoder and the CONFIRM button are separate physical controls,
+                // so the crank must never fire a confirm. Enter (CONFIRM) is the sole confirm key.
+                if (_game.State != GameState.Playing) return;
                 if (!_crankCap.TryAccept()) return;         // income cap (anti-mashgun) — gameplay only
                 _game.HandleInput(GameInput.MoneyTick);     // Game sees only the semantic crank event
                 if (_game.MoneyOpen && isActiveAndEnabled)  // pill pulse on each PAYING tick
@@ -278,6 +287,7 @@ namespace ThanksNoThanks
 
         private void Update()
         {
+            _dismissedThisFrame = false;         // fresh frame → the same-frame dismiss-swallow guard clears
             if (_game == null) return;
             _crankCap.Advance(Time.deltaTime);   // deterministic clock for the income cap
             _breath.Advance(Time.deltaTime);     // deterministic clock for the breathing rhythm
@@ -293,6 +303,10 @@ namespace ThanksNoThanks
                 float rel = Mathf.Clamp01(s.Relationships / 100f);
                 _balancerMarker.anchoredPosition = new Vector2((rel - 0.5f) * _balancerTrackWidth, 0f);
                 if (_burnoutPlate.activeSelf != _game.Burnout) _burnoutPlate.SetActive(_game.Burnout);
+                // Age-gated reveals run every frame (SetActive is a no-op on same value): a widget
+                // opening MID-CARD (18/25/30 crossings) appears the moment its age is crossed instead
+                // of waiting for the next card resolution (founder Gate-2 bug, uniform fix).
+                ApplyAgeGates(_game.Age);
 
                 float remaining = Mathf.Max(0f, _game.CardTimer);
                 _timerText.text = Mathf.CeilToInt(remaining).ToString();
@@ -393,11 +407,11 @@ namespace ThanksNoThanks
             start.type = Image.Type.Sliced;
             Anchor(start.rectTransform, new Vector2(0.5f, 0.17f), new Vector2(520, 150));
             var startText = NewText("StartText", start.transform,
-                "▸ НАЧАТЬ ЖИЗНЬ", 46, TextAnchor.MiddleCenter, Ink, _display);
+                "▸ НАЧАТЬ ЖИЗНЬ — Enter", 40, TextAnchor.MiddleCenter, Ink, _display);
             Stretch(startText.rectTransform);
 
             var hint = NewText("Hint", _openerPanel.transform,
-                "←  ДА          →  СПАСИБО, НЕ НАДО          Enter / Пробел — НАЧАТЬ",
+                "←  ДА          →  СПАСИБО, НЕ НАДО          Enter — НАЧАТЬ",
                 28, TextAnchor.MiddleCenter, Muted, _body);
             Anchor(hint.rectTransform, new Vector2(0.5f, 0.06f), new Vector2(1500, 60));
         }
@@ -571,7 +585,7 @@ namespace ThanksNoThanks
             again.type = Image.Type.Sliced;
             Anchor(again.rectTransform, new Vector2(0.5f, 0.10f), new Vector2(560, 140));
             var againText = NewText("AgainText", again.transform,
-                "▸ НАЧАТЬ ЗАНОВО", 44, TextAnchor.MiddleCenter, Ink, _display);
+                "▸ ПРОЖИТЬ ЗАНОВО — Enter", 38, TextAnchor.MiddleCenter, Ink, _display);
             Stretch(againText.rectTransform);
         }
 
@@ -592,10 +606,12 @@ namespace ThanksNoThanks
             _tutorialText = NewText("TutBody", modal.transform, MoneyTutorialText, 40, TextAnchor.MiddleCenter, Ink, _body);
             Anchor(_tutorialText.rectTransform, new Vector2(0.5f, 0.52f), new Vector2(1100, 320));
 
+            // «Enter» is spelled out on the plate (founder Gate-2): Space is the crank and must never
+            // dismiss a hint, so the dismiss key has to be discoverable right on the button.
             var plate = NewSprite("GotItPlate", modal.transform, Sprite("plate-yes"));
             plate.type = Image.Type.Sliced;
-            Anchor(plate.rectTransform, new Vector2(0.5f, 0.14f), new Vector2(420, 120));
-            var plateTxt = NewText("GotItText", plate.transform, "ПОНЯТНО ▸", 40, TextAnchor.MiddleCenter, Ink, _display);
+            Anchor(plate.rectTransform, new Vector2(0.5f, 0.14f), new Vector2(480, 120));
+            var plateTxt = NewText("GotItText", plate.transform, "ПОНЯТНО — Enter ▸", 32, TextAnchor.MiddleCenter, Ink, _display);
             Stretch(plateTxt.rectTransform);
 
             _tutorialOverlay.SetActive(false);
@@ -626,6 +642,15 @@ namespace ThanksNoThanks
             _tutorialShowing = false;
             _tutorialOverlay.SetActive(false);
             _game.Paused = false;
+            // Root cause of the «one card late» founder bug: the 18/25/30 crossings happen MID-CARD
+            // (inside Game.Tick), but the age-gated HUD reveal only ran on card-advance/state-change.
+            // Refresh it NOW so the just-opened widget (money pill / energy / health bar) is visible
+            // and live on THIS card the moment the hint closes.
+            if (_game.State == GameState.Playing)
+            {
+                UpdateHudValues();
+                ApplyAgeGates(_game.Age);
+            }
         }
 
         // ================================================================ refresh / events

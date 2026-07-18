@@ -55,7 +55,11 @@ namespace ThanksNoThanks
 
         // ---- live energy (tunable; canon §Энергия) ----
         public const int EnergyOpenAge = 25;              // энергия открывается в 25 (YA05)
-        public const double EnergyDrainPerSec = 0.7;      // дренаж ≈0.7%/сек, пока энергия открыта
+        // Drain is INTENTIONALLY steeper than health's: energy REQUIRES active breathing (founder
+        // Gate-2 r3). Passive → burnout mid-adulthood → «полное выгорание» if ignored. A valid breath
+        // cadence (≤1.5s apart, +3% each) recovers ≥2%/s, more than offsetting this — so it's doable,
+        // it just costs hand-time vs cranking+answering. #1 energy tunable the founder will feel-tune.
+        public const double EnergyDrainPerSec = 1.7;      // дренаж ≈1.7%/сек, пока энергия открыта
         public const int BreathEnergyGain = 3;            // корректный ритм-цикл дыхания → +3%
 
         // ---- burnout (temporary; canon §Энергия §Выгорание) ----

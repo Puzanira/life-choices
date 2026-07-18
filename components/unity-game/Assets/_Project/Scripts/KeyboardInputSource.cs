@@ -8,12 +8,12 @@ namespace ThanksNoThanks
     /// <summary>
     /// Keyboard implementation of <see cref="IInputSource"/>.
     /// ← = ДА (ANSWER_YES), → = СПАСИБО НЕ НАДО (ANSWER_NO), Enter/Numpad-Enter = CONFIRM,
-    /// Пробел = MONEY_TICK. Every discrete Space keydown emits IMMEDIATELY (never swallowed — outside
-    /// gameplay Space doubles as CONFIRM via the driver re-map and must be instant); held Space
-    /// auto-repeats ~4/с via <see cref="MoneyCrankAutoRepeat"/>. The ~5/с anti-mash INCOME cap lives
-    /// in the driver's gameplay-crank branch (<see cref="MoneyTickThrottle"/>), not here. The
-    /// state-dependent Space→CONFIRM re-map lives in the driver wiring (<see cref="GameDriver"/>),
-    /// NOT here and NOT in <see cref="Game"/> — this source stays a pure key→semantic mapping.
+    /// Пробел = MONEY_TICK. This source is a PURE key→semantic mapping: it always emits MONEY_TICK for
+    /// Space (fresh) / MONEY_TICK_REPEAT (held). The driver treats Space as the money crank ONLY — inert
+    /// outside Playing — so Space never confirms/starts/restarts (founder Gate-2; also matches the
+    /// hardware: crank encoder and CONFIRM button are separate controls). Held Space auto-repeats ~4/с
+    /// via <see cref="MoneyCrankAutoRepeat"/>; the ~5/с anti-mash INCOME cap lives in the driver's
+    /// gameplay-crank branch (<see cref="MoneyTickThrottle"/>), not here.
     /// A future SerialInputSource (Arduino/COM) is a drop-in replacement of this one class.
     /// </summary>
     public sealed class KeyboardInputSource : MonoBehaviour, IInputSource

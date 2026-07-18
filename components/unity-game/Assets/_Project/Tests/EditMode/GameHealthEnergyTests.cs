@@ -465,25 +465,66 @@ namespace ThanksNoThanks.Tests
             Assert.AreEqual(70, g.Scales.Health, "30% + 40% = 70% — the real row heals, not +2");
         }
 
-        // ================================================================ clean-run calibration
+        // ================================================================ energy REQUIRES breathing (r3)
 
-        [Test]
-        public void CleanRun_WorstCasePace_SurvivesToNaturalEnding()
+        private static List<Card> AdultFiller()
         {
-            // The slowest possible clean life: every card times out (max real-time at age≥30/≥25 → max
-            // decay/drain) and no bad choices. Calibration «ничего плохого → доживаешь» must hold: the
-            // run reaches a NATURAL old-age tone, never a health/energy death.
             var cards = new List<Card>();
             for (int a = 18; a <= 84; a += 3) cards.Add(Plain("F" + a, a));
-            var g = NewGame(() => false, cards.ToArray());
-            g.StartLife(); No(g);
-            int guard = 0;
-            while (g.State == GameState.Playing && guard++ < 100000) g.Tick(0.25f);
-
-            Assert.AreEqual(GameState.Finale, g.State, "the clean run reaches an ending");
-            CollectionAssert.Contains(new[] { "спокойная старость", "весёлая старость", "одинокая старость" },
-                g.Cause, $"clean run survives to old age, not a burnout death (got «{g.Cause}»)");
+            return cards;
         }
+
+        [Test]
+        public void NoBreathing_SlidesIntoBurnout_ThenEnergyDeath()
+        {
+            // A player who NEVER breathes must burn out mid-adulthood and, ignoring it, die of energy.
+            // «Дыхание» is a real cost, not decoration — the third hand has to be worked.
+            var g = NewGame(() => false, AdultFiller().ToArray());
+            g.StartLife(); No(g);
+            bool sawBurnout = false;
+            int guard = 0;
+            while (g.State == GameState.Playing && guard++ < 100000)
+            {
+                g.Tick(0.25f);                       // no EnergyPulse — ignoring the breathing lever
+                if (g.Burnout) sawBurnout = true;
+            }
+            Assert.AreEqual(GameState.Finale, g.State);
+            Assert.IsTrue(sawBurnout, "passive player hits burnout (income ×0.5) partway through adult life");
+            Assert.AreEqual("полное выгорание", g.Cause,
+                "ignoring the breathing lever is fatal — energy death is reachable by neglect");
+        }
+
+        [Test]
+        public void ModestBreathing_StaysAboveBurnout_ToANonEnergyEnding()
+        {
+            // A modest, sustainable cadence (a valid breath every ~1.25s) more than offsets the drain:
+            // the player stays comfortably above burnout and reaches a non-energy ending. Doable — it
+            // just costs hand-time. (Health still survives on its own 0.7%/s calibration → the run ends
+            // naturally, proving neither scale kills a competent, no-bad-choices player.)
+            var g = NewGame(() => false, AdultFiller().ToArray());
+            g.StartLife(); No(g);
+            int sinceBreath = 0, guard = 0;
+            int minEnergyWhileOpen = 100;
+            while (g.State == GameState.Playing && guard++ < 100000)
+            {
+                g.Tick(0.25f);
+                if (g.EnergyOpen && ++sinceBreath >= 5)   // ≈ every 1.25s (a valid rhythm cadence)
+                {
+                    Pulse(g);
+                    sinceBreath = 0;
+                }
+                if (g.EnergyOpen) minEnergyWhileOpen = System.Math.Min(minEnergyWhileOpen, g.Scales.Energy);
+            }
+            Assert.AreEqual(GameState.Finale, g.State);
+            Assert.AreNotEqual("полное выгорание", g.Cause, "modest breathing prevents the energy death");
+            Assert.IsFalse(g.Burnout, "never left in burnout at the end");
+            Assert.Greater(minEnergyWhileOpen, BurnoutEnterEnergyReadable(),
+                "energy stayed comfortably above the burnout threshold the whole adult life");
+            CollectionAssert.Contains(new[] { "спокойная старость", "весёлая старость", "одинокая старость" },
+                g.Cause, $"reaches a natural old-age ending (got «{g.Cause}»)");
+        }
+
+        private static int BurnoutEnterEnergyReadable() => Game.BurnoutEnterEnergyAtOrBelow;
 
         // ================================================================ opens + hint pause + restart
 

@@ -8,9 +8,11 @@ namespace ThanksNoThanks.Tests.PlayMode
 {
     /// <summary>
     /// The S5 money tutorial and the Space re-map through the REAL driver: overlay on first open,
-    /// full freeze (age + drains + card timer) while up, INSTANT Space dismiss right after cranking
-    /// (the skeptic's swallow scenario), instant Space-confirm in Opener/Finale, mid-timer card
-    /// resume, and tutorial re-arm on restart. Time is driven by explicit Game.Tick calls.
+    /// full freeze (age + drains + card timer) while up, Enter-ONLY dismissal (founder Gate-2:
+    /// Space presses AND repeats are inert on the hint — mashing the crank must never skip it),
+    /// instant Space-confirm in Opener/Finale, mid-timer card resume, tutorial re-arm on restart,
+    /// and the money HUD + crank going live IMMEDIATELY on dismissal (same card, no one-card lag).
+    /// Time is driven by explicit Game.Tick calls.
     /// </summary>
     public class MoneyTutorialTests
     {
@@ -40,7 +42,7 @@ namespace ThanksNoThanks.Tests.PlayMode
         }
 
         [UnityTest]
-        public IEnumerator Tutorial_Freezes_All_And_SpaceDismisses_RightAfterCranking_TimerResumes()
+        public IEnumerator Tutorial_Freezes_All_And_SpaceDoesNotDismiss_OnlyEnterDoes_TimerResumes()
         {
             var driver = Boot(out var go, out var fake);
             yield return null;                             // Start wires input + MoneyOpened
@@ -63,16 +65,19 @@ namespace ThanksNoThanks.Tests.PlayMode
             Assert.AreEqual(timer0, driver.Game.CardTimer, "card timer frozen (no timeout under pause)");
             Assert.AreEqual(money0, driver.Game.Money, "money frozen (cost + drains)");
 
-            // Held-Space autorepeat is INERT on the tutorial: holding through money-open must not
-            // insta-dismiss the hint — only a fresh keydown (or Enter) may.
+            // FOUNDER DECISION (Gate-2), REVERSED from the original design: Space must NOT dismiss the
+            // hint — she holds/mashes Space for the crank and was skipping every hint unread. Both the
+            // held-Space autorepeat AND a fresh Space press are inert here; ONLY Enter dismisses.
             fake.Fire(GameInput.MoneyTickRepeat);
             Assert.IsTrue(driver.TutorialShowing, "autorepeat does NOT dismiss the tutorial");
             Assert.IsTrue(driver.Game.Paused, "still paused after an inert repeat");
 
-            // The swallow scenario: the last crank was ≤0.25s ago (cap window!) — a FRESH Space press
-            // must STILL dismiss instantly, because the income cap only guards the gameplay-crank branch.
             fake.Fire(GameInput.MoneyTick);
-            Assert.IsFalse(driver.TutorialShowing, "Space dismissed the tutorial instantly after a crank");
+            Assert.IsTrue(driver.TutorialShowing, "a FRESH Space press does NOT dismiss either (founder)");
+            Assert.IsTrue(driver.Game.Paused, "still paused after the inert fresh press");
+
+            fake.Confirm();                                // Enter — the ONLY dismiss key
+            Assert.IsFalse(driver.TutorialShowing, "Enter dismissed the tutorial");
             Assert.IsFalse(driver.TutorialOverlay.activeSelf, "overlay hidden");
             Assert.IsFalse(driver.Game.Paused, "game unpaused");
 
@@ -88,13 +93,86 @@ namespace ThanksNoThanks.Tests.PlayMode
         }
 
         [UnityTest]
-        public IEnumerator Space_Confirms_Instantly_InFinaleAndOpener_And_TutorialReArms_OnRestart()
+        public IEnumerator MoneyHud_And_Crank_AreLive_ImmediatelyAfterDismiss_SameCard()
         {
+            // Founder Gate-2 bug: after «появилась работа» closed, the pill + crank only went live one
+            // card later (the age-gated HUD reveal ran on card-advance only, but the 18-crossing
+            // happens mid-card). Now dismissal refreshes the gates: same card, instantly live.
+            var driver = Boot(out var go, out var fake);
+            yield return null;
+            fake.Confirm();                                // opener → playing
+            PlayUntilTutorial(driver, fake);
+
+            var card = driver.Game.CurrentCard;
+            Assert.IsNotNull(card, "a card is up under the tutorial");
+
+            fake.Confirm();                                // Enter dismisses
+            Assert.IsFalse(driver.TutorialShowing, "hint closed");
+            Assert.IsTrue(driver.MoneyPill.activeSelf,
+                "money pill visible the MOMENT the hint closes — not one card later");
+
+            yield return new WaitForSeconds(0.25f);        // let the ~5/s income-cap clock breathe
+            Assert.AreSame(card, driver.Game.CurrentCard, "still the SAME card (timer was frozen ≥3s)");
+
+            double before = driver.Game.Money;
+            fake.Fire(GameInput.MoneyTick);
+            Assert.Greater(driver.Game.Money, before,
+                "Space pays income immediately on this same card — the crank is live");
+
+            Object.Destroy(go);
+            yield return null;
+        }
+
+        [UnityTest]
+        public IEnumerator Tutorial_Dismiss_SameFrameChord_DoesNotLeakCrank()
+        {
+            // Skeptic HIGH: in one input poll the source yields Confirm BEFORE MoneyTick, so an Enter+Space
+            // chord could dismiss the hint then leak the later same-frame crank into gameplay. The
+            // same-frame swallow guard must eat everything but the dismiss on the frame the hint closes.
+            var driver = Boot(out var go, out var fake);
+            yield return null;
+            fake.Confirm();                                // opener → playing
+            PlayUntilTutorial(driver, fake);
+
+            // Let the ~5/s income cap breathe WHILE PAUSED so a leaked crank WOULD land (proves the guard,
+            // not the cap, is what swallows it). Update advances the cap clock even under the pause.
+            yield return new WaitForSeconds(0.3f);
+            Assert.IsTrue(driver.TutorialShowing, "still on the hint (WaitForSeconds didn't dismiss)");
+            double money0 = driver.Game.Money;
+
+            // The chord, in source order: Confirm FIRST (dismisses), then MoneyTick + repeat SAME frame.
+            fake.Confirm();
+            Assert.IsFalse(driver.TutorialShowing, "Enter dismissed the hint");
+            fake.Fire(GameInput.MoneyTick);
+            fake.Fire(GameInput.MoneyTickRepeat);
+            Assert.AreEqual(money0, driver.Game.Money,
+                "no crank leaked onto the dismiss frame (fresh Space AND repeat both swallowed)");
+
+            // Next frame everything is normal again: Space cranks (cap re-armed by the wait).
+            yield return new WaitForSeconds(0.3f);
+            double money1 = driver.Game.Money;
+            fake.Fire(GameInput.MoneyTick);
+            Assert.Greater(driver.Game.Money, money1, "Space cranks normally on the following frame");
+
+            Object.Destroy(go);
+            yield return null;
+        }
+
+        [UnityTest]
+        public IEnumerator Space_NeverConfirms_EnterIs_TheSoleConfirmKey_AndTutorialReArms()
+        {
+            // REVERSED (founder Gate-2 round 2): Space is the crank ONLY — it must never start, restart,
+            // or advance a screen. She holds Space through the necrolog; it must not skip the payoff.
             var driver = Boot(out var go, out var fake);
             yield return null;
 
-            fake.Fire(GameInput.MoneyTick);                // Space on the OPENER = CONFIRM → playing
-            Assert.AreEqual(GameState.Playing, driver.Game.State, "Space started the life");
+            // Opener: neither a fresh Space nor a held repeat may start the life — only Enter.
+            fake.Fire(GameInput.MoneyTick);
+            Assert.AreEqual(GameState.Opener, driver.Game.State, "fresh Space does NOT start from the opener");
+            fake.Fire(GameInput.MoneyTickRepeat);
+            Assert.AreEqual(GameState.Opener, driver.Game.State, "held Space does NOT start either");
+            fake.Confirm();                                // Enter is the sole start key
+            Assert.AreEqual(GameState.Playing, driver.Game.State, "Enter started the life");
 
             // Life 1: all-НЕТ without ticking (age stays put → no tutorial) straight to the finale.
             int guard = 0;
@@ -102,27 +180,25 @@ namespace ThanksNoThanks.Tests.PlayMode
                 fake.No();
             Assert.AreEqual(GameState.Finale, driver.Game.State, "reached the finale");
 
-            // Held-Space autorepeat is INERT outside gameplay: a player who cranked into the finale
-            // with Space held must NOT auto-confirm through the screens into a new life.
+            // The core founder bug: holding/mashing Space through the necrolog must NOT restart —
+            // the payoff screen stays up until she presses Enter.
             fake.Fire(GameInput.MoneyTickRepeat);
-            fake.Fire(GameInput.MoneyTickRepeat);
+            fake.Fire(GameInput.MoneyTick);
+            fake.Fire(GameInput.MoneyTick);
             Assert.AreEqual(GameState.Finale, driver.Game.State,
-                "autorepeat events do not confirm the finale (no auto-restart while holding Space)");
+                "no amount of Space (fresh or held) leaves the finale — the necrolog is not skipped");
 
-            // Two FRESH Space presses back-to-back — zero cap-clock advance between them. Both must
-            // land: finale → opener → new life. (The old source-side throttle swallowed the second.)
+            fake.Confirm();                                // Enter — the sole restart key
+            Assert.AreEqual(GameState.Opener, driver.Game.State, "Enter restarted from the finale → opener");
             fake.Fire(GameInput.MoneyTick);
-            Assert.AreEqual(GameState.Opener, driver.Game.State, "fresh Space confirmed the finale instantly");
-            fake.Fire(GameInput.MoneyTickRepeat);
-            Assert.AreEqual(GameState.Opener, driver.Game.State, "autorepeat is inert on the opener too");
-            fake.Fire(GameInput.MoneyTick);
-            Assert.AreEqual(GameState.Playing, driver.Game.State,
-                "an immediate second fresh Space also landed (no throttle outside gameplay)");
+            Assert.AreEqual(GameState.Opener, driver.Game.State, "Space still inert on the opener");
+            fake.Confirm();                                // Enter → new life
+            Assert.AreEqual(GameState.Playing, driver.Game.State, "Enter started life 2");
 
-            // Life 2: the tutorial re-arms — it must show again at 18 and CONFIRM dismisses it.
+            // Life 2: the tutorial re-arms — it must show again at 18 and Enter (CONFIRM) dismisses it.
             PlayUntilTutorial(driver, fake);
             Assert.IsTrue(driver.Game.Paused, "re-armed tutorial pauses again");
-            fake.Confirm();                                // Enter (CONFIRM) dismisses too
+            fake.Confirm();                                // Enter (CONFIRM) dismisses
             Assert.IsFalse(driver.TutorialShowing, "CONFIRM dismissed the re-armed tutorial");
             Assert.IsFalse(driver.Game.Paused, "unpaused after dismissal");
 

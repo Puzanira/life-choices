@@ -12,8 +12,8 @@ namespace ThanksNoThanks
     {
         AnswerYes,       // ДА          (keyboard: ← )
         AnswerNo,        // СПАСИБО, НЕ НАДО (keyboard: → )
-        Confirm,         // start / restart (keyboard: Enter; fresh Space in Opener/Finale/tutorial — driver-mapped)
-        MoneyTick,       // крутилка денег, FRESH physical keydown (may double as CONFIRM outside gameplay)
+        Confirm,         // start / dismiss-hint / restart — keyboard Enter ONLY (the sole confirm key)
+        MoneyTick,       // крутилка денег, FRESH physical keydown — crank-only, inert outside gameplay
 
         /// <summary>
         /// Autorepeat crank from HELD Space (~4/с) — input-layer kind, income-only. The driver lets it
