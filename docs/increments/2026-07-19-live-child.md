@@ -88,4 +88,4 @@
 ## 6. Playtest verdict
 
 `Playtest ok:` — (утро, Gate 2)
-`Landed:` — (ночной режим: код + машинный гейт зелёные; посадка/коммит — за основательницей утром)
+`Landed:` 3489e95 (bookkeeping; авторитетно — handoff)
