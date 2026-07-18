@@ -121,6 +121,24 @@ namespace ThanksNoThanks
         // Breath rhythm validator (E in a calm cadence → valid pulse → +energy). Clock advanced in Update.
         private readonly BreathRhythm _breath = new();
 
+        // ---- Host (Ведущий): speech bubble (S3) + rubric banner (S4) ----
+        // Tunables (defaults; noted in the report). Both clocks are injected real-time via Update.
+        public const float BubbleSeconds = 2f;   // speech bubble auto-hide (~2s)
+        public const float BannerSeconds = 1.5f; // rubric banner brief announce (~1.5s), then it clears
+
+        // The banner is a NON-blocking announcement band: it does NOT pause Game and does NOT swallow
+        // input (so it can never soft-lock, and the direct-Tick test loops keep flowing). It auto-hides
+        // on its own ~1.5s clock AND is replaced/cleared the moment the next card is drawn.
+        private HostVoice _voice;
+        private readonly TimedReveal _bubbleTimer = new(BubbleSeconds);
+        private readonly TimedReveal _bannerTimer = new(BannerSeconds);
+
+        private GameObject _hostBubble;   // yellow bubble.png (9-slice), S3 corner
+        private Text _bubbleText;
+        private GameObject _bannerRoot;   // rubric band (S4), over the card's upper area
+        private Image _bannerBand;
+        private Text _bannerText;
+
         private Coroutine _cardAnim;
         private Coroutine _moneyPulse;
 
@@ -175,6 +193,12 @@ namespace ThanksNoThanks
         public GameObject BurnoutPlate => _burnoutPlate;
         public Image BrightnessVeil => _brightness;
         public Text TutorialText => _tutorialText;
+        public GameObject HostBubble => _hostBubble;
+        public Text HostBubbleText => _bubbleText;
+        public GameObject HostBanner => _bannerRoot;
+        public Text HostBannerText => _bannerText;
+        public bool HostBubbleVisible => _bubbleTimer.Visible;
+        public bool HostBannerVisible => _bannerTimer.Visible;
 
         /// <summary>Test hook: run the age-gated HUD visibility for an arbitrary age.</summary>
         public void DebugApplyAgeGates(float age) => ApplyAgeGates(age);
@@ -185,6 +209,7 @@ namespace ThanksNoThanks
             _body = Resources.Load<Font>("Fonts/Rubik");
             if (_display == null) _display = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
             if (_body == null) _body = _display;
+            _voice = new HostVoice(new System.Random().NextDouble);   // named-line priority + seeded pool
             BuildHud();
             LoadGame();
         }
@@ -212,6 +237,7 @@ namespace ThanksNoThanks
         {
             _game.StateChanged += Refresh;
             _game.CardChanged += OnCardChanged;
+            _game.AnswerResolved += OnAnswerResolved;
             _game.MoneyOpened += OnMoneyOpened;
             _game.EnergyOpened += OnEnergyOpened;
             _game.HealthOpened += OnHealthOpened;
@@ -222,6 +248,7 @@ namespace ThanksNoThanks
         {
             _game.StateChanged -= Refresh;
             _game.CardChanged -= OnCardChanged;
+            _game.AnswerResolved -= OnAnswerResolved;
             _game.MoneyOpened -= OnMoneyOpened;
             _game.EnergyOpened -= OnEnergyOpened;
             _game.HealthOpened -= OnHealthOpened;
@@ -342,6 +369,7 @@ namespace ThanksNoThanks
                     ? Vector3.one * (1f + 0.08f * Mathf.Sin(Time.time * 12f))
                     : Vector3.one;
             }
+            ReflectHostReveals(_game.State == GameState.Playing);
             UpdateBrightness();
         }
 
@@ -547,6 +575,41 @@ namespace ThanksNoThanks
             Stretch(burnoutTxt.rectTransform);
             DisplayFx(burnoutTxt);
             _burnoutPlate.SetActive(false);
+
+            BuildHostReactions();
+        }
+
+        // Host speech bubble (S3, yellow bubble.png 9-slice) + rubric banner (S4). Both start hidden.
+        private void BuildHostReactions()
+        {
+            // ---- Speech bubble (S3): a corner bubble, right of the card so it never covers it ----
+            var bubbleImg = NewSprite("HostBubble", _gamePanel.transform, Sprite("bubble"));
+            bubbleImg.type = Image.Type.Sliced;   // 9-slice border 70/120/70/70 (import already set)
+            _hostBubble = bubbleImg.gameObject;
+            Anchor(bubbleImg.rectTransform, new Vector2(0.85f, 0.42f), new Vector2(360, 220));
+            _bubbleText = NewText("HostBubbleText", _hostBubble.transform, "", 34,
+                TextAnchor.MiddleCenter, Ink, _display);
+            // Inset asymmetrically: leave the bottom «tail» (120px border) clear of text.
+            var brt = _bubbleText.rectTransform;
+            brt.anchorMin = Vector2.zero; brt.anchorMax = Vector2.one;
+            brt.offsetMin = new Vector2(34, 66);   // left, bottom (above the tail)
+            brt.offsetMax = new Vector2(-34, -28);  // right, top
+            _hostBubble.SetActive(false);
+
+            // ---- Rubric banner (S4): a bold gold band over the card's upper area, static flourish ----
+            _bannerRoot = NewGroup("HostBanner", _gamePanel.transform);
+            _bannerBand = NewSolid("BannerBand", _bannerRoot.transform, Bulb);
+            Anchor(_bannerBand.rectTransform, new Vector2(0.5f, 0.60f), new Vector2(1600, 240));
+            // Static star flourishes at the band ends (no particles, no sound — canon).
+            var starL = NewSprite("BannerStarL", _bannerBand.transform, Sprite("star-white"));
+            Anchor(starL.rectTransform, new Vector2(0.05f, 0.5f), new Vector2(80, 80));
+            var starR = NewSprite("BannerStarR", _bannerBand.transform, Sprite("star-white"));
+            Anchor(starR.rectTransform, new Vector2(0.95f, 0.5f), new Vector2(80, 80));
+            _bannerText = NewText("BannerText", _bannerBand.transform, "", 82,
+                TextAnchor.MiddleCenter, Ink, _display);
+            Inset(_bannerText.rectTransform, 150f);   // clear the flourishes at both ends
+            DisplayFx(_bannerText);
+            _bannerRoot.SetActive(false);
         }
 
         private GameObject BuildBar(string name, Vector2 anchor, string label, string icon,
@@ -712,6 +775,11 @@ namespace ThanksNoThanks
                 _breath.Reset();
                 _burnoutPlate.SetActive(false);
                 _brightnessAlpha = 0f;
+                // Host reveals reset each life: no stale bubble/banner carried across a restart.
+                _bubbleTimer.Hide();
+                _bannerTimer.Hide();
+                _hostBubble.SetActive(false);
+                _bannerRoot.SetActive(false);
             }
             if (!playing && _tutorialShowing) DismissTutorial();
             _wasPlaying = playing;
@@ -739,6 +807,11 @@ namespace ThanksNoThanks
             _blockVeil.SetActive(blocked);        // S10: dim the card + red banner when unaffordable
             _blockBanner.SetActive(blocked);
             RefreshPriceLabel();                  // S10: show the required amount on any BLOCK$ card
+            // Rubric banner (S4): announce on a TIMELINE milestone; clear it on any non-milestone card
+            // (so it never lingers onto the card after the milestone). The bubble is answer-driven and
+            // deliberately NOT touched here — it survives this same-frame advance to live out its ~2s.
+            if (c != null && c.IsTimeline) ShowBanner(c);
+            else _bannerTimer.Hide();
             UpdateHudValues();
             ApplyAgeGates(_game.Age);
             if (c != null && isActiveAndEnabled)
@@ -746,6 +819,43 @@ namespace ThanksNoThanks
                 if (_cardAnim != null) StopCoroutine(_cardAnim);
                 _cardAnim = StartCoroutine(CardEntry());
             }
+        }
+
+        // Host bubble: on every resolved answer pick a line (named for the chosen side beats the tone
+        // pool; overall ~30–40%). Non-null → show ~2s; null → clear (so a new card with no line hides the
+        // old bubble). Fires BEFORE the next card is drawn, so it reflects the choice just made.
+        private void OnAnswerResolved(Card card, AnswerSide side)
+        {
+            var line = _voice.Pick(card, side);
+            if (!string.IsNullOrEmpty(line)) _bubbleTimer.Show(line);
+            else _bubbleTimer.Hide();
+        }
+
+        // Show the rubric band for a TIMELINE card. CR09 is styled muted (out-of-scope crisis; text baked).
+        private void ShowBanner(Card c)
+        {
+            bool muted = c.Id == HostContent.MutedBannerId;
+            _bannerBand.color = muted ? CobaltDeep : Bulb;
+            _bannerText.color = muted ? Muted : Ink;
+            _bannerText.text = HostContent.BannerFor(c.Id);
+            _bannerTimer.Show(_bannerText.text);
+            _bannerRoot.transform.SetAsLastSibling();   // draw over the card
+        }
+
+        // Advance both host clocks (real-time) and mirror their visibility onto the widgets. Only visible
+        // while Playing; the timers keep their own state so a restart/leaving-play simply hides them.
+        private void ReflectHostReveals(bool playing)
+        {
+            _bubbleTimer.Advance(Time.deltaTime);
+            _bannerTimer.Advance(Time.deltaTime);
+
+            bool bub = playing && _bubbleTimer.Visible;
+            if (_hostBubble.activeSelf != bub) _hostBubble.SetActive(bub);
+            if (bub) _bubbleText.text = _bubbleTimer.Text;
+
+            bool ban = playing && _bannerTimer.Visible;
+            if (_bannerRoot.activeSelf != ban) _bannerRoot.SetActive(ban);
+            if (ban) _bannerText.text = _bannerTimer.Text;
         }
 
         // BLOCK$ price sub-line: reads the single source (Game.CurrentCardPrice / CurrentCardBlocked) and

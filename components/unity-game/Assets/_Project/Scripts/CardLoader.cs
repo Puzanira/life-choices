@@ -50,7 +50,8 @@ namespace ThanksNoThanks
         private const int ColYesDelta = 5;
         // 6 = НЕТ-проза
         private const int ColNoDelta = 7;
-        // 8/9 = Ведущий
+        private const int ColHostYes = 8;   // «Ведущий (ДА)» — named host reaction line for ДА
+        private const int ColHostNo = 9;    // «Ведущий (НЕТ)» — named host reaction line for НЕТ
         private const int ColYesNecro = 10;
         private const int ColNoNecro = 11;
         private const int ColFlags = 12;
@@ -105,9 +106,14 @@ namespace ThanksNoThanks
                     NoDeltas = ParseDeltas(Field(row, ColNoDelta)),
                     YesNecrolog = CleanNecrolog(Field(row, ColYesNecro)),
                     NoNecrolog = CleanNecrolog(Field(row, ColNoNecro)),
+                    // Named host lines (cols 8/9). Same «— / blank → null» cleaning as necrolog cells, so
+                    // an empty or dash cell falls back to the tone pool downstream. NAMED beats the pool.
+                    HostYes = CleanNecrolog(Field(row, ColHostYes)),
+                    HostNo = CleanNecrolog(Field(row, ColHostNo)),
                     Flags = flags,
                 };
                 card.IsNoCons = flags.Contains("NOCONS");
+                card.IsTimeline = flags.Contains("TIMELINE");   // one-off milestone → rubric banner (S4)
                 card.IsRond = flags.Contains("ROND");
                 card.IsForced = flags.Contains("FORCED");
                 card.IsBlockCost = flags.Contains("BLOCK$");

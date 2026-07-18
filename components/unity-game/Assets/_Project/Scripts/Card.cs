@@ -71,6 +71,21 @@ namespace ThanksNoThanks
         public string YesNecrolog;    // null when the CSV cell is "—"
         public string NoNecrolog;     // null when the CSV cell is "—"
 
+        /// <summary>
+        /// «Ведущий (ДА)/(НЕТ)» (cols 8/9): the host's NAMED reaction line for each side, shown in the
+        /// speech bubble with priority over the tone pool. null/empty when the CSV cell is blank or «—»
+        /// (then the driver falls back to a tone-pool line). Pure data — no reaction logic here.
+        /// </summary>
+        public string HostYes;
+        public string HostNo;
+
+        /// <summary>
+        /// TIMELINE flag: a one-off life milestone (старт/работа/любовь/свадьба…). When such a card
+        /// becomes current the driver announces its rubric banner (S4). Semantic marker only — the
+        /// banner text lives in the driver's <c>HostContent</c>, keyed by <see cref="Id"/>.
+        /// </summary>
+        public bool IsTimeline;
+
         public IReadOnlyList<string> Flags = System.Array.Empty<string>();
 
         public bool IsNoCons;         // NOCONS — intro card, apply nothing / no necrolog line

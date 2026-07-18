@@ -7,6 +7,13 @@ namespace ThanksNoThanks
     public enum GameState { Opener, Playing, Finale }
 
     /// <summary>
+    /// Which way a card resolved — the semantic input to the host's speech-bubble tone.
+    /// <see cref="Timeout"/> means the 5-second timer ran out (the mechanical answer was still a coin
+    /// flip, but the host reacts to the silence, not the random pick).
+    /// </summary>
+    public enum AnswerSide { Yes, No, Timeout }
+
+    /// <summary>
     /// Pure, engine-free spine of «Спасибо, не надо»: the 3-state machine
     /// (Opener → Playing → Finale → Opener), the event-time age model, the 5-second
     /// card timer (timeout = random answer), passive Δ application, FATAL / burnout /
@@ -172,6 +179,13 @@ namespace ThanksNoThanks
 
         public event Action StateChanged;
         public event Action CardChanged;
+        /// <summary>
+        /// Fired the instant a card resolves — with the card and the chosen <see cref="AnswerSide"/> —
+        /// BEFORE the next card is drawn, so the driver's host bubble reacts to THIS choice. Semantic
+        /// only: the bubble text and its RNG live in the driver's HostVoice, never here. NOT fired for a
+        /// BLOCK$-blocked card (that is skipped, not answered).
+        /// </summary>
+        public event Action<Card, AnswerSide> AnswerResolved;
         /// <summary>Fired the first time money opens in a life (drives the S5 tutorial overlay + pause).</summary>
         public event Action MoneyOpened;
         /// <summary>Fired the first time energy opens (Age 25) — drives the S5 «дыхание» hint + pause.</summary>
@@ -327,7 +341,7 @@ namespace ThanksNoThanks
 
             CardTimer -= dt;
             if (CardTimer <= 0f)
-                Answer(_coin());   // не успел — берём ДА или НЕТ случайно
+                Answer(_coin(), timeout: true);   // не успел — берём ДА или НЕТ случайно (тон — «пропуск»)
         }
 
         // Opens the money scale the first time Age reaches 18 and announces it (tutorial + pause hook).
@@ -454,7 +468,9 @@ namespace ThanksNoThanks
             return true;
         }
 
-        private void Answer(bool yes)
+        private void Answer(bool yes) => Answer(yes, timeout: false);
+
+        private void Answer(bool yes, bool timeout)
         {
             var card = CurrentCard;
             if (card == null) return;
@@ -504,6 +520,11 @@ namespace ThanksNoThanks
             // Card-id specials on the live layer: LT01 sets the health-decay modifier (both answers),
             // KEK04=ДА gives a small one-shot health plus. Runs regardless of NOCONS (KEK04 is NOCONS).
             ApplyCardSpecial(card, yes);
+
+            // Host reaction hook: announce the resolution (card + side) BEFORE the fatal/advance fork,
+            // so the bubble reflects THIS choice no matter what happens next. Timeout carries the «skip»
+            // tone even though the mechanical pick above was a coin flip.
+            AnswerResolved?.Invoke(card, timeout ? AnswerSide.Timeout : yes ? AnswerSide.Yes : AnswerSide.No);
 
             // Delayed fatal (RND01): ДА schedules «за вами пришли» for card.Age + n, life continues.
             if (yes && card.DelayedFatalYears > 0)
