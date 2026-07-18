@@ -45,7 +45,17 @@ namespace ThanksNoThanks
         /// <summary>RELATION_AXIS ↓ — same held-axis model as <see cref="RelationUp"/>, pulling the
         /// balancer marker DOWN (keyboard: ↓). Emitted every frame the key is held. If both ↑ and ↓ are
         /// held the source resolves to ↑ (safe direction) — the two are mutually exclusive on the wire.</summary>
-        RelationDown
+        RelationDown,
+
+        /// <summary>
+        /// CHILD_PRESS — «жать по вспышке» кнопки-тамагочи ребёнка (keyboard: Enter, only meaningful in
+        /// gameplay; later a lit button on the cabinet). Enter is CONFIRM everywhere else, so the DRIVER
+        /// decides context: an Enter/CONFIRM becomes CHILD_PRESS ONLY while Playing with the child scale
+        /// open and no tutorial up; otherwise it stays <see cref="Confirm"/> (start/restart/dismiss). A
+        /// discrete keydown — <see cref="Game"/> honours it only inside the open flash window (else it
+        /// arms the anti-pre-spam lockout). Keeps <see cref="Game"/> semantic-only (no keys/ports).
+        /// </summary>
+        ChildPress
     }
 
     /// <summary>

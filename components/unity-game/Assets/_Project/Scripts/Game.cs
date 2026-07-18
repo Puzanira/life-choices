@@ -87,6 +87,23 @@ namespace ThanksNoThanks
         public const float RelBreakupSeconds = 10f;        // суммарно ~10 сек ниже зоны → разрыв
         public const int RelBreakupValue = 20;             // после разрыва шкала падает сюда (одиноко)
 
+        // ---- live child (signal-response tamagotchi button; tunable; canon §Ребёнок) ----
+        // Opens on MD02=ДА (which the deck places at «свадьба +2», gated CHAIN→MD01=ДА, so it can only
+        // resolve ≥2 game-years after the wedding). Signal-response: the button FLASHES on a random
+        // interval; a CHILD_PRESS inside the open window is good parenting; missing 2+ flashes in a row is
+        // «плохой родитель» (relationships −10% + child scale drop). NO death — it only bends relationships
+        // (which fold into the show tone/brightness) and the child scale. Numbers are the #1 feel-tunables.
+        public const float ChildFlashIntervalMin = 15f;   // вспышка каждые ~15–25с (нижняя граница)
+        public const float ChildFlashIntervalMax = 25f;   // …верхняя граница (seeded/injectable roll)
+        public const float ChildFlashWindow = 2f;         // окно нажатия ~2с, пока кнопка горит
+        public const float ChildPressMinDelay = 1f;       // мин. задержка ~1с: пре-нажатие в этом окне
+                                                           // перед вспышкой блокирует засчёт (анти-заспам)
+        public const int ChildBadParentMisses = 2;        // пропуск 2+ вспышек подряд → «плохой родитель»
+        public const int ChildBadParentRelPenalty = 10;   // …отношения −10% (разово за такой промах-лапс)
+        public const int ChildBadParentScaleDrop = 12;    // …и шкала ребёнка проседает
+        public const int ChildPressGain = 4;              // успел по вспышке → шкала ребёнка чуть вверх
+        public const int ChildStartValue = 70;            // шкала ребёнка на открытии (MD02=ДА)
+
         private List<Card> _deck;
         private List<Card> _reserve = new();             // top-up pool for skipped chain-gated cards
         private readonly Func<IReadOnlyList<Card>> _deckFactory; // re-samples a fresh deck per life
@@ -147,6 +164,30 @@ namespace ThanksNoThanks
         /// <summary>«Красная зона»: relationships above <see cref="RelZoneMax"/> while open — задушил
         /// вниманием, penalty pulling back down. Read by the driver for the red-zone HUD tint.</summary>
         public bool RelationshipRedZone => RelationshipsOpen && Scales.Relationships > RelZoneMax;
+
+        // ---- live child (signal-response) state ----
+        private readonly Random _childRng = new();  // engine-free RNG for the flash interval roll
+        private float _childFlashElapsed;            // time since the last window closed (counts toward next flash)
+        private float _childNextInterval;            // rolled length of the current wait (~15–25s)
+        private float _childWindowRemaining;         // time left in the OPEN press-window (>0 while lit)
+        private float _childPressLockout;            // anti-pre-spam: while >0 an in-window press is ignored
+        private int _childConsecutiveMiss;           // flashes missed in a row (2+ → «плохой родитель»)
+
+        /// <summary>Test/tuning seam: supplies the NEXT flash interval in seconds. null → a uniform draw in
+        /// [<see cref="ChildFlashIntervalMin"/>,<see cref="ChildFlashIntervalMax"/>] from the internal RNG.
+        /// Survives <see cref="StartLife"/> so a deterministic test can pin every interval.</summary>
+        public Func<float> ChildFlashInterval;
+
+        /// <summary>True while the child scale/button is live: opened by MD02=ДА, closed by LT04 or a fresh
+        /// life. Drives the child-button HUD reveal and the flash/press integration.</summary>
+        public bool ChildOpen { get; private set; }
+        /// <summary>True while the flash window is OPEN (button lit) — a CHILD_PRESS now is good parenting.
+        /// Read by the driver for the lit/flashing button state (S9).</summary>
+        public bool ChildFlashing { get; private set; }
+
+        /// <summary>Fired the instant the child scale opens (MD02=ДА, «свадьба+2») — drives the S5
+        /// «ПОПОЛНЕНИЕ! жмите Enter по вспышке» hint + pause, one-shot per life.</summary>
+        public event Action ChildOpened;
 
         /// <summary>Live money in ₽ (fractional; negative allowed). Authoritative for the HUD pill.</summary>
         public double Money { get; private set; }
@@ -296,6 +337,7 @@ namespace ThanksNoThanks
                     else if (input == GameInput.EnergyPulse) Breathe(); // already rhythm-validated by the driver
                     else if (input == GameInput.RelationUp) SetRelationAxis(+1);
                     else if (input == GameInput.RelationDown) SetRelationAxis(-1);
+                    else if (input == GameInput.ChildPress) ChildPress();
                     break;
                 case GameState.Finale:
                     if (input == GameInput.Confirm) ToOpener();
@@ -323,6 +365,7 @@ namespace ThanksNoThanks
             ResetMoney();
             ResetHealthEnergy();
             ResetRelationships();
+            ResetChild();
             State = GameState.Playing;
             StateChanged?.Invoke();
             Advance();
@@ -376,6 +419,7 @@ namespace ThanksNoThanks
             IntegrateHealth(dt);                   // decay from 30 (×LT01 modifier), real-time
             IntegrateEnergy(dt);                   // drain from 25 + burnout enter/exit, real-time
             IntegrateRelationships(dt);            // drift + RELATION_AXIS + breakup (no death), real-time
+            IntegrateChild(dt);                    // flash scheduler + missed-flash bad-parent penalty (no death)
 
             if (Scales.HealthDepleted) { End("здоровье не выдержало"); return; }
             if (EnergyOpen && Scales.EnergyDepleted) { End("полное выгорание"); return; }
@@ -616,6 +660,18 @@ namespace ThanksNoThanks
                     // breakup has closed it. Cleared by a breakup.
                     if (yes && RelationshipsOpen) Married = true;
                     break;
+                case "MD02":
+                    // Ребёнок (MD02=ДА «завести ребёнка», OPEN:Реб): opens the child scale + tamagotchi
+                    // button and fires the S5 hint. The deck places MD02 at «свадьба +2» and gates it
+                    // CHAIN→MD01=ДА, so this only fires ≥2 game-years after the wedding. НЕТ → nothing opens.
+                    if (yes) OpenChild();
+                    break;
+                case "LT04":
+                    // Дети выросли (LT04, «55–65, если MD02=ДА»): the button/scale go dark either way. The
+                    // ДА «навязчивая опека» отношения −1 rides the normal CSV Δ (applied before this); НЕТ
+                    // «отпустил» carries no Δ. Both just close the child mechanic — never a death.
+                    CloseChild();
+                    break;
             }
         }
 
@@ -662,6 +718,7 @@ namespace ThanksNoThanks
             ResetMoney();
             ResetHealthEnergy();
             ResetRelationships();
+            ResetChild();
             CurrentCard = null;
             State = GameState.Opener;
             StateChanged?.Invoke();
@@ -829,6 +886,119 @@ namespace ThanksNoThanks
             });
 
             RelationshipBrokeUp?.Invoke();
+        }
+
+        // ================================================================ live child (signal-response)
+
+        private void ResetChild()
+        {
+            ChildOpen = false;
+            ChildFlashing = false;
+            _childFlashElapsed = 0f;
+            _childNextInterval = 0f;
+            _childWindowRemaining = 0f;
+            _childPressLockout = 0f;
+            _childConsecutiveMiss = 0;
+            // Scales.Reset() (in StartLife/ToOpener) has already restored Child = 0.
+        }
+
+        // MD02=ДА: open the child scale + button. Seeds the first flash interval, lifts the child scale to
+        // its starting value (overriding the token «Реб +2» the CSV Δ just applied), and fires the S5 hint.
+        private void OpenChild()
+        {
+            if (ChildOpen) return;
+            ChildOpen = true;
+            ChildFlashing = false;
+            _childFlashElapsed = 0f;
+            _childWindowRemaining = 0f;
+            _childPressLockout = 0f;
+            _childConsecutiveMiss = 0;
+            _childNextInterval = PickChildInterval();
+            if (Scales.Child < ChildStartValue) Scales.Child = ChildStartValue;
+            ChildOpened?.Invoke();
+        }
+
+        // LT04 (either answer): the children have grown — the button/scale go dark for good this life.
+        private void CloseChild()
+        {
+            ChildOpen = false;
+            ChildFlashing = false;
+            _childWindowRemaining = 0f;
+            _childPressLockout = 0f;
+            _childConsecutiveMiss = 0;
+        }
+
+        // The next wait between flashes: an injected value (test/tuning) or a uniform draw in [min,max].
+        private float PickChildInterval()
+        {
+            if (ChildFlashInterval != null) return Math.Max(0.01f, ChildFlashInterval());
+            return ChildFlashIntervalMin
+                   + (float)(_childRng.NextDouble() * (ChildFlashIntervalMax - ChildFlashIntervalMin));
+        }
+
+        // Signal-response integration (real-time, dt-injected): count down to the next flash, hold the ~2s
+        // open window, and register a MISS when the window closes unpressed. NO death path — a lapse only
+        // bends relationships (which fold into the show tone) and the child scale.
+        private void IntegrateChild(float dt)
+        {
+            if (!ChildOpen) return;
+
+            // Anti-pre-spam lockout always winds down (so a press >1s before a flash is harmless again).
+            if (_childPressLockout > 0f)
+                _childPressLockout = Math.Max(0f, _childPressLockout - dt);
+
+            if (ChildFlashing)
+            {
+                _childWindowRemaining -= dt;
+                if (_childWindowRemaining <= 0f)   // window closed with no valid press → missed flash
+                {
+                    ChildFlashing = false;
+                    RegisterChildMiss();
+                    _childFlashElapsed = 0f;
+                    _childNextInterval = PickChildInterval();
+                }
+            }
+            else
+            {
+                _childFlashElapsed += dt;
+                if (_childFlashElapsed >= _childNextInterval)   // time to flash → open the press window
+                {
+                    ChildFlashing = true;
+                    _childWindowRemaining = ChildFlashWindow;
+                }
+            }
+        }
+
+        // CHILD_PRESS (Enter, routed by the driver only in gameplay-with-open-child). A press INSIDE the open
+        // window (and not inside the anti-pre-spam lockout) is good parenting: child scale up, miss-streak
+        // cleared, next flash rescheduled. Any other press — before/after the window, or while locked out —
+        // is discarded AND (re)arms the ~1s lockout, so mashing ahead of the flash can't bank a success.
+        private void ChildPress()
+        {
+            if (!ChildOpen || Paused) return;
+            if (ChildFlashing && _childPressLockout <= 0f)
+            {
+                ChildFlashing = false;
+                _childConsecutiveMiss = 0;
+                Scales.Child = Math.Min(100, Scales.Child + ChildPressGain);
+                _childFlashElapsed = 0f;
+                _childNextInterval = PickChildInterval();
+            }
+            else
+            {
+                _childPressLockout = ChildPressMinDelay;   // premature / locked → punish the pre-spam
+            }
+        }
+
+        // A missed flash. Two in a row = «плохой родитель»: relationships −10% + child scale drop, applied
+        // ONCE per lapse (the streak resets, so it takes two fresh misses to be penalised again).
+        private void RegisterChildMiss()
+        {
+            _childConsecutiveMiss++;
+            if (_childConsecutiveMiss < ChildBadParentMisses) return;
+            _childConsecutiveMiss = 0;
+            Scales.Relationships = Math.Max(0, Scales.Relationships - ChildBadParentRelPenalty);
+            Scales.Child = Math.Max(0, Scales.Child - ChildBadParentScaleDrop);
         }
 
         // «Пора подлечиться!» (LT08): a condition-triggered system card, single-shot per life. Eligible

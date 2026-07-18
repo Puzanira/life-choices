@@ -67,6 +67,11 @@ namespace ThanksNoThanks
         private Image _balancerMarkerImg;  // tinted red in the red zone too
         private float _balancerTrackWidth;
 
+        // ---- child button (opens on MD02=ДА, not age-gated; flashes on the signal-response window) ----
+        private GameObject _childGroup;    // whole widget; shown while Game.ChildOpen, hidden after LT04
+        private Image _childButtonImg;     // the «lit» bulb — bright while ChildFlashing, dim otherwise
+        private Image _childScaleFill;     // compact child-scale readout (шкала ребёнка)
+
         // Card
         private RectTransform _cardRoot;
         private Image _cardFrame;
@@ -111,6 +116,7 @@ namespace ThanksNoThanks
         private bool _energyTutorialSeen;
         private bool _healthTutorialSeen;
         private bool _burnoutHintSeen;
+        private bool _childTutorialSeen;
         private bool _wasPlaying;
 
         // Burnout state plate (S7): dim-cobalt «ВЫГОРАНИЕ» banner, shown while Game.Burnout is on.
@@ -185,6 +191,14 @@ namespace ThanksNoThanks
             "Подышите (E), чтобы прийти в себя.\n\n" +
             "Отпустит само, когда энергия восстановится.";
 
+        // Child S5 hint. Must NOT contain «УСТАЛОСТЬ»/«ТАЯТЬ»/«ОТНОШЕНИЙ» — the PlayMode hint-walkers key
+        // off those substrings to identify the energy/health/relationships hints; a collision misids this.
+        private const string ChildTutorialText =
+            "ПОПОЛНЕНИЕ!\n\n" +
+            "Появился РЕБЁНОК — кнопка на пульте загорается время от времени.\n" +
+            "Жмите Enter, пока она горит — по вспышке.\n\n" +
+            "Пропустите подряд — станете плохим родителем.";
+
         // ---- public inspection accessors (visual-assembly PlayMode tests) ----
         public RectTransform CanvasRect { get; private set; }
         public Image BackgroundImage => _bg;
@@ -208,6 +222,8 @@ namespace ThanksNoThanks
         public GameObject BurnoutPlate => _burnoutPlate;
         public GameObject BreakupPlate => _breakupPlate;
         public GameObject BalancerMarker => _balancerMarker != null ? _balancerMarker.gameObject : null;
+        public GameObject ChildGroup => _childGroup;
+        public Image ChildButtonImage => _childButtonImg;
         public Image BrightnessVeil => _brightness;
         public Text TutorialText => _tutorialText;
         public GameObject HostBubble => _hostBubble;
@@ -261,6 +277,7 @@ namespace ThanksNoThanks
             _game.HealthOpened += OnHealthOpened;
             _game.BurnoutEntered += OnBurnoutEntered;
             _game.RelationshipBrokeUp += OnRelationshipBrokeUp;
+            _game.ChildOpened += OnChildOpened;
         }
 
         private void UnsubscribeGame()
@@ -274,6 +291,7 @@ namespace ThanksNoThanks
             _game.HealthOpened -= OnHealthOpened;
             _game.BurnoutEntered -= OnBurnoutEntered;
             _game.RelationshipBrokeUp -= OnRelationshipBrokeUp;
+            _game.ChildOpened -= OnChildOpened;
         }
 
         /// <summary>
@@ -340,6 +358,18 @@ namespace ThanksNoThanks
                 return;
             }
 
+            // Enter double-duty: during gameplay with the child scale open (and no tutorial up — that case
+            // returned above), Enter/CONFIRM means «жать по вспышке» → CHILD_PRESS. Everywhere else it stays
+            // CONFIRM (start the game / restart from the finale / dismiss a hint), so the child mechanic
+            // never steals those. Game itself only honours the press inside the open flash window.
+            if (input == GameInput.Confirm
+                && _game.State == GameState.Playing
+                && _game.ChildOpen)
+            {
+                _game.HandleInput(GameInput.ChildPress);
+                return;
+            }
+
             _game.HandleInput(input);
         }
 
@@ -379,6 +409,7 @@ namespace ThanksNoThanks
                 if (_balancerTrackImg.color != relTint) _balancerTrackImg.color = relTint;
                 if (_balancerMarkerImg.color != relTint) _balancerMarkerImg.color = relTint;
                 if (_burnoutPlate.activeSelf != _game.Burnout) _burnoutPlate.SetActive(_game.Burnout);
+                ReflectChildButton();               // reveal on MD02=ДА, light the bulb while flashing
                 // Age-gated reveals run every frame (SetActive is a no-op on same value): a widget
                 // opening MID-CARD (18/25/30 crossings) appears the moment its age is crossed instead
                 // of waiting for the next card resolution (founder Gate-2 bug, uniform fix).
@@ -397,6 +428,25 @@ namespace ThanksNoThanks
             ReflectHostReveals(_game.State == GameState.Playing);
             ReflectBreakupPlate(_game.State == GameState.Playing);
             UpdateBrightness();
+        }
+
+        // Child button: reveal off Game.ChildOpen (not age-gated — opens on MD02=ДА, hides after LT04), and
+        // light the bulb bright gold + pulse while the flash window is open (Game.ChildFlashing), dim else.
+        // The scale bar tracks Scales.Child so a bad-parent drop reads. NO brightness coupling (canon —
+        // child flows into the show tone only via the relationships penalty, already folded in elsewhere).
+        private void ReflectChildButton()
+        {
+            if (_childGroup == null) return;
+            if (_childGroup.activeSelf != _game.ChildOpen) _childGroup.SetActive(_game.ChildOpen);
+            if (!_game.ChildOpen) return;
+
+            bool lit = _game.ChildFlashing;
+            var tint = lit ? Bulb : CobaltDeep;
+            if (_childButtonImg.color != tint) _childButtonImg.color = tint;
+            _childButtonImg.rectTransform.localScale = lit
+                ? Vector3.one * (1f + 0.10f * Mathf.Sin(Time.time * 11f))
+                : Vector3.one;
+            _childScaleFill.fillAmount = Mathf.Clamp01(_game.Scales.Child / 100f);
         }
 
         // Transient «РАССТАЛИСЬ» plate: advance its own ~2s clock and mirror visibility (only while
@@ -539,6 +589,9 @@ namespace ThanksNoThanks
 
             // ---- Relationships balancer (age 20+) ----
             BuildBalancer(new Vector2(0.775f, 0.875f));
+
+            // ---- Child tamagotchi button (opens on MD02=ДА, not age-gated) ----
+            BuildChildButton(new Vector2(0.5f, 0.315f));
 
             // ---- Timer ring (top centre) ----
             var ringGroup = NewGroup("Timer", _gamePanel.transform);
@@ -703,6 +756,42 @@ namespace ThanksNoThanks
             Anchor(_balancerMarker, new Vector2(0.5f, 0.5f), new Vector2(58, 78));
         }
 
+        // Child «cabinet button»: no dedicated sprite exists, so this is a code placeholder built from
+        // marquee-bulb.png (the lit-bulb art) with a heart glyph — dim while idle, bright gold + pulsing
+        // while the flash window is open (driven in Update off Game.ChildFlashing). A compact bar under it
+        // shows the child scale so a лапс (bad-parent drop) reads. Hidden until MD02=ДА, and after LT04.
+        private void BuildChildButton(Vector2 anchor)
+        {
+            _childGroup = NewGroup("Child", _gamePanel.transform);
+            Anchor(_childGroup.GetComponent<RectTransform>(), anchor, new Vector2(220, 210));
+
+            var lbl = NewText("Label", _childGroup.transform, "РЕБЁНОК", 22, TextAnchor.MiddleCenter, TextLight, _display);
+            Anchor(lbl.rectTransform, new Vector2(0.5f, 0.92f), new Vector2(220, 30));
+
+            _childButtonImg = NewSprite("Button", _childGroup.transform, Sprite("marquee-bulb"));
+            _childButtonImg.color = CobaltDeep;   // idle (unlit)
+            Anchor(_childButtonImg.rectTransform, new Vector2(0.5f, 0.52f), new Vector2(128, 128));
+            var heart = NewSprite("Heart", _childButtonImg.transform, Sprite("icon-heart"));
+            Anchor(heart.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(56, 56));
+
+            var hint = NewText("Hint", _childGroup.transform, "Enter", 20, TextAnchor.MiddleCenter, Muted, _display);
+            Anchor(hint.rectTransform, new Vector2(0.5f, 0.14f), new Vector2(220, 26));
+
+            var track = NewSprite("ScaleTrack", _childGroup.transform, Sprite("bar-track"));
+            track.type = Image.Type.Sliced;
+            Anchor(track.rectTransform, new Vector2(0.5f, 0.02f), new Vector2(180, 22));
+            _childScaleFill = NewSprite("ScaleFill", track.transform, Sprite("bar-health-fill"));
+            _childScaleFill.type = Image.Type.Filled;
+            _childScaleFill.fillMethod = Image.FillMethod.Horizontal;
+            _childScaleFill.fillOrigin = (int)Image.OriginHorizontal.Left;
+            var cfr = _childScaleFill.rectTransform;
+            cfr.anchorMin = Vector2.zero; cfr.anchorMax = Vector2.one;
+            cfr.offsetMin = Vector2.zero; cfr.offsetMax = Vector2.zero;
+            _childScaleFill.fillAmount = 1f;
+
+            _childGroup.SetActive(false);
+        }
+
         private void BuildFinale(Transform parent)
         {
             _finalePanel = NewGroup("Finale", parent);
@@ -765,6 +854,9 @@ namespace ThanksNoThanks
         private void OnEnergyOpened() { if (!_energyTutorialSeen) ShowTutorial(EnergyTutorialText, ref _energyTutorialSeen); }
         private void OnHealthOpened() { if (!_healthTutorialSeen) ShowTutorial(HealthTutorialText, ref _healthTutorialSeen); }
         private void OnBurnoutEntered(){ if (!_burnoutHintSeen)  ShowTutorial(BurnoutHintText,   ref _burnoutHintSeen); }
+        // MD02=ДА opened the child scale: the «ПОПОЛНЕНИЕ!» rubric banner already fired when MD02 was drawn;
+        // this sequences the S5 hint after the answer (one-shot per life, pauses like every other open).
+        private void OnChildOpened()  { if (!_childTutorialSeen)  ShowTutorial(ChildTutorialText,  ref _childTutorialSeen); }
 
         // Breakup: flash the transient «РАССТАЛИСЬ» plate (auto-hides on its own ~2s clock, reflected in
         // Update). The balancer HUD hides itself off Game.RelationshipsLost on the next ApplyAgeGates.
@@ -822,6 +914,8 @@ namespace ThanksNoThanks
                 _energyTutorialSeen = false;
                 _healthTutorialSeen = false;
                 _burnoutHintSeen = false;
+                _childTutorialSeen = false;
+                _childGroup.SetActive(false);
                 _tutorialShowing = false;
                 _tutorialOverlay.SetActive(false);
                 _game.Paused = false;
