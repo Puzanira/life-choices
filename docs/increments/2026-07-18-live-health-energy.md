@@ -112,4 +112,4 @@
 ## 6. Playtest verdict
 
 `Playtest ok:` —
-`Landed:` —
+`Landed:` 1934653 (bookkeeping-коммитом; авторитетно — в handoff)
