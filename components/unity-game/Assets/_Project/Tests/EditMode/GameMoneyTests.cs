@@ -233,11 +233,18 @@ namespace ThanksNoThanks.Tests
         }
 
         [Test]
-        public void BlockCard_Affordable_IsNormal_AndAppliesDelta()
+        public void BlockCard_Affordable_ДА_SpendsExactlyThePrice_AndSkipsCsvMoneyDelta()
         {
+            // NEW (block-cost-spend-and-show): ДА on an affordable BLOCK$ card spends EXACTLY the price
+            // (MD03 = 60₽), and the card's CSV money-Δ («Дн −2») is NOT applied — the price is the single
+            // authoritative money cost. Any non-money Δ (here «Эн +2») still applies.
             var open = Plain("OPEN", 18);
             var block = Block("MD03", 30);
-            block.YesDeltas = new[] { new ScaleDelta(Scale.Money, DeltaKind.Add, -2) };
+            block.YesDeltas = new[]
+            {
+                new ScaleDelta(Scale.Energy, DeltaKind.Add, 2),   // applies
+                new ScaleDelta(Scale.Money, DeltaKind.Add, -2),   // DROPPED on BLOCK$ (price owns money)
+            };
             block.YesNecrolog = "отпуск на море";
             var g = NewGame(() => false, open, block, Plain("N", 40));
 
@@ -248,14 +255,181 @@ namespace ThanksNoThanks.Tests
             No(g);                                    // OPEN → MD03 drawn while affordable
             Assert.AreEqual("MD03", g.CurrentCard.Id);
             Assert.IsFalse(g.CurrentCardBlocked, "affordable BLOCK$ card is a normal card");
+            Assert.AreEqual(60.0, g.CurrentCardPrice, Eps, "single source: shown/gate/spend price = 60");
 
-            double m = g.Money;
-            Yes(g);                                   // normal ДА applies its Δ (includes the cost)
-            Assert.AreEqual(m - 2.0, g.Money, Eps, "ДА applied the card's money Δ");
+            double m = g.Money; int e = g.Scales.Energy;
+            Yes(g);                                   // ДА → spend exactly 60, skip the −2, apply Эн +2
+            Assert.AreEqual(m - 60.0, g.Money, Eps, "ДА spent exactly the price (−60), not −2 or −62");
+            Assert.AreEqual(e + 2, g.Scales.Energy, "non-money Δ (Эн +2) still applies on a BLOCK$ card");
 
             int guard = 0;
             while (g.State == GameState.Playing && guard++ < 50) No(g);
             CollectionAssert.Contains(g.Necrolog.StoryLines, "отпуск на море", "affordable card writes its line");
+        }
+
+        [Test]
+        public void BlockCard_Affordable_ДА_Spend_MatchesEachPrice_AndAppliesHealth()
+        {
+            // Per-id spend + health/energy Δ for all three BLOCK$ ids, exactly per the CSV:
+            //   MD03 −60 & Эн +2 · LT02 −120 & Здр +40 · LT08 −100 & Здр → 80%.
+            // (Health is pre-dropped to 40 so LT02's «Здр<50» draw gate lets it through.)
+            AssertSpend("MD03", 60, new[] { new ScaleDelta(Scale.Energy, DeltaKind.Add, 2) },
+                g => Assert.AreEqual(102, g.Scales.Energy, "MD03 Эн +2 (from 100)"));
+            AssertSpend("LT02", 120, new[] { new ScaleDelta(Scale.Health, DeltaKind.Add, 40) },
+                g => Assert.AreEqual(80, g.Scales.Health, "LT02 heals +40 (40 → 80)"));
+            AssertSpend("LT08", 100, new[] { new ScaleDelta(Scale.Health, DeltaKind.Set, 80) },
+                g => Assert.AreEqual(80, g.Scales.Health, "LT08 sets health → 80%"));
+        }
+
+        // Health-drop card (Set): resolving ДА lowers health to a known value so LT02's «Здр<50» draw
+        // gate is satisfied. Harmless for the money-only-gated ids (MD03/LT08).
+        private static Card Drop(int age, int toHealth)
+        {
+            var c = Plain("DROP" + age, age);
+            c.YesDeltas = new[] { new ScaleDelta(Scale.Health, DeltaKind.Set, toHealth) };
+            return c;
+        }
+
+        // Bank enough, drop health under LT02's gate, draw the BLOCK$ card affordable, answer ДА, assert
+        // money dropped by EXACTLY the registered price and the health/energy side-effect landed.
+        private static void AssertSpend(string id, double price, ScaleDelta[] yesDeltas, System.Action<Game> effectCheck)
+        {
+            var block = Block(id, 40);
+            block.YesDeltas = yesDeltas;
+            var g = NewGame(() => false, Plain("OPEN", 18), Drop(30, 40), block, Plain("N", 60));
+
+            g.StartLife(); No(g); g.Tick(2f);        // open money
+            for (int i = 0; i < 300; i++) Crank(g);  // bank well past 120₽
+            No(g);                                    // OPEN → DROP
+            Yes(g);                                   // DROP → health = 40 (LT02 gate needs < 50)
+            Assert.AreEqual(id, g.CurrentCard.Id, id + " drawn (not gated off)");
+            Assert.IsFalse(g.CurrentCardBlocked, id + " affordable");
+            Assert.AreEqual(price, g.CurrentCardPrice, Eps, id + " price is the single source");
+
+            double m = g.Money;
+            Yes(g);
+            Assert.AreEqual(m - price, g.Money, Eps, id + " spent exactly its price on ДА");
+            effectCheck(g);
+        }
+
+        [Test]
+        public void BlockCard_НЕТ_Affordable_SpendsNothing()
+        {
+            // НЕТ on an affordable BLOCK$ card declines the purchase → no spend (money-Δ also skipped).
+            var open = Plain("OPEN", 18);
+            var block = Block("MD03", 40);
+            block.YesDeltas = new[] { new ScaleDelta(Scale.Money, DeltaKind.Add, -2) };
+            block.NoDeltas = new[] { new ScaleDelta(Scale.Money, DeltaKind.Add, -5) }; // also dropped
+            var g = NewGame(() => false, open, block, Plain("N", 60));
+
+            g.StartLife(); No(g); g.Tick(2f);
+            for (int i = 0; i < 200; i++) Crank(g);
+            No(g);
+            Assert.AreEqual("MD03", g.CurrentCard.Id);
+
+            double m = g.Money;
+            No(g);                                    // declined → nothing spent, no money-Δ
+            Assert.AreEqual(m, g.Money, Eps, "НЕТ on a BLOCK$ card spends nothing");
+        }
+
+        [Test]
+        public void BlockCard_Blocked_ДА_SpendsNothing_MoneyUnchanged()
+        {
+            // Unaffordable (money < price): ДА skips with no spend, no Δ (regression companion to the
+            // existing no-necrolog/no-reroll test, focused on the money column).
+            var open = Plain("OPEN", 18);
+            var block = Block("MD03", 30);            // price 60₽
+            var g = NewGame(() => false, open, block, Plain("N", 40));
+
+            g.StartLife(); No(g); g.Tick(2f);         // open money, broke (< 60)
+            No(g);
+            Assert.AreEqual("MD03", g.CurrentCard.Id);
+            Assert.IsTrue(g.CurrentCardBlocked, "broke → blocked");
+
+            double m = g.Money;
+            Yes(g);
+            Assert.AreEqual(m, g.Money, Eps, "blocked ДА spends nothing");
+        }
+
+        [Test]
+        public void BlockCard_Blocked_НЕТ_SkipsCleanly_NoDelta_NoNecrolog()
+        {
+            // НЕТ on a blocked BLOCK$ card: skip with no spend, no Δ, no necrolog line, no re-roll.
+            // MD03 at age 5 → money never opens (no cost-of-living), so «unchanged» is exact.
+            var block = Block("MD03", 5);
+            block.NoDeltas = new[] { new ScaleDelta(Scale.Health, DeltaKind.Add, -40) };
+            block.NoNecrolog = "НЕ ДОЛЖНО ПОПАСТЬ";
+            var after = Plain("AFTER", 10);
+            var g = NewGame(() => false, block, after);
+
+            g.StartLife(); No(g);                     // start age timer → MD03 drawn (Money 0 < 60 → blocked)
+            Assert.AreEqual("MD03", g.CurrentCard.Id);
+            Assert.IsTrue(g.CurrentCardBlocked, "broke → blocked");
+            Assert.IsFalse(g.MoneyOpen, "money shut at this age → no drain, exact unchanged assert");
+
+            int health = g.Scales.Health; double money = g.Money;
+            No(g);                                     // НЕТ = skip
+            Assert.AreEqual("AFTER", g.CurrentCard.Id, "skipped to the next card, not re-rolled");
+            Assert.AreEqual(money, g.Money, Eps, "blocked НЕТ spends nothing");
+            Assert.AreEqual(health, g.Scales.Health, "no Δ on the blocked НЕТ skip");
+
+            Yes(g);                                    // finish → finale
+            CollectionAssert.DoesNotContain(g.Necrolog.StoryLines, "НЕ ДОЛЖНО ПОПАСТЬ",
+                "blocked НЕТ writes no necrolog line");
+        }
+
+        [Test]
+        public void BlockCard_Blocked_Timeout_SkipsCleanly_NoDelta_NoNecrolog()
+        {
+            // Timeout (5s expires → random auto-answer) on a blocked BLOCK$ card behaves like any answer:
+            // skip with no spend, no Δ, no necrolog line, no re-roll. MD03 at age 5 keeps money shut so
+            // the timer's Tick can't drain cost-of-living — the «unchanged» assert stays exact.
+            var block = Block("MD03", 5);
+            block.YesDeltas = new[] { new ScaleDelta(Scale.Health, DeltaKind.Add, -40) };
+            block.NoDeltas  = new[] { new ScaleDelta(Scale.Health, DeltaKind.Add, -40) };
+            block.YesNecrolog = "НЕ ДОЛЖНО ПОПАСТЬ";
+            block.NoNecrolog  = "НЕ ДОЛЖНО ПОПАСТЬ";
+            var after = Plain("AFTER", 10);
+            var g = NewGame(() => false, block, after);
+
+            g.StartLife(); No(g);                     // MD03 drawn, blocked (Money 0 < 60)
+            Assert.AreEqual("MD03", g.CurrentCard.Id);
+            Assert.IsTrue(g.CurrentCardBlocked, "broke → blocked");
+
+            int health = g.Scales.Health; double money = g.Money;
+            g.Tick(Game.CardSeconds + 0.1f);          // let the 5s timer expire → timeout auto-answer
+            Assert.AreEqual("AFTER", g.CurrentCard.Id, "timeout on a blocked card just skips");
+            Assert.AreEqual(money, g.Money, Eps, "blocked timeout spends nothing");
+            Assert.AreEqual(health, g.Scales.Health, "no Δ on the blocked timeout skip");
+
+            Yes(g);
+            CollectionAssert.DoesNotContain(g.Necrolog.StoryLines, "НЕ ДОЛЖНО ПОПАСТЬ",
+                "timed-out blocked card writes no necrolog line");
+        }
+
+        [Test]
+        public void BlockPrice_SingleSource_Gate_Spend_Display_AllAgree()
+        {
+            // The gate threshold (blocked iff money < price), the ДА spend, and the displayed number
+            // are the SAME value for every BLOCK$ id — sourced from Game.BlockPrices.
+            foreach (var kv in Game.BlockPrices)
+            {
+                string id = kv.Key; double price = kv.Value;
+
+                // Just-below the price → blocked (gate reads the same number). Health pre-dropped to 40 so
+                // LT02's «Здр<50» draw gate lets it through (money-only ids are unaffected).
+                var block = Block(id, 40);
+                var g = NewGame(() => false, Plain("OPEN", 18), Drop(30, 40), block, Plain("N", 60));
+                g.StartLife(); No(g); g.Tick(2f);
+                int ticks = (int)price - 1;           // bank ~price−1 (money < price)
+                for (int i = 0; i < ticks; i++) Crank(g);
+                No(g);                                 // OPEN → DROP
+                Yes(g);                                // DROP → health 40, then draw the BLOCK$ card
+                Assert.AreEqual(id, g.CurrentCard.Id, id + " drawn");
+                Assert.Less(g.Money, price, id + " under price");
+                Assert.IsTrue(g.CurrentCardBlocked, id + " gate uses the price");
+                Assert.AreEqual(price, g.CurrentCardPrice, Eps, id + " displayed price == gate price == spend");
+            }
         }
 
         [Test]

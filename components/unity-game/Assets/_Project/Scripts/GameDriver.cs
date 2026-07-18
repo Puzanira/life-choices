@@ -90,6 +90,9 @@ namespace ThanksNoThanks
         // BLOCK$ (S10): dim veil over the card + red block-tag banner.
         private GameObject _blockVeil;
         private GameObject _blockBanner;
+        // BLOCK$ price sub-line on the card: «СТОИТ N ₽» when affordable, «НУЖНО N ₽» when blocked.
+        // Above the veil (drawn after it), so it stays legible in the dimmed/blocked state too.
+        private Text _cardPriceText;
 
         // Tutorial overlay (S5): dimmed bg + yellow modal + «ПОНЯТНО»; freezes the game while up.
         // Reused for every hint: money (18), energy (25), health (30) and the first burnout.
@@ -168,6 +171,7 @@ namespace ThanksNoThanks
         public GameObject TutorialOverlay => _tutorialOverlay;
         public bool TutorialShowing => _tutorialShowing;
         public GameObject BlockBanner => _blockBanner;
+        public Text CardPriceText => _cardPriceText;
         public GameObject BurnoutPlate => _burnoutPlate;
         public Image BrightnessVeil => _brightness;
         public Text TutorialText => _tutorialText;
@@ -190,12 +194,7 @@ namespace ThanksNoThanks
             Input ??= gameObject.AddComponent<KeyboardInputSource>();
             Input.Received += OnInput;
             Input.Received += OnInputFx;
-            _game.StateChanged += Refresh;
-            _game.CardChanged += OnCardChanged;
-            _game.MoneyOpened += OnMoneyOpened;
-            _game.EnergyOpened += OnEnergyOpened;
-            _game.HealthOpened += OnHealthOpened;
-            _game.BurnoutEntered += OnBurnoutEntered;
+            SubscribeGame();
             Refresh();
         }
 
@@ -206,15 +205,40 @@ namespace ThanksNoThanks
                 Input.Received -= OnInput;
                 Input.Received -= OnInputFx;
             }
-            if (_game != null)
-            {
-                _game.StateChanged -= Refresh;
-                _game.CardChanged -= OnCardChanged;
-                _game.MoneyOpened -= OnMoneyOpened;
-                _game.EnergyOpened -= OnEnergyOpened;
-                _game.HealthOpened -= OnHealthOpened;
-                _game.BurnoutEntered -= OnBurnoutEntered;
-            }
+            if (_game != null) UnsubscribeGame();
+        }
+
+        private void SubscribeGame()
+        {
+            _game.StateChanged += Refresh;
+            _game.CardChanged += OnCardChanged;
+            _game.MoneyOpened += OnMoneyOpened;
+            _game.EnergyOpened += OnEnergyOpened;
+            _game.HealthOpened += OnHealthOpened;
+            _game.BurnoutEntered += OnBurnoutEntered;
+        }
+
+        private void UnsubscribeGame()
+        {
+            _game.StateChanged -= Refresh;
+            _game.CardChanged -= OnCardChanged;
+            _game.MoneyOpened -= OnMoneyOpened;
+            _game.EnergyOpened -= OnEnergyOpened;
+            _game.HealthOpened -= OnHealthOpened;
+            _game.BurnoutEntered -= OnBurnoutEntered;
+        }
+
+        /// <summary>
+        /// Test seam: swap in a purpose-built <see cref="Game"/> (e.g. a deterministic deck with a
+        /// BLOCK$ card) and rewire the HUD to it, so a test can drive a REAL priced card through the
+        /// live card flow (Advance → CardChanged → OnCardChanged) instead of poking the label directly.
+        /// </summary>
+        public void DebugReplaceGame(Game game)
+        {
+            if (_game != null) UnsubscribeGame();
+            _game = game;
+            SubscribeGame();
+            Refresh();
         }
 
         /// <summary>
@@ -488,6 +512,14 @@ namespace ThanksNoThanks
             _blockVeil.SetActive(false);
             _blockBanner.SetActive(false);
 
+            // ---- BLOCK$ price sub-line (S10): the required amount, on any BLOCK$-priced card ----
+            // Sits at the bottom of the card, added AFTER the veil so it reads in the blocked state too.
+            // «СТОИТ N ₽» (gold) when affordable · «НУЖНО N ₽» (light, next to the banner) when blocked.
+            _cardPriceText = NewText("CardPrice", _cardRoot, "", 44, TextAnchor.MiddleCenter, Bulb, _display);
+            Anchor(_cardPriceText.rectTransform, new Vector2(0.5f, 0.12f), new Vector2(820, 80));
+            DisplayFx(_cardPriceText);
+            _cardPriceText.gameObject.SetActive(false);
+
             // ---- Answer plates (bottom) ----
             _yesPlate = NewSprite("YesPlate", _gamePanel.transform, Sprite("plate-yes"));
             _yesPlate.type = Image.Type.Sliced;
@@ -706,6 +738,7 @@ namespace ThanksNoThanks
             bool blocked = _game.CurrentCardBlocked;
             _blockVeil.SetActive(blocked);        // S10: dim the card + red banner when unaffordable
             _blockBanner.SetActive(blocked);
+            RefreshPriceLabel();                  // S10: show the required amount on any BLOCK$ card
             UpdateHudValues();
             ApplyAgeGates(_game.Age);
             if (c != null && isActiveAndEnabled)
@@ -713,6 +746,23 @@ namespace ThanksNoThanks
                 if (_cardAnim != null) StopCoroutine(_cardAnim);
                 _cardAnim = StartCoroutine(CardEntry());
             }
+        }
+
+        // BLOCK$ price sub-line: reads the single source (Game.CurrentCardPrice / CurrentCardBlocked) and
+        // shows the required amount on the card in both the affordable and the blocked (dimmed) states.
+        private void RefreshPriceLabel()
+        {
+            bool has = _game.CurrentCardHasPrice;
+            ApplyPriceLabel(has, has ? _game.CurrentCardPrice : 0, _game.CurrentCardBlocked);
+        }
+
+        private void ApplyPriceLabel(bool hasPrice, double price, bool blocked)
+        {
+            if (!hasPrice) { _cardPriceText.gameObject.SetActive(false); return; }
+            int p = Mathf.RoundToInt((float)price);
+            _cardPriceText.text = (blocked ? "НУЖНО " : "СТОИТ ") + p + " ₽";
+            _cardPriceText.color = blocked ? TextLight : Bulb;
+            _cardPriceText.gameObject.SetActive(true);
         }
 
         private void UpdateHudValues()

@@ -40,6 +40,89 @@ namespace ThanksNoThanks.Tests.PlayMode
             yield return null;
         }
 
+        // ---- BLOCK$ price line, driven by a REAL priced card through the live card flow ----
+
+        private static Card Plain(string id, int age)
+            => new Card { Id = id, Question = id + "?", Age = age, Order = age, Flags = new System.Collections.Generic.List<string>() };
+
+        private static Card Starter()
+        {
+            var c = Plain("I03", 1);
+            c.StartsAgeTimer = true;
+            return c;
+        }
+
+        // A deck that lands on MD03 (a genuine BLOCK$ card, price 60₽) as the current card: starter →
+        // filler(18, where money opens) → MD03(30). Driven through Advance/CardChanged, not a hook.
+        private static Game BlockDeck()
+        {
+            var deck = new System.Collections.Generic.List<Card>
+            {
+                Starter(), Plain("FILL", 18), Plain("MD03", 30), Plain("NORMAL", 40),
+            };
+            deck[2].IsBlockCost = true;   // MD03 → BLOCK$ (Game.BlockPrices["MD03"] = 60)
+            return new Game(deck, coin: () => false);
+        }
+
+        [UnityTest]
+        public IEnumerator PriceLine_Blocked_RealCard_ShowsНУЖНО_WithBanner()
+        {
+            // Broke path: a REAL BLOCK$ card (MD03, 60₽) is drawn while money < price → the on-card price
+            // line reads «НУЖНО 60 ₽» and the S10 block banner is up. Asserts the actual Text, via the
+            // live flow (StartLife → Advance → CardChanged → OnCardChanged), not a debug setter.
+            var driver = Boot(out var go, out var fake);
+            yield return null;                           // Awake + Start (CSV game wired)
+            driver.DebugReplaceGame(BlockDeck());        // swap in the deterministic BLOCK$ deck
+            fake.Confirm();                              // Opener → StartLife → draws the starter
+            fake.No();                                   // resolve starter → age timer on, FILL drawn
+            fake.No();                                   // resolve FILL → MD03 drawn (Money 0 < 60 → blocked)
+
+            Assert.AreEqual("MD03", driver.Game.CurrentCard.Id, "landed on the real BLOCK$ card");
+            Assert.IsTrue(driver.Game.CurrentCardBlocked, "drawn while broke → blocked");
+            Assert.IsTrue(driver.CardPriceText.gameObject.activeSelf, "price line shown on a blocked BLOCK$ card");
+            StringAssert.Contains("60", driver.CardPriceText.text, "shows the required amount");
+            StringAssert.Contains("НУЖНО", driver.CardPriceText.text, "blocked wording");
+            Assert.IsTrue(driver.BlockBanner.activeSelf, "S10 block banner is up alongside the price");
+
+            Object.Destroy(go);
+            yield return null;
+        }
+
+        [UnityTest]
+        public IEnumerator PriceLine_Affordable_RealCard_ShowsСТОИТ_NoBanner()
+        {
+            // Afforded path: bank ≥ 60₽, then the SAME real BLOCK$ card is drawn affordable → «СТОИТ 60 ₽»
+            // and no block banner. All steps are synchronous (no yields) so the driver's own Update never
+            // ticks mid-sequence — money stays banked and the 5s timer never fires.
+            var driver = Boot(out var go, out var fake);
+            yield return null;
+            var g = BlockDeck();
+            driver.DebugReplaceGame(g);
+            fake.Confirm();                              // → StartLife, starter drawn
+            fake.No();                                   // starter resolved → FILL drawn, age timer on
+            g.Tick(2f);                                  // age → 18, money opens (driver shows the S5 hint + pauses)
+            fake.Confirm();                              // dismiss the money hint → unpause
+            yield return null;                           // let Update clear the same-frame dismiss guard (tiny tick)
+            for (int i = 0; i < 100; i++) g.HandleInput(GameInput.MoneyTick); // bank ≥ 60₽ (direct game, no cap)
+            Assert.GreaterOrEqual(g.Money, 60.0, "banked past the price");
+
+            fake.No();                                   // resolve FILL → MD03 drawn affordable
+            Assert.AreEqual("MD03", driver.Game.CurrentCard.Id, "landed on the real BLOCK$ card");
+            Assert.IsFalse(driver.Game.CurrentCardBlocked, "affordable → not blocked");
+            Assert.IsTrue(driver.CardPriceText.gameObject.activeSelf, "price line shown on an affordable BLOCK$ card");
+            StringAssert.Contains("60", driver.CardPriceText.text, "shows the amount");
+            StringAssert.Contains("СТОИТ", driver.CardPriceText.text, "affordable wording");
+            Assert.IsFalse(driver.BlockBanner.activeSelf, "no block banner when affordable");
+
+            // And the line clears on a normal (non-BLOCK$) card: answer MD03 → deck ends, no priced card up.
+            fake.Yes();
+            Assert.IsFalse(driver.Game.CurrentCardHasPrice, "no priced card after MD03");
+            Assert.IsFalse(driver.CardPriceText.gameObject.activeSelf, "price line hidden once off the BLOCK$ card");
+
+            Object.Destroy(go);
+            yield return null;
+        }
+
         [UnityTest]
         public IEnumerator EnergyHint_Shows_AndPauses_When_EnergyOpensAt25()
         {

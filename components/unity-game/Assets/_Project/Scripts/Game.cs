@@ -131,6 +131,20 @@ namespace ThanksNoThanks
         public bool CurrentCardBlocked { get; private set; }
 
         /// <summary>
+        /// True when the CURRENT card is a BLOCK$ card with a known price. Drives the on-card price line
+        /// (shown both affordable and blocked) — read-only view onto the single source <see cref="BlockPrices"/>.
+        /// </summary>
+        public bool CurrentCardHasPrice =>
+            CurrentCard != null && CurrentCard.IsBlockCost && BlockPrices.ContainsKey(CurrentCard.Id);
+
+        /// <summary>
+        /// The current BLOCK$ card's price in ₽ — the ONE number used for the affordability gate, the ДА
+        /// spend, and the on-card display. 0 when the current card carries no BLOCK$ price.
+        /// </summary>
+        public double CurrentCardPrice =>
+            CurrentCardHasPrice ? BlockPrices[CurrentCard.Id] : 0;
+
+        /// <summary>
         /// Current income multiplier (product of active FROM-gated multipliers). ≥ 1 unless wiped.
         /// While <see cref="Burnout"/> is active the crank «тяжелеет» — the product is halved
         /// (<see cref="BurnoutIncomeMult"/>), folded in here so every income path pays the same.
@@ -460,7 +474,16 @@ namespace ThanksNoThanks
 
             if (!card.IsNoCons)
             {
-                ApplyCardDeltas(yes ? card.YesDeltas : card.NoDeltas); // money Δ → live float; rest → Scales
+                // BLOCK$: the price (BlockPrices[id]) is the ONE authoritative money cost — the same number
+                // that gates affordability and is shown on the card. So on a BLOCK$ card we DROP the CSV
+                // money-Δ (e.g. MD03's tiny «Дн −2» on a different scale) to avoid a double/mis-scaled charge,
+                // and instead spend exactly the price on ДА. Health/energy components of the Δ still apply
+                // (MD03 keeps «Эн +2», LT02 «Здр +40», LT08 «Здр → 80%»). НЕТ spends nothing. (Reached only
+                // when NOT blocked — a blocked BLOCK$ card returned above with no Δ and no spend.)
+                bool isBlockCost = card.IsBlockCost;
+                ApplyCardDeltas(yes ? card.YesDeltas : card.NoDeltas, skipMoney: isBlockCost); // rest → Scales/Money
+                if (isBlockCost && yes && BlockPrices.TryGetValue(card.Id, out var price))
+                    Money -= price;                                   // spend exactly the price on ДА
                 if (yes) ApplyLongEffects(card);                       // multipliers / installment drains (on ДА)
                 // FORCED cards (вехи/объявления, no real choice) NEVER write a necrolog line — canon.
                 // Enforced structurally here, independent of what the CSV cell happens to hold.
@@ -707,7 +730,9 @@ namespace ThanksNoThanks
         }
 
         // Route a card's money Δ onto the live float (the authoritative money); non-money deltas go to Scales.
-        private void ApplyCardDeltas(IReadOnlyList<ScaleDelta> deltas)
+        // <paramref name="skipMoney"/> = true drops the money component entirely (BLOCK$ cards: the price is
+        // the authoritative money cost, so the CSV money-Δ must not also charge). Non-money deltas still apply.
+        private void ApplyCardDeltas(IReadOnlyList<ScaleDelta> deltas, bool skipMoney = false)
         {
             if (deltas == null) return;
             List<ScaleDelta> nonMoney = null;
@@ -715,6 +740,7 @@ namespace ThanksNoThanks
             {
                 if (d.Scale == Scale.Money)
                 {
+                    if (skipMoney) continue;   // BLOCK$: price owns the money cost — ignore CSV money-Δ
                     switch (d.Kind)
                     {
                         case DeltaKind.Add: Money += d.Value; break;
