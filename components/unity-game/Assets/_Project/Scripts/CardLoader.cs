@@ -54,6 +54,7 @@ namespace ThanksNoThanks
         private const int ColYesNecro = 10;
         private const int ColNoNecro = 11;
         private const int ColFlags = 12;
+        private const int ColLong = 13;   // «Длительный эффект» (MULT/DRAIN/FROM/DUR), tolerant if absent
 
         public static List<Card> LoadSubset(string csv, IEnumerable<string> ids)
         {
@@ -109,6 +110,8 @@ namespace ThanksNoThanks
                 card.IsNoCons = flags.Contains("NOCONS");
                 card.IsRond = flags.Contains("ROND");
                 card.IsForced = flags.Contains("FORCED");
+                card.IsBlockCost = flags.Contains("BLOCK$");
+                card.LongEffects = ParseLongEffects(Field(row, ColLong));
                 // Probabilistic inclusion keys on RANDOM_TRIGGER; legacy "RANDOM" means the same
                 // (old snapshot). RANDOM_OUTCOME is a separate, mechanically-inert marker.
                 card.IsRandomTrigger = flags.Contains("RANDOM_TRIGGER") || flags.Contains("RANDOM");
@@ -215,6 +218,67 @@ namespace ThanksNoThanks
                 if (m.Success && int.TryParse(m.Groups[1].Value, out var n)) return n;
             }
             return 0;
+        }
+
+        // «Длительный эффект» grammar (entries split by ';'):
+        //   MULT:Дн=x2 FROM:25   income multiplier ×2 from age 25
+        //   MULT:Дн=x1.5         income multiplier ×1.5 (stacks)
+        //   MULT:Дн=x5|0         random ×5 OR wipe money to 0 (with RANDOM_OUTCOME)
+        //   DRAIN:Дн=-0.3/s DUR:10y   installment drain −0.3₽/сек for 10 game-years
+        // Culture-invariant number parse so "1.5"/"0.3" never depend on the machine locale.
+        private static readonly Regex MultRx = new(
+            @"MULT:\s*(Здр|Эн|Дн|Отн|Реб)\s*=\s*x\s*([0-9]+(?:\.[0-9]+)?)\s*(\|\s*0)?\s*(?:FROM:\s*(\d+))?",
+            RegexOptions.Compiled);
+        private static readonly Regex DrainRx = new(
+            @"DRAIN:\s*(Здр|Эн|Дн|Отн|Реб)\s*=\s*(-?[0-9]+(?:\.[0-9]+)?)\s*/s\s+DUR:\s*(\d+)\s*y",
+            RegexOptions.Compiled);
+
+        private static readonly System.Globalization.CultureInfo Inv =
+            System.Globalization.CultureInfo.InvariantCulture;
+
+        internal static List<LongEffect> ParseLongEffects(string cell)
+        {
+            var result = new List<LongEffect>();
+            var t = (cell ?? string.Empty).Trim();
+            if (t.Length == 0 || t == "—" || t == "-" || t == "−") return result;
+
+            foreach (var raw in t.Split(';'))
+            {
+                var part = raw.Trim();
+                if (part.Length == 0) continue;
+
+                var m = MultRx.Match(part);
+                if (m.Success && Abbrevs.TryGetValue(m.Groups[1].Value, out var mscale))
+                {
+                    double.TryParse(m.Groups[2].Value, System.Globalization.NumberStyles.Float, Inv, out var val);
+                    int.TryParse(m.Groups[4].Value, out var from);
+                    result.Add(new LongEffect
+                    {
+                        Kind = LongEffectKind.Mult,
+                        Scale = mscale,
+                        MultValue = val,
+                        RandomZero = m.Groups[3].Success,
+                        FromAge = from,
+                    });
+                    continue;
+                }
+
+                var d = DrainRx.Match(part);
+                if (d.Success && Abbrevs.TryGetValue(d.Groups[1].Value, out var dscale))
+                {
+                    double.TryParse(d.Groups[2].Value, System.Globalization.NumberStyles.Float, Inv, out var rate);
+                    int.TryParse(d.Groups[3].Value, out var dur);
+                    result.Add(new LongEffect
+                    {
+                        Kind = LongEffectKind.Drain,
+                        Scale = dscale,
+                        DrainPerSec = rate,
+                        DurYears = dur,
+                    });
+                }
+                // Unknown grammar → tolerated (ignored), never throws (contract: all 50 rows parse).
+            }
+            return result;
         }
 
         private static List<string> ParseFlags(string cell)

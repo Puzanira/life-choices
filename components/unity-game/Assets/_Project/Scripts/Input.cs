@@ -10,9 +10,18 @@ namespace ThanksNoThanks
     /// </summary>
     public enum GameInput
     {
-        AnswerYes,  // ДА          (keyboard: ← )
-        AnswerNo,   // СПАСИБО, НЕ НАДО (keyboard: → )
-        Confirm     // start / restart (keyboard: Enter / Space)
+        AnswerYes,       // ДА          (keyboard: ← )
+        AnswerNo,        // СПАСИБО, НЕ НАДО (keyboard: → )
+        Confirm,         // start / restart (keyboard: Enter; fresh Space in Opener/Finale/tutorial — driver-mapped)
+        MoneyTick,       // крутилка денег, FRESH physical keydown (may double as CONFIRM outside gameplay)
+
+        /// <summary>
+        /// Autorepeat crank from HELD Space (~4/с) — input-layer kind, income-only. The driver lets it
+        /// crank during gameplay (translated to <see cref="MoneyTick"/> after the income cap) but keeps
+        /// it INERT outside Playing and on the tutorial: held Space must never confirm screens or
+        /// dismiss hints. <see cref="Game"/> never receives this value.
+        /// </summary>
+        MoneyTickRepeat
     }
 
     /// <summary>

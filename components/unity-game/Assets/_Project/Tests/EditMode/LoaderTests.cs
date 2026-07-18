@@ -196,6 +196,67 @@ namespace ThanksNoThanks.Tests
             Assert.IsFalse(byId["RND01"].IsRandomTrigger, "RND01 is a normal card (never RANDOM in canon)");
         }
 
+        // ---- «Длительный эффект» (col 13): money multipliers + installment drains ----
+
+        [Test]
+        public void LongEffects_Parse_Mult_Drain_From_And_RandomZero_FromCanon()
+        {
+            var asset = Resources.Load<TextAsset>("scenes");
+            Assert.IsNotNull(asset);
+            var byId = CardLoader.ParseAll(asset.text).ToDictionary(c => c.Id);
+
+            // YA01 → MULT:Дн=x2 FROM:25
+            var ya01 = byId["YA01"].LongEffects.Single();
+            Assert.AreEqual(LongEffectKind.Mult, ya01.Kind);
+            Assert.AreEqual(Scale.Money, ya01.Scale);
+            Assert.AreEqual(2.0, ya01.MultValue, 1e-9);
+            Assert.AreEqual(25, ya01.FromAge);
+            Assert.IsFalse(ya01.RandomZero);
+
+            // YA06 → MULT:Дн=x1.5 (stacks, no FROM)
+            var ya06 = byId["YA06"].LongEffects.Single();
+            Assert.AreEqual(1.5, ya06.MultValue, 1e-9);
+            Assert.AreEqual(0, ya06.FromAge, "no FROM → active immediately");
+
+            // YA02 → MULT:Дн=x5|0 (random ×5 or wipe), paired with RANDOM_OUTCOME
+            var ya02 = byId["YA02"].LongEffects.Single();
+            Assert.AreEqual(5.0, ya02.MultValue, 1e-9);
+            Assert.IsTrue(ya02.RandomZero, "x5|0 → random-zero branch parsed");
+
+            // YA04 → DRAIN:Дн=-0.3/s DUR:10y ; MD04 → DUR:20y
+            var ya04 = byId["YA04"].LongEffects.Single();
+            Assert.AreEqual(LongEffectKind.Drain, ya04.Kind);
+            Assert.AreEqual(-0.3, ya04.DrainPerSec, 1e-9);
+            Assert.AreEqual(10, ya04.DurYears);
+            Assert.AreEqual(20, byId["MD04"].LongEffects.Single().DurYears, "ипотека DUR:20y");
+        }
+
+        [Test]
+        public void BlockCost_Flag_Parsed_On_Price_Cards()
+        {
+            var asset = Resources.Load<TextAsset>("scenes");
+            Assert.IsNotNull(asset);
+            var byId = CardLoader.ParseAll(asset.text).ToDictionary(c => c.Id);
+            Assert.IsTrue(byId["MD03"].IsBlockCost, "MD03 (отпуск) BLOCK$");
+            Assert.IsTrue(byId["LT02"].IsBlockCost, "LT02 (операция) BLOCK$");
+        }
+
+        [Test]
+        public void EveryCanonRow_ParsesLongEffectColumn_WithoutError()
+        {
+            // Contract row 6: «Длительный эффект» of all 50 canon rows parses tolerantly — no throw,
+            // and the money-effect cards carry a parsed entry.
+            var asset = Resources.Load<TextAsset>("scenes");
+            Assert.IsNotNull(asset);
+            var all = CardLoader.ParseAll(asset.text);
+            Assert.Greater(all.Count, 40, "full canon deck parsed");
+            foreach (var c in all)
+                Assert.IsNotNull(c.LongEffects, $"{c.Id} has a (possibly empty) long-effects list");
+
+            int withLong = all.Count(c => c.LongEffects.Count > 0);
+            Assert.GreaterOrEqual(withLong, 5, "the money-effect cards (YA01/YA02/YA04/YA06/MD04) parsed entries");
+        }
+
         [Test]
         public void RealSubset_Loads_FromResources_InAgeOrder_WithFlags()
         {

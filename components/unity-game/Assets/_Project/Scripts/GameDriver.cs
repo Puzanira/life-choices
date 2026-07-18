@@ -87,7 +87,29 @@ namespace ThanksNoThanks
         private Text _finaleCause;
         private Text _finaleStory;
 
+        // BLOCK$ (S10): dim veil over the card + red block-tag banner.
+        private GameObject _blockVeil;
+        private GameObject _blockBanner;
+
+        // Tutorial overlay (S5): dimmed bg + yellow modal + «ПОНЯТНО»; freezes the game while up.
+        private GameObject _tutorialOverlay;
+        private Text _tutorialText;
+        private bool _tutorialShowing;
+        private bool _moneyTutorialSeen;   // one-shot per life; reset on a fresh life
+        private bool _wasPlaying;
+
         private Coroutine _cardAnim;
+        private Coroutine _moneyPulse;
+
+        // Income cap (~5/s): applied ONLY on the gameplay-crank branch in OnInput — Space-as-CONFIRM
+        // (opener/finale/tutorial) bypasses it entirely, so a recent crank can never eat a confirm.
+        private readonly MoneyTickThrottle _crankCap = new();
+
+        private const string MoneyTutorialText =
+            "ТЕПЕРЬ У ВАС ЕСТЬ РАБОТА!\n\n" +
+            "Крутите ПРОБЕЛ — и деньги потекут. Но жизнь идёт своим чередом:\n" +
+            "содержать себя стоит денег каждую секунду.\n\n" +
+            "Рук всего две — крутить и отвечать придётся разом.";
 
         // ---- public inspection accessors (visual-assembly PlayMode tests) ----
         public RectTransform CanvasRect { get; private set; }
@@ -105,6 +127,9 @@ namespace ThanksNoThanks
         public GameObject OpenerPanel => _openerPanel;
         public GameObject GamePanel => _gamePanel;
         public GameObject FinalePanel => _finalePanel;
+        public GameObject TutorialOverlay => _tutorialOverlay;
+        public bool TutorialShowing => _tutorialShowing;
+        public GameObject BlockBanner => _blockBanner;
 
         /// <summary>Test hook: run the age-gated HUD visibility for an arbitrary age.</summary>
         public void DebugApplyAgeGates(float age) => ApplyAgeGates(age);
@@ -122,10 +147,11 @@ namespace ThanksNoThanks
         private void Start()
         {
             Input ??= gameObject.AddComponent<KeyboardInputSource>();
-            Input.Received += _game.HandleInput;
+            Input.Received += OnInput;
             Input.Received += OnInputFx;
             _game.StateChanged += Refresh;
             _game.CardChanged += OnCardChanged;
+            _game.MoneyOpened += OnMoneyOpened;
             Refresh();
         }
 
@@ -133,14 +159,55 @@ namespace ThanksNoThanks
         {
             if (Input != null)
             {
-                Input.Received -= _game.HandleInput;
+                Input.Received -= OnInput;
                 Input.Received -= OnInputFx;
             }
             if (_game != null)
             {
                 _game.StateChanged -= Refresh;
                 _game.CardChanged -= OnCardChanged;
+                _game.MoneyOpened -= OnMoneyOpened;
             }
+        }
+
+        /// <summary>
+        /// Input funnel. The ONLY place the state-dependent Space re-map lives (contract): a Space crank
+        /// (MONEY_TICK) doubles as CONFIRM in the Opener/Finale and while the tutorial overlay is up —
+        /// those paths are INSTANT and unthrottled (the source never swallows a discrete keydown).
+        /// The ~5/s income cap applies only when the tick actually cranks money during gameplay.
+        /// While the overlay is up, all other input is swallowed. Pure <see cref="Game"/> never sees
+        /// any of this — it gets a clean semantic event.
+        /// </summary>
+        private void OnInput(GameInput input)
+        {
+            if (_tutorialShowing)
+            {
+                // Only a FRESH press (or Enter) dismisses; held-Space repeats are inert here —
+                // holding through money-open must not insta-dismiss the hint.
+                if (input == GameInput.Confirm || input == GameInput.MoneyTick) DismissTutorial();
+                return;
+            }
+
+            if (input == GameInput.MoneyTick || input == GameInput.MoneyTickRepeat)
+            {
+                if (_game.State != GameState.Playing)
+                {
+                    // Fresh Space = CONFIRM on opener/finale — instant. Autorepeat is inert: holding
+                    // Space through a life ending must never auto-confirm screens into a new life.
+                    if (input == GameInput.MoneyTick)
+                        _game.HandleInput(GameInput.Confirm);
+                    return;
+                }
+                if (!_crankCap.TryAccept()) return;         // income cap (anti-mashgun) — gameplay only
+                _game.HandleInput(GameInput.MoneyTick);     // Game sees only the semantic crank event
+                if (_game.MoneyOpen && isActiveAndEnabled)  // pill pulse on each PAYING tick
+                {
+                    if (_moneyPulse != null) StopCoroutine(_moneyPulse);
+                    _moneyPulse = StartCoroutine(PulseMoney());
+                }
+                return;
+            }
+            _game.HandleInput(input);
         }
 
         private void LoadGame()
@@ -160,10 +227,12 @@ namespace ThanksNoThanks
         private void Update()
         {
             if (_game == null) return;
+            _crankCap.Advance(Time.deltaTime);   // deterministic clock for the income cap
             _game.Tick(Time.deltaTime);
             if (_game.State == GameState.Playing)
             {
                 _ageText.text = Mathf.FloorToInt(_game.Age).ToString();
+                _moneyText.text = FormatMoney(_game.Money);   // live: ticks up on crank, drains down
                 float remaining = Mathf.Max(0f, _game.CardTimer);
                 _timerText.text = Mathf.CeilToInt(remaining).ToString();
                 float t = Mathf.Clamp01(remaining / Game.CardSeconds);
@@ -199,6 +268,7 @@ namespace ThanksNoThanks
             BuildOpener(canvasGo.transform);
             BuildGamePanel(canvasGo.transform);
             BuildFinale(canvasGo.transform);
+            BuildTutorialOverlay(canvasGo.transform);   // top-most: dims every screen when up
         }
 
         private void BuildStars(Transform parent)
@@ -312,6 +382,18 @@ namespace ThanksNoThanks
             Inset(_cardText.rectTransform, 130f);
             DisplayFx(_cardText);
 
+            // ---- BLOCK$ (S10): dim veil over the card + red block-tag banner (hidden by default) ----
+            _blockVeil = NewSolid("BlockVeil", _cardRoot, new Color(0.02f, 0.03f, 0.10f, 0.62f)).gameObject;
+            Stretch(_blockVeil.GetComponent<RectTransform>());
+            _blockBanner = NewSolid("BlockBanner", _cardRoot, TimerRed).gameObject;
+            Anchor(_blockBanner.GetComponent<RectTransform>(), new Vector2(0.5f, 0.5f), new Vector2(820, 150));
+            var blockTxt = NewText("BlockText", _blockBanner.transform,
+                "КАК ЖАЛЬ, У ВАС НЕТ\nДЕНЕГ НА ЭТО!", 48, TextAnchor.MiddleCenter, Color.white, _display);
+            Stretch(blockTxt.rectTransform);
+            DisplayFx(blockTxt);
+            _blockVeil.SetActive(false);
+            _blockBanner.SetActive(false);
+
             // ---- Answer plates (bottom) ----
             _yesPlate = NewSprite("YesPlate", _gamePanel.transform, Sprite("plate-yes"));
             _yesPlate.type = Image.Type.Sliced;
@@ -404,6 +486,51 @@ namespace ThanksNoThanks
             Stretch(againText.rectTransform);
         }
 
+        // S5 tutorial: full-screen dim + a yellow modal in the Host's tone + «ПОНЯТНО» plate.
+        private void BuildTutorialOverlay(Transform parent)
+        {
+            _tutorialOverlay = NewSolid("TutorialOverlay", parent, new Color(0.02f, 0.03f, 0.10f, 0.78f)).gameObject;
+            Stretch(_tutorialOverlay.GetComponent<RectTransform>());
+
+            var modal = NewSprite("Modal", _tutorialOverlay.transform, Sprite("marquee-frame"));
+            modal.type = Image.Type.Sliced;
+            modal.color = Bulb;   // жёлтая карточка (тон Ведущего)
+            Anchor(modal.rectTransform, new Vector2(0.5f, 0.52f), new Vector2(1280, 560));
+
+            var head = NewText("TutHead", modal.transform, "ПОДСКАЗКА", 34, TextAnchor.UpperCenter, Ink, _display);
+            Anchor(head.rectTransform, new Vector2(0.5f, 0.86f), new Vector2(1100, 60));
+
+            _tutorialText = NewText("TutBody", modal.transform, MoneyTutorialText, 40, TextAnchor.MiddleCenter, Ink, _body);
+            Anchor(_tutorialText.rectTransform, new Vector2(0.5f, 0.52f), new Vector2(1100, 320));
+
+            var plate = NewSprite("GotItPlate", modal.transform, Sprite("plate-yes"));
+            plate.type = Image.Type.Sliced;
+            Anchor(plate.rectTransform, new Vector2(0.5f, 0.14f), new Vector2(420, 120));
+            var plateTxt = NewText("GotItText", plate.transform, "ПОНЯТНО ▸", 40, TextAnchor.MiddleCenter, Ink, _display);
+            Stretch(plateTxt.rectTransform);
+
+            _tutorialOverlay.SetActive(false);
+        }
+
+        private void OnMoneyOpened()
+        {
+            if (_moneyTutorialSeen || _tutorialShowing) return;
+            _tutorialShowing = true;
+            _tutorialText.text = MoneyTutorialText;
+            _tutorialOverlay.transform.SetAsLastSibling();
+            _tutorialOverlay.SetActive(true);
+            _game.Paused = true;   // freeze age, drains, cost-of-living and the card timer while the hint is up
+        }
+
+        private void DismissTutorial()
+        {
+            if (!_tutorialShowing) return;
+            _tutorialShowing = false;
+            _moneyTutorialSeen = true;
+            _tutorialOverlay.SetActive(false);
+            _game.Paused = false;
+        }
+
         // ================================================================ refresh / events
 
         private void Refresh()
@@ -416,6 +543,18 @@ namespace ThanksNoThanks
             _openerPanel.SetActive(opener);
             _gamePanel.SetActive(playing);
             _finalePanel.SetActive(finale);
+
+            // Fresh life → the money tutorial is armed again and any leftover overlay is cleared.
+            if (playing && !_wasPlaying)
+            {
+                _moneyTutorialSeen = false;
+                _tutorialShowing = false;
+                _tutorialOverlay.SetActive(false);
+                _game.Paused = false;
+                _crankCap.Reset();
+            }
+            if (!playing && _tutorialShowing) DismissTutorial();
+            _wasPlaying = playing;
 
             if (playing)
             {
@@ -436,6 +575,9 @@ namespace ThanksNoThanks
             if (_game == null || _game.State != GameState.Playing) return;
             var c = _game.CurrentCard;
             _cardText.text = c != null ? c.Question : "";
+            bool blocked = _game.CurrentCardBlocked;
+            _blockVeil.SetActive(blocked);        // S10: dim the card + red banner when unaffordable
+            _blockBanner.SetActive(blocked);
             UpdateHudValues();
             ApplyAgeGates(_game.Age);
             if (c != null && isActiveAndEnabled)
@@ -449,7 +591,7 @@ namespace ThanksNoThanks
         {
             var s = _game.Scales;
             _ageText.text = Mathf.FloorToInt(_game.Age).ToString();
-            _moneyText.text = "₽ " + FormatThousands(s.Money);
+            _moneyText.text = FormatMoney(_game.Money);
             _healthFill.fillAmount = Mathf.Clamp01(s.Health / 100f);
             _energyFill.fillAmount = Mathf.Clamp01(s.Energy / 100f);
             float rel = Mathf.Clamp01(s.Relationships / 100f);
@@ -469,9 +611,30 @@ namespace ThanksNoThanks
 
         private void OnInputFx(GameInput input)
         {
+            // MoneyTick FX (pill pulse) is triggered from OnInput's ACCEPTED-crank branch instead —
+            // raw (capped/no-op) presses must not flash feedback for income that didn't land.
             if (_game == null || _game.State != GameState.Playing || !isActiveAndEnabled) return;
+            if (_tutorialShowing) return;
             if (input == GameInput.AnswerYes) StartCoroutine(PunchPlate(_yesRect, YesTilt));
             else if (input == GameInput.AnswerNo) StartCoroutine(PunchPlate(_noRect, NoTilt));
+        }
+
+        // Small pill pulse on each accepted crank tick (feedback that the tick landed).
+        private IEnumerator PulseMoney()
+        {
+            var rt = (RectTransform)_moneyPill.transform;
+            const float dur = 0.12f;
+            float t = 0f;
+            while (t < dur)
+            {
+                t += Time.deltaTime;
+                float k = Mathf.Clamp01(t / dur);
+                float s = 1f + 0.06f * Mathf.Sin(k * Mathf.PI);
+                rt.localScale = new Vector3(s, s, 1f);
+                yield return null;
+            }
+            rt.localScale = Vector3.one;
+            _moneyPulse = null;
         }
 
         // ================================================================ transitions
@@ -526,6 +689,12 @@ namespace ThanksNoThanks
             return value.ToString("#,0", System.Globalization.CultureInfo.InvariantCulture).Replace(',', ' ');
         }
 
+        // Live money → «₽ N» (floored; negative allowed — «в минус», canon).
+        private static string FormatMoney(double value)
+        {
+            return "₽ " + FormatThousands(Mathf.FloorToInt((float)value));
+        }
+
         private Image NewSprite(string name, Transform parent, Sprite sprite)
         {
             var go = new GameObject(name, typeof(RectTransform), typeof(Image));
@@ -533,6 +702,17 @@ namespace ThanksNoThanks
             var img = go.GetComponent<Image>();
             img.sprite = sprite;
             img.color = Color.white;
+            img.raycastTarget = false;
+            return img;
+        }
+
+        /// <summary>A flat solid-colour Image (no sprite) — veils, banners, dimmers.</summary>
+        private Image NewSolid(string name, Transform parent, Color color)
+        {
+            var go = new GameObject(name, typeof(RectTransform), typeof(Image));
+            go.transform.SetParent(parent, false);
+            var img = go.GetComponent<Image>();
+            img.color = color;
             img.raycastTarget = false;
             return img;
         }

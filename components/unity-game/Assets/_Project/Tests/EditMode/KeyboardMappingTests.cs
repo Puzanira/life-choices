@@ -7,12 +7,16 @@ namespace ThanksNoThanks.Tests
 {
     /// <summary>
     /// Verifies the concrete control scheme of the input abstraction:
-    /// ← = ANSWER_YES (ДА), → = ANSWER_NO (СПАСИБО НЕ НАДО), Enter/Numpad-Enter/Space = CONFIRM.
+    /// ← = ANSWER_YES (ДА), → = ANSWER_NO (СПАСИБО НЕ НАДО), Enter/Numpad-Enter = CONFIRM,
+    /// a fresh Space keydown = MONEY_TICK, a held-Space autorepeat = MONEY_TICK_REPEAT.
+    /// (Space→CONFIRM on opener/finale screens is a driver re-map for FRESH presses only,
+    /// deliberately NOT in this pure key→semantic mapping.)
     /// </summary>
     public class KeyboardMappingTests
     {
-        private static List<GameInput> M(bool l, bool r, bool enter, bool numEnter, bool space)
-            => KeyboardInputSource.Map(l, r, enter, numEnter, space).ToList();
+        private static List<GameInput> M(bool l, bool r, bool enter, bool numEnter,
+            bool moneyTick, bool moneyTickRepeat = false)
+            => KeyboardInputSource.Map(l, r, enter, numEnter, moneyTick, moneyTickRepeat).ToList();
 
         [Test]
         public void LeftArrow_IsAnswerYes()
@@ -27,11 +31,23 @@ namespace ThanksNoThanks.Tests
         }
 
         [Test]
-        public void Enter_Space_NumpadEnter_AreConfirm()
+        public void Enter_And_NumpadEnter_AreConfirm()
         {
             CollectionAssert.AreEqual(new[] { GameInput.Confirm }, M(false, false, true, false, false));
             CollectionAssert.AreEqual(new[] { GameInput.Confirm }, M(false, false, false, true, false));
-            CollectionAssert.AreEqual(new[] { GameInput.Confirm }, M(false, false, false, false, true));
+        }
+
+        [Test]
+        public void SpaceTick_IsMoneyTick_NotConfirm()
+        {
+            CollectionAssert.AreEqual(new[] { GameInput.MoneyTick }, M(false, false, false, false, true));
+        }
+
+        [Test]
+        public void SpaceAutoRepeat_IsMoneyTickRepeat_DistinctFromFreshPress()
+        {
+            CollectionAssert.AreEqual(new[] { GameInput.MoneyTickRepeat },
+                M(false, false, false, false, false, true));
         }
 
         [Test]

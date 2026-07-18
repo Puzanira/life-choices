@@ -24,6 +24,22 @@ namespace ThanksNoThanks
         public const int JoyfulOldAgeRelationships = 60;   // >= → весёлая старость
         public const int LonelyOldAgeRelationships = 50;   // <= → одинокая старость
 
+        // ---- money crank (tunable; canon §Деньги + §Сводка констант) ----
+        public const int MoneyOpenAge = 18;                  // деньги открываются в 18 («работа»)
+        public const double MoneyTickIncome = 1.0;           // +1₽ × множитель за тик
+        public const double CostOfLivingPerSec = 0.5;        // −0.5₽/сек, пока деньги открыты
+        public const int UniversityMultFromAge = 25;         // универ-множитель включается с 25 (FROM:25)
+
+        // BLOCK$ prices — из прозы канона (не в CSV), тюнинг-константы. Карта недоступна при деньгах < цены.
+        // LT08 (100₽) — вне scope (системная карта здоровья, hard-excluded из колоды), но цена учтена
+        //   на случай появления, чтобы BLOCK$ работал единообразно.
+        public static readonly IReadOnlyDictionary<string, double> BlockPrices = new Dictionary<string, double>
+        {
+            { "MD03", 60 },   // отпуск
+            { "LT02", 120 },  // операция
+            { "LT08", 100 },  // подлечиться (вне scope)
+        };
+
         private List<Card> _deck;
         private List<Card> _reserve = new();             // top-up pool for skipped chain-gated cards
         private readonly Func<IReadOnlyList<Card>> _deckFactory; // re-samples a fresh deck per life
@@ -45,6 +61,44 @@ namespace ThanksNoThanks
         public Scales Scales { get; } = new Scales();
         public float Age { get; private set; }
 
+        // ---- live money economy (float ₽; may go negative — «в минус», canon; no death from money) ----
+        private struct ActiveMult { public double Value; public int FromAge; }
+        private struct MoneyDrain { public double PerSec; public float StartAge; public float EndAge; }
+        private readonly List<ActiveMult> _mults = new();
+        private readonly List<MoneyDrain> _drains = new();
+
+        /// <summary>Live money in ₽ (fractional; negative allowed). Authoritative for the HUD pill.</summary>
+        public double Money { get; private set; }
+
+        /// <summary>True once the money scale has opened (Age ≥ <see cref="MoneyOpenAge"/>). One-shot per life.</summary>
+        public bool MoneyOpen { get; private set; }
+
+        /// <summary>
+        /// Tutorial-pause flag (set by the driver while the S5 overlay is up). While true, <see cref="Tick"/>
+        /// freezes EVERYTHING — age, cost-of-living, installment drains and the card timer (canon §Подсказки).
+        /// Pure Game exposes it; the visual overlay lives in the driver.
+        /// </summary>
+        public bool Paused { get; set; }
+
+        /// <summary>
+        /// BLOCK$ state of the CURRENT card, fixed at draw time: true when the card is a BLOCK$ card and
+        /// money was below its price when it came up. Timer still runs; any answer/timeout skips it with
+        /// no Δ, no necrolog line, no reschedule (design-agent variant «а», мокап S10).
+        /// </summary>
+        public bool CurrentCardBlocked { get; private set; }
+
+        /// <summary>Current income multiplier (product of active FROM-gated multipliers). ≥ 1 unless wiped.</summary>
+        public double IncomeMultiplier
+        {
+            get
+            {
+                double m = 1.0;
+                foreach (var a in _mults)
+                    if (a.FromAge == 0 || Age >= a.FromAge) m *= a.Value;
+                return m;
+            }
+        }
+
         /// <summary>
         /// The age timer starts only when the card flagged <see cref="Card.StartsAgeTimer"/>
         /// (I03 «Сделать первый шаг?») resolves — with either answer. Until then Age stays 0.
@@ -56,6 +110,8 @@ namespace ThanksNoThanks
 
         public event Action StateChanged;
         public event Action CardChanged;
+        /// <summary>Fired the first time money opens in a life (drives the S5 tutorial overlay + pause).</summary>
+        public event Action MoneyOpened;
 
         public Game(IEnumerable<Card> deck, Func<bool> coin = null, IEnumerable<Card> reserve = null)
         {
@@ -113,6 +169,7 @@ namespace ThanksNoThanks
                 case GameState.Playing:
                     if (input == GameInput.AnswerYes) Answer(true);
                     else if (input == GameInput.AnswerNo) Answer(false);
+                    else if (input == GameInput.MoneyTick) Crank();
                     break;
                 case GameState.Finale:
                     if (input == GameInput.Confirm) ToOpener();
@@ -137,6 +194,7 @@ namespace ThanksNoThanks
             _scheduledFatalAge = float.NaN;
             _scheduledFatalCause = null;
             _coasting = false;
+            ResetMoney();
             State = GameState.Playing;
             StateChanged?.Invoke();
             Advance();
@@ -146,6 +204,7 @@ namespace ThanksNoThanks
         public void Tick(float dt)
         {
             if (State != GameState.Playing) return;
+            if (Paused) return; // tutorial overlay up — freeze age, drains, cost-of-living and the card timer
 
             if (CurrentCard == null)
             {
@@ -154,6 +213,8 @@ namespace ThanksNoThanks
                 if (_coasting)
                 {
                     Age += AgeCatchUpPerSecond * dt;
+                    if (CheckMoneyOpen()) return; // tutorial pause can fire even during the coast
+                    IntegrateMoney(dt);
                     CheckScheduledFatal();
                 }
                 return;
@@ -167,12 +228,25 @@ namespace ThanksNoThanks
                 else
                     Age += AgeSlowTickPerSecond * dt;
 
+                if (CheckMoneyOpen()) return;      // open money → tutorial pause may freeze this frame
                 if (CheckScheduledFatal()) return; // «за вами пришли» once age crosses card.Age+n
             }
+
+            IntegrateMoney(dt);                    // cost-of-living + installment drains (real-time)
 
             CardTimer -= dt;
             if (CardTimer <= 0f)
                 Answer(_coin());   // не успел — берём ДА или НЕТ случайно
+        }
+
+        // Opens the money scale the first time Age reaches 18 and announces it (tutorial + pause hook).
+        // Returns true if the frame should stop here (a listener paused the game on open).
+        private bool CheckMoneyOpen()
+        {
+            if (MoneyOpen || Age < MoneyOpenAge) return false;
+            MoneyOpen = true;
+            MoneyOpened?.Invoke();   // driver shows the S5 overlay and sets Paused
+            return Paused;
         }
 
         // A CHAIN child is drawable only after its parent resolved ДА. Parents always precede their
@@ -195,6 +269,10 @@ namespace ThanksNoThanks
                     continue;
                 }
                 CurrentCard = c;
+                // BLOCK$ affordability fixed at draw time («на момент показа денег меньше цены»).
+                CurrentCardBlocked = c.IsBlockCost
+                    && BlockPrices.TryGetValue(c.Id, out var price)
+                    && Money < price;
                 CardTimer = CardSeconds;
                 CardChanged?.Invoke();
                 return;
@@ -265,6 +343,14 @@ namespace ThanksNoThanks
             var card = CurrentCard;
             if (card == null) return;
 
+            // BLOCK$ при нехватке денег: любой ответ/таймаут = пропуск без Δ, без некролога, без
+            // записи ответа (CHAIN-гейт не считает это ДА) и без повторного выпадения — просто дальше.
+            if (CurrentCardBlocked)
+            {
+                Advance();
+                return;
+            }
+
             _answers[card.Id] = yes;   // recorded before consequences so CHAIN gates can read it
 
             if (card.StartsAgeTimer)
@@ -272,7 +358,8 @@ namespace ThanksNoThanks
 
             if (!card.IsNoCons)
             {
-                Scales.Apply(yes ? card.YesDeltas : card.NoDeltas, _coin);
+                ApplyCardDeltas(yes ? card.YesDeltas : card.NoDeltas); // money Δ → live float; rest → Scales
+                if (yes) ApplyLongEffects(card);                       // multipliers / installment drains (on ДА)
                 // FORCED cards (вехи/объявления, no real choice) NEVER write a necrolog line — canon.
                 // Enforced structurally here, independent of what the CSV cell happens to hold.
                 if (!card.IsForced)
@@ -336,9 +423,96 @@ namespace ThanksNoThanks
             _scheduledFatalAge = float.NaN;
             _scheduledFatalCause = null;
             _coasting = false;
+            ResetMoney();
             CurrentCard = null;
             State = GameState.Opener;
             StateChanged?.Invoke();
+        }
+
+        // ================================================================ money crank
+
+        private void ResetMoney()
+        {
+            Money = 0;
+            MoneyOpen = false;
+            Paused = false;
+            CurrentCardBlocked = false;
+            _mults.Clear();
+            _drains.Clear();
+        }
+
+        /// <summary>MONEY_TICK: +1₽ × multiplier. No-op unless money is open and the run is live/unpaused.</summary>
+        private void Crank()
+        {
+            if (!MoneyOpen || Paused) return;
+            Money += MoneyTickIncome * IncomeMultiplier;
+        }
+
+        // Real-time money integration for one Tick step (cost-of-living + active installment drains).
+        // Rate is per REAL second; drain windows are measured in GAME-years (canon reading, see report).
+        private void IntegrateMoney(float dt)
+        {
+            if (!MoneyOpen) return;
+            Money -= CostOfLivingPerSec * dt;
+            foreach (var d in _drains)
+                if (Age >= d.StartAge && Age < d.EndAge)
+                    Money += d.PerSec * dt;   // PerSec is signed (e.g. −0.3)
+        }
+
+        // Apply a card's «Длительный эффект» money entries on ДА (multipliers + installment drains).
+        private void ApplyLongEffects(Card card)
+        {
+            foreach (var e in card.LongEffects)
+            {
+                if (e.Scale != Scale.Money) continue;   // non-money (e.g. health MULT) inert this increment
+                if (e.Kind == LongEffectKind.Mult)
+                {
+                    if (e.RandomZero)
+                    {
+                        // «×5 или обнуление денег» (YA02): coin win → ongoing ×MultValue income multiplier;
+                        // coin loss → wipe current money to 0 (one-shot). Reading noted in the report.
+                        if (_coin()) _mults.Add(new ActiveMult { Value = e.MultValue, FromAge = e.FromAge });
+                        else Money = 0;
+                    }
+                    else
+                    {
+                        _mults.Add(new ActiveMult { Value = e.MultValue, FromAge = e.FromAge });
+                    }
+                }
+                else // Drain: starts NOW (on ДА), lasts DurYears game-years
+                {
+                    _drains.Add(new MoneyDrain
+                    {
+                        PerSec = e.DrainPerSec,
+                        StartAge = Age,
+                        EndAge = Age + e.DurYears,
+                    });
+                }
+            }
+        }
+
+        // Route a card's money Δ onto the live float (the authoritative money); non-money deltas go to Scales.
+        private void ApplyCardDeltas(IReadOnlyList<ScaleDelta> deltas)
+        {
+            if (deltas == null) return;
+            List<ScaleDelta> nonMoney = null;
+            foreach (var d in deltas)
+            {
+                if (d.Scale == Scale.Money)
+                {
+                    switch (d.Kind)
+                    {
+                        case DeltaKind.Add: Money += d.Value; break;
+                        case DeltaKind.RandomPlusMinus: Money += _coin() ? d.Value : -d.Value; break;
+                        case DeltaKind.Set: Money = d.Value; break;
+                    }
+                }
+                else
+                {
+                    (nonMoney ??= new List<ScaleDelta>()).Add(d);
+                }
+            }
+            if (nonMoney != null) Scales.Apply(nonMoney, _coin);
         }
     }
 }

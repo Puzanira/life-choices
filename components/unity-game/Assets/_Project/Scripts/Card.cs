@@ -27,6 +27,32 @@ namespace ThanksNoThanks
         }
     }
 
+    public enum LongEffectKind
+    {
+        Mult,   // income multiplier (MULT:Дн=x2 FROM:25 / x1.5 / x5|0)
+        Drain   // timed drain / installment (DRAIN:Дн=-0.3/s DUR:10y)
+    }
+
+    /// <summary>
+    /// A durable effect parsed from the «Длительный эффект» column (col 13, 2026-07-18 canon).
+    /// Applied on ДА. Only <see cref="Scale.Money"/> effects act this increment (income multipliers
+    /// and installment drains); non-money entries (e.g. health MULT) parse but stay inert.
+    /// </summary>
+    public struct LongEffect
+    {
+        public LongEffectKind Kind;
+        public Scale Scale;      // target scale (Дн = Money)
+
+        // --- Mult ---
+        public double MultValue; // ×2 / ×1.5 / ×5
+        public bool RandomZero;  // "x5|0": coin → ×MultValue OR wipe money to 0 (RANDOM_OUTCOME)
+        public int FromAge;      // FROM:n → multiplier active only once Age >= n (0 = immediately)
+
+        // --- Drain ---
+        public double DrainPerSec; // signed ₽/сек while active (e.g. -0.3)
+        public int DurYears;       // DUR:Ny → active for N game-years from its start
+    }
+
     /// <summary>
     /// One question card. Pure data — no engine references. Built by <see cref="CardLoader"/>
     /// from scenes.csv (the authoritative source of text/Δ/flags/necrolog lines).
@@ -50,6 +76,19 @@ namespace ThanksNoThanks
         public bool IsNoCons;         // NOCONS — intro card, apply nothing / no necrolog line
         public bool IsRond;           // ROND   — droppable from the necrolog first when over the limit
         public bool YesIsFatal;       // FATAL  — choosing ДА ends the run immediately
+
+        /// <summary>
+        /// BLOCK$ — карта доступна только при деньгах ≥ цены. Цена — в прозе (тюнинг-константы в
+        /// <see cref="Game"/>), не в CSV. При нехватке денег карта выпадает затемнённой и пропускается
+        /// без Δ и без строки некролога (мокап S10). Обрабатывается в <see cref="Game"/>.
+        /// </summary>
+        public bool IsBlockCost;
+
+        /// <summary>
+        /// «Длительный эффект» (col 13): множители дохода и рассрочки-дренажи. Применяются на ДА.
+        /// Только денежные (Дн) действуют в этом инкременте; прочие парсятся, но инертны.
+        /// </summary>
+        public IReadOnlyList<LongEffect> LongEffects = System.Array.Empty<LongEffect>();
 
         /// <summary>
         /// FORCED — веха/объявление: карта показывается, но реального выбора нет. Такие карты
