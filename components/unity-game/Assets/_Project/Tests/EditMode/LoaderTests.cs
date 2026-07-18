@@ -11,6 +11,10 @@ namespace ThanksNoThanks.Tests
         private const string HeaderLine =
             "ID,Карточка,Когда,Тип,ДА-проза,ДА-Δ,НЕТ-проза,НЕТ-Δ,ВедущийДА,ВедущийНЕТ,НекроДА,НекроНЕТ,Флаги\n";
 
+        // Canon 2026-07-18 header with the 14th column «Длительный эффект».
+        private const string HeaderLine14 =
+            "ID,Карточка,Когда,Тип,ДА-проза,ДА-Δ,НЕТ-проза,НЕТ-Δ,ВедущийДА,ВедущийНЕТ,НекроДА,НекроНЕТ,Флаги,Длительный эффект\n";
+
         [Test]
         public void Tolerant_Parses_QuotedCommas_BlankFields_BothMinusSigns_NonContiguousIds()
         {
@@ -98,6 +102,98 @@ namespace ThanksNoThanks.Tests
             var rnd01 = all.First(c => c.Id == "RND01");
             Assert.IsFalse(rnd01.YesIsFatal, "RND01 is NOT immediate");
             Assert.AreEqual(3, rnd01.DelayedFatalYears, "RND01 fatal deferred by 3 event-years");
+        }
+
+        // ---- canon 2026-07-18: FORCED + RANDOM_TRIGGER/OUTCOME split + 14th column ----
+
+        [Test]
+        public void ForcedFlag_And_RandomSplit_Parse_FromFlagsColumn()
+        {
+            string csv = HeaderLine14 +
+                // FORCED веха; RANDOM_TRIGGER (вероятностное выпадение); RANDOM_OUTCOME (случаен исход)
+                "YA05,Усталость,25,Таймлайн,,—,,Эн −1,,,—,—,\"OPEN:Эн, TIMELINE, FORCED\",—\n" +
+                "RND06,Селфи,любой,Фатальная,,—,,—,,,—,СтрокаНЕТ,\"FATAL, RANDOM_TRIGGER\",—\n" +
+                "YA02,Стартап,\"19–21, если YA01=ДА\",Развилка,,Дн ±3,,—,,,ДА,—,RANDOM_OUTCOME,MULT:Дн=x5|0\n";
+            var all = CardLoader.ParseAll(csv);
+
+            var ya05 = all.First(c => c.Id == "YA05");
+            Assert.IsTrue(ya05.IsForced, "FORCED parsed on YA05");
+            Assert.IsFalse(ya05.IsRandomTrigger); Assert.IsFalse(ya05.IsRandomOutcome);
+
+            var rnd06 = all.First(c => c.Id == "RND06");
+            Assert.IsTrue(rnd06.IsRandomTrigger, "RANDOM_TRIGGER = probabilistic inclusion marker");
+            Assert.IsFalse(rnd06.IsRandomOutcome, "not an outcome-random card");
+            Assert.IsTrue(rnd06.YesIsFatal, "FATAL still parsed alongside RANDOM_TRIGGER");
+
+            var ya02 = all.First(c => c.Id == "YA02");
+            Assert.IsTrue(ya02.IsRandomOutcome, "RANDOM_OUTCOME parsed on YA02");
+            Assert.IsFalse(ya02.IsRandomTrigger, "RANDOM_OUTCOME is NOT a probabilistic-inclusion marker");
+            Assert.AreEqual(DeltaKind.RandomPlusMinus, ya02.YesDeltas[0].Kind, "outcome randomness lives in ±Δ");
+        }
+
+        [Test]
+        public void LegacyRandomLiteral_MapsTo_RandomTrigger()
+        {
+            // The OLD snapshot used a bare "RANDOM" flag; it must still load and behave as TRIGGER
+            // (backward compat so both snapshots parse).
+            string csv = HeaderLine +
+                "RND06,Селфи,любой,Фатальная,,—,,—,,,—,СтрокаНЕТ,\"FATAL, RANDOM\"\n";
+            var rnd06 = CardLoader.ParseAll(csv).First(c => c.Id == "RND06");
+            Assert.IsTrue(rnd06.IsRandomTrigger, "legacy RANDOM → probabilistic-inclusion (TRIGGER)");
+            Assert.IsFalse(rnd06.IsRandomOutcome, "legacy RANDOM is not OUTCOME");
+        }
+
+        [Test]
+        public void FourteenthColumn_Tolerated_PresentAndAbsent_InSameParse()
+        {
+            // A 14-column row (canon) and a 13-column row (old) parse side by side. The «Длительный
+            // эффект» cell (index 13) must NEVER be read as a flag — proven with a red-herring "FORCED"
+            // placed in the 14th column of the first row: flags live only in column 12.
+            string csv = HeaderLine14 +
+                // 14 cols: real flag TIMELINE in col12; a decoy "FORCED" in the 14th «Длительный эффект».
+                "YA01,Универ,18,Развилка,,Дн −1,,\"Дн +1, Эн −1\",Умница!,,ОкупилосьДА,СвободноНЕТ,TIMELINE,FORCED\n" +
+                // 13 cols (old snapshot shape): genuine FORCED in col12, no 14th cell at all.
+                "YA05,Усталость,25,Таймлайн,,—,,Эн −1,,,—,—,\"TIMELINE, FORCED\"\n";
+            var all = CardLoader.ParseAll(csv);
+            Assert.AreEqual(2, all.Count, "both the 14-col and the 13-col row parsed");
+
+            var ya01 = all.First(c => c.Id == "YA01");
+            Assert.IsFalse(ya01.IsForced, "the 14th «Длительный эффект» cell is NOT read as a flag");
+            Assert.IsTrue(ya01.NoDeltas.Any(d => d.Scale == Scale.Money && d.Value == 1), "YA01 НЕТ Дн +1 intact");
+
+            var ya05 = all.First(c => c.Id == "YA05");
+            Assert.IsTrue(ya05.IsForced, "13-col row still parses its flags column (genuine FORCED)");
+        }
+
+        [Test]
+        public void Lt02_When_YieldsWindow_55_to_70_FromCanon()
+        {
+            // Canon «Когда» is now «55–70, если Здр<50%» — prose after the comma must be stripped,
+            // leaving the age window 55–70.
+            var asset = Resources.Load<TextAsset>("scenes");
+            Assert.IsNotNull(asset);
+            var lt02 = CardLoader.ParseAll(asset.text).First(c => c.Id == "LT02");
+            Assert.AreEqual(55, lt02.Age, "leading age parsed from «55–70, если Здр<50%»");
+            var w = DeckSampler.AgeWindow.Parse(lt02.When);
+            Assert.AreEqual(55, w.Min); Assert.AreEqual(70, w.Max);
+        }
+
+        [Test]
+        public void Canon_Snapshot_Flags_Parse_Forced_And_RandomSplit()
+        {
+            // Spot-check the real (refreshed) Resources snapshot carries the canon flags.
+            var asset = Resources.Load<TextAsset>("scenes");
+            Assert.IsNotNull(asset);
+            var byId = CardLoader.ParseAll(asset.text).ToDictionary(c => c.Id);
+
+            Assert.IsTrue(byId["YA05"].IsForced, "YA05 FORCED");
+            Assert.IsTrue(byId["CR00"].IsForced, "CR00 FORCED");
+            Assert.IsTrue(byId["CR09"].IsForced, "CR09 FORCED");
+            Assert.IsTrue(byId["RND06"].IsRandomTrigger, "RND06 RANDOM_TRIGGER");
+            Assert.IsTrue(byId["LT08"].IsRandomTrigger, "LT08 RANDOM_TRIGGER");
+            Assert.IsTrue(byId["YA02"].IsRandomOutcome && !byId["YA02"].IsRandomTrigger, "YA02 OUTCOME only");
+            Assert.IsTrue(byId["RND04"].IsRandomOutcome && !byId["RND04"].IsRandomTrigger, "RND04 OUTCOME only");
+            Assert.IsFalse(byId["RND01"].IsRandomTrigger, "RND01 is a normal card (never RANDOM in canon)");
         }
 
         [Test]

@@ -22,7 +22,8 @@ namespace ThanksNoThanks
     ///  • hard-excluded IDs (crisis block, system-only cards) never appear;
     ///  • TIMELINE milestones are always included at their canonical age;
     ///  • non-milestone cards are sampled per life-phase so the run stays ~25–30 cards;
-    ///  • RANDOM-flagged cards (+ RND01) roll for probabilistic inclusion;
+    ///  • RANDOM_TRIGGER cards roll for probabilistic inclusion (RND06 in the pool; CR09/LT08 excluded);
+    ///    RANDOM_OUTCOME (YA02/RND04) and RND01 draw by the normal rules (only their outcome is random);
     ///  • CHAIN children are placed in the age-sorted plan but tagged with a parent-ДА gate that
     ///    <see cref="Game"/> checks at draw time (so the child is skipped unless the parent said ДА);
     ///  • RND01 is turned into a delayed fatal by <see cref="CardLoader"/> (age + n → «за вами пришли»).
@@ -39,7 +40,7 @@ namespace ThanksNoThanks
 
         public const int MinDeck = 25;
         public const int MaxDeck = 30;
-        public const double RandomInclusionChance = 0.5; // per RANDOM/RND01 card, each run
+        public const double RandomInclusionChance = 0.5; // per RANDOM_TRIGGER card, each run
 
         // Per-phase non-milestone sample sizes (childhood is a range; the rest are fixed targets).
         public const int ChildhoodMin = 6;
@@ -71,10 +72,10 @@ namespace ThanksNoThanks
 
         // Conditional milestones — always placed in the plan, gated at runtime.
         private static readonly string[] ConditionalMilestones = { "MD02", "LT04" };
-        // Chained non-milestone cards — same treatment.
-        private static readonly string[] ChainedNormals = { "LT07", "MD07" };
-        // Probabilistic inclusion group: RANDOM-flagged + RND01 (delayed fatal). YA02 also chained.
-        private static readonly string[] Probabilistic = { "YA02", "RND04", "RND06", "RND01" };
+        // Chained non-milestone cards — same treatment. YA02 (стартап ← универ) is RANDOM_OUTCOME,
+        // not RANDOM_TRIGGER, so it is a NORMAL chained card now: always placed, gated on YA01=ДА;
+        // only its ±Δ outcome is random.
+        private static readonly string[] ChainedNormals = { "LT07", "MD07", "YA02" };
 
         /// <summary>Convenience: parse the CSV and sample one deck.</summary>
         public static List<Card> SampleFromCsv(string csv, Random rng)
@@ -130,15 +131,19 @@ namespace ThanksNoThanks
                 handled.Add(id);
             }
 
-            // 4) Probabilistic inclusion (RANDOM cards + RND01), each an independent coin per run.
-            foreach (var id in Probabilistic)
+            // 4) Probabilistic inclusion — cards flagged RANDOM_TRIGGER (canon) or legacy RANDOM,
+            //    each an independent coin per run. In the playable pool this is RND06 (селфи);
+            //    CR09/LT08 (the other RANDOM_TRIGGER cards) are hard-excluded. RANDOM_OUTCOME cards
+            //    (YA02/RND04) and RND01 are NOT here — they draw by the normal rules below.
+            //    Iterated in source order for deterministic seeded output.
+            foreach (var c in byId.Values.Where(c => c.IsRandomTrigger).OrderBy(c => c.Order).ToList())
             {
-                if (handled.Contains(id) || !byId.TryGetValue(id, out var c)) continue;
-                if (rng.NextDouble() >= RandomInclusionChance) { handled.Add(id); continue; }
+                if (handled.Contains(c.Id)) continue;
+                if (rng.NextDouble() >= RandomInclusionChance) { handled.Add(c.Id); continue; }
                 c.Age = AssignAge(c, rng);
-                if (ChainParent.TryGetValue(id, out var parent)) c.RequiresParentYes = parent;
+                if (ChainParent.TryGetValue(c.Id, out var parent)) c.RequiresParentYes = parent;
                 deck.Add(c);
-                handled.Add(id);
+                handled.Add(c.Id);
             }
 
             // 5) Non-milestone pool → phase buckets → sampled to fill the run.

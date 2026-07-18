@@ -9,8 +9,17 @@ namespace ThanksNoThanks
     /// Tolerant loader for scenes.csv (the authoritative card source).
     /// Handles quoted commas, blank fields, unicode (−) AND ascii (-) minus, and
     /// non-contiguous IDs (I01/LT06/RND02 are absent — never assume a dense range).
-    /// Unsupported flags (OPEN:*, CHAIN→, DELAY, BLOCK$, INVERT, BLITZ, ZONE, RANDOM)
-    /// are parsed and ignored, never crash.
+    /// Unsupported flags (OPEN:*, CHAIN→, DELAY, BLOCK$, INVERT, BLITZ, ZONE) are parsed
+    /// and ignored, never crash.
+    ///
+    /// Flag semantics honoured here (canon scenes.csv 2026-07-18):
+    ///  • FORCED         → веха/объявление (no real choice); never contributes a necrolog line.
+    ///  • RANDOM_TRIGGER → probabilistic INCLUSION marker (whether the card appears at all).
+    ///  • RANDOM_OUTCOME → random OUTCOME marker (already carried by ±N deltas); mechanical no-op.
+    ///  • legacy "RANDOM" → mapped to RANDOM_TRIGGER (backward compat with the old snapshot).
+    ///
+    /// The optional 14th column «Длительный эффект» (MULT/DRAIN/FROM/DUR grammar) is tolerated
+    /// both when present and when absent — flags always live in column 12, so it is simply ignored.
     /// </summary>
     public static class CardLoader
     {
@@ -99,6 +108,11 @@ namespace ThanksNoThanks
                 };
                 card.IsNoCons = flags.Contains("NOCONS");
                 card.IsRond = flags.Contains("ROND");
+                card.IsForced = flags.Contains("FORCED");
+                // Probabilistic inclusion keys on RANDOM_TRIGGER; legacy "RANDOM" means the same
+                // (old snapshot). RANDOM_OUTCOME is a separate, mechanically-inert marker.
+                card.IsRandomTrigger = flags.Contains("RANDOM_TRIGGER") || flags.Contains("RANDOM");
+                card.IsRandomOutcome = flags.Contains("RANDOM_OUTCOME");
                 bool hasFatal = flags.Contains("FATAL");
                 int delayYears = ParseDelayYears(flags);
                 // DELAY(n)+FATAL (RND01) is a *delayed* fatal: ДА doesn't end the run now, the

@@ -515,6 +515,28 @@ namespace ThanksNoThanks.Tests
             Assert.AreEqual(Necrolog.ParentsLine, g.Necrolog.StoryLines[0], "necrolog opens with parents");
         }
 
+        // ---- FORCED cards never contribute a necrolog line (canon; enforced structurally) ----
+
+        [Test]
+        public void ForcedCard_NeverWritesNecrologLine_EvenWithProse()
+        {
+            // A FORCED card carrying (contrived) necrolog prose must still be excluded structurally.
+            var forced = Plain("YA05", 25, yesNec: "НЕ ДОЛЖНО ПОПАСТЬ", noNec: "И ЭТО ТОЖЕ НЕТ");
+            forced.IsForced = true;
+            var normal = Plain("N", 30, yesNec: "обычная строка");
+
+            var g = new Game(new[] { forced, normal }, coin: () => false);
+            g.StartLife();
+            g.HandleInput(GameInput.AnswerYes);          // resolve FORCED (ДА)
+            g.HandleInput(GameInput.AnswerYes);          // resolve normal → deck ends → finale
+
+            Assert.AreEqual(GameState.Finale, g.State);
+            var lines = g.Necrolog.StoryLines;
+            CollectionAssert.DoesNotContain(lines, "НЕ ДОЛЖНО ПОПАСТЬ", "FORCED ДА line excluded");
+            CollectionAssert.DoesNotContain(lines, "И ЭТО ТОЖЕ НЕТ", "FORCED НЕТ line excluded");
+            CollectionAssert.Contains(lines, "обычная строка", "normal card's line still recorded");
+        }
+
         [Test]
         public void Restart_FromFinale_ResetsState()
         {

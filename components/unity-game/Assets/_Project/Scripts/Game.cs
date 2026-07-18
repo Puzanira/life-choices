@@ -273,15 +273,20 @@ namespace ThanksNoThanks
             if (!card.IsNoCons)
             {
                 Scales.Apply(yes ? card.YesDeltas : card.NoDeltas, _coin);
-                string line = yes ? card.YesNecrolog : card.NoNecrolog;
-                if (!string.IsNullOrEmpty(line))
-                    _entries.Add(new NecrologEntry
-                    {
-                        Age = card.Age,
-                        Order = card.Order,
-                        Line = line,
-                        IsRond = card.IsRond,
-                    });
+                // FORCED cards (вехи/объявления, no real choice) NEVER write a necrolog line — canon.
+                // Enforced structurally here, independent of what the CSV cell happens to hold.
+                if (!card.IsForced)
+                {
+                    string line = yes ? card.YesNecrolog : card.NoNecrolog;
+                    if (!string.IsNullOrEmpty(line))
+                        _entries.Add(new NecrologEntry
+                        {
+                            Age = card.Age,
+                            Order = card.Order,
+                            Line = line,
+                            IsRond = card.IsRond,
+                        });
+                }
             }
 
             // Delayed fatal (RND01): ДА schedules «за вами пришли» for card.Age + n, life continues.

@@ -50,6 +50,24 @@ namespace ThanksNoThanks
         public bool IsNoCons;         // NOCONS — intro card, apply nothing / no necrolog line
         public bool IsRond;           // ROND   — droppable from the necrolog first when over the limit
         public bool YesIsFatal;       // FATAL  — choosing ДА ends the run immediately
+
+        /// <summary>
+        /// FORCED — веха/объявление: карта показывается, но реального выбора нет. Такие карты
+        /// НИКОГДА не пишут строк в некролог (канон; enforced structurally by <see cref="Game"/>).
+        /// </summary>
+        public bool IsForced;
+
+        /// <summary>
+        /// RANDOM_TRIGGER (или legacy «RANDOM») — вероятностное ВЫПАДЕНИЕ карты: появится ли она
+        /// в забеге вообще. Ключ для вероятностной выборки в <see cref="DeckSampler"/>.
+        /// </summary>
+        public bool IsRandomTrigger;
+
+        /// <summary>
+        /// RANDOM_OUTCOME — случаен ИСХОД карты (уже реализован через ±N в Δ-колонке), НЕ выпадение.
+        /// Механически no-op в этом инкременте; хранится для тестов/ясности (карта выбирается обычно).
+        /// </summary>
+        public bool IsRandomOutcome;
         public string FatalCause;     // cause phrase for the finale when this card is fatal
         public bool StartsAgeTimer;   // resolving this card (either answer) starts the age timer (I03)
 

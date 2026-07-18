@@ -140,6 +140,43 @@ namespace ThanksNoThanks.Tests
             }
         }
 
+        // ---- RANDOM_TRIGGER is probabilistic; RANDOM_OUTCOME / normal cards are not ----
+
+        [Test]
+        public void RandomTrigger_IsProbabilistic_RandomOutcome_And_Normals_AreNot()
+        {
+            int rnd06Present = 0;      // RANDOM_TRIGGER (селфи): probabilistic inclusion
+            int ya02Present = 0;       // RANDOM_OUTCOME (стартап, gated): ALWAYS placed
+            int seeds = 60;
+
+            for (int seed = 0; seed < seeds; seed++)
+            {
+                var ids = Sample(seed).Select(c => c.Id).ToHashSet();
+                if (ids.Contains("RND06")) rnd06Present++;
+                if (ids.Contains("YA02")) ya02Present++;
+            }
+
+            // RANDOM_TRIGGER card must appear in SOME runs and be absent in OTHERS (~coin per run).
+            Assert.Greater(rnd06Present, 0, "RND06 (RANDOM_TRIGGER) appears in some runs");
+            Assert.Less(rnd06Present, seeds, "RND06 (RANDOM_TRIGGER) is absent in some runs");
+
+            // RANDOM_OUTCOME card is a normal (gated) card now: placed in EVERY plan, not coin-gated.
+            Assert.AreEqual(seeds, ya02Present,
+                "YA02 (RANDOM_OUTCOME) is always in the plan — only its ±Δ outcome is random");
+        }
+
+        [Test]
+        public void YA02_Is_Gated_OnYA01_NotProbabilistic()
+        {
+            for (int seed = 1; seed <= 10; seed++)
+            {
+                var byId = Sample(seed).ToDictionary(c => c.Id);
+                Assert.IsTrue(byId.ContainsKey("YA02"), "YA02 always placed (gated, not probabilistic)");
+                Assert.AreEqual("YA01", byId["YA02"].RequiresParentYes, "YA02 gated on YA01=ДА");
+                Assert.That(byId["YA02"].Age, Is.InRange(19, 21), "YA02 inside its 19–21 window");
+            }
+        }
+
         [Test]
         public void LifePhases_AreSpread_NotFrontLoaded()
         {
