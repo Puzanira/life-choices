@@ -63,6 +63,8 @@ namespace ThanksNoThanks
         private Image _healthFill;
         private Image _energyFill;
         private RectTransform _balancerMarker;
+        private Image _balancerTrackImg;   // tinted red in the >75% «красная зона»
+        private Image _balancerMarkerImg;  // tinted red in the red zone too
         private float _balancerTrackWidth;
 
         // Card
@@ -105,6 +107,7 @@ namespace ThanksNoThanks
         // Reset at the top of Update so the next frame behaves normally.
         private bool _dismissedThisFrame;
         private bool _moneyTutorialSeen;   // one-shot per life; reset on a fresh life
+        private bool _relTutorialSeen;
         private bool _energyTutorialSeen;
         private bool _healthTutorialSeen;
         private bool _burnoutHintSeen;
@@ -112,6 +115,10 @@ namespace ThanksNoThanks
 
         // Burnout state plate (S7): dim-cobalt «ВЫГОРАНИЕ» banner, shown while Game.Burnout is on.
         private GameObject _burnoutPlate;
+
+        // Breakup notice: a transient red «РАССТАЛИСЬ» plate, shown ~2s when Game fires RelationshipBrokeUp.
+        private GameObject _breakupPlate;
+        private readonly TimedReveal _breakupTimer = new(2f);
 
         // Show-reaction brightness veil: full-screen dark Image whose alpha lerps with overall state
         // (ShowMood), «шоу тускнеет» as health+energy sag. Above the panels, below the tutorial overlay.
@@ -152,6 +159,14 @@ namespace ThanksNoThanks
             "содержать себя стоит денег каждую секунду.\n\n" +
             "Рук всего две — крутить и отвечать придётся разом.";
 
+        // NOTE: must NOT contain «УСТАЛОСТЬ» or «ТАЯТЬ» — the PlayMode hint-walker tests key off those
+        // substrings to identify the energy/health hints; a collision would misidentify this one.
+        private const string RelationshipsTutorialText =
+            "ПЕРВАЯ ЛЮБОВЬ!\n\n" +
+            "Появился БАЛАНСИР ОТНОШЕНИЙ — и он всё время сползает вниз.\n" +
+            "Держите маркер в зоне: ↑ тянет вверх, ↓ вниз.\n\n" +
+            "Упустите надолго — расстанетесь. Переусердствуете — ссоры.";
+
         private const string EnergyTutorialText =
             "ПЕРВАЯ УСТАЛОСТЬ!\n\n" +
             "Появилась ЭНЕРГИЯ — и она тает сама собой.\n" +
@@ -191,6 +206,8 @@ namespace ThanksNoThanks
         public GameObject BlockBanner => _blockBanner;
         public Text CardPriceText => _cardPriceText;
         public GameObject BurnoutPlate => _burnoutPlate;
+        public GameObject BreakupPlate => _breakupPlate;
+        public GameObject BalancerMarker => _balancerMarker != null ? _balancerMarker.gameObject : null;
         public Image BrightnessVeil => _brightness;
         public Text TutorialText => _tutorialText;
         public GameObject HostBubble => _hostBubble;
@@ -239,9 +256,11 @@ namespace ThanksNoThanks
             _game.CardChanged += OnCardChanged;
             _game.AnswerResolved += OnAnswerResolved;
             _game.MoneyOpened += OnMoneyOpened;
+            _game.RelationshipsOpened += OnRelationshipsOpened;
             _game.EnergyOpened += OnEnergyOpened;
             _game.HealthOpened += OnHealthOpened;
             _game.BurnoutEntered += OnBurnoutEntered;
+            _game.RelationshipBrokeUp += OnRelationshipBrokeUp;
         }
 
         private void UnsubscribeGame()
@@ -250,9 +269,11 @@ namespace ThanksNoThanks
             _game.CardChanged -= OnCardChanged;
             _game.AnswerResolved -= OnAnswerResolved;
             _game.MoneyOpened -= OnMoneyOpened;
+            _game.RelationshipsOpened -= OnRelationshipsOpened;
             _game.EnergyOpened -= OnEnergyOpened;
             _game.HealthOpened -= OnHealthOpened;
             _game.BurnoutEntered -= OnBurnoutEntered;
+            _game.RelationshipBrokeUp -= OnRelationshipBrokeUp;
         }
 
         /// <summary>
@@ -353,6 +374,10 @@ namespace ThanksNoThanks
                 _energyFill.fillAmount = Mathf.Clamp01(s.Energy / 100f);
                 float rel = Mathf.Clamp01(s.Relationships / 100f);
                 _balancerMarker.anchoredPosition = new Vector2((rel - 0.5f) * _balancerTrackWidth, 0f);
+                // «Красная зона» (>75%): tint the track + marker red so the over-attention risk reads.
+                var relTint = _game.RelationshipRedZone ? TimerRed : Color.white;
+                if (_balancerTrackImg.color != relTint) _balancerTrackImg.color = relTint;
+                if (_balancerMarkerImg.color != relTint) _balancerMarkerImg.color = relTint;
                 if (_burnoutPlate.activeSelf != _game.Burnout) _burnoutPlate.SetActive(_game.Burnout);
                 // Age-gated reveals run every frame (SetActive is a no-op on same value): a widget
                 // opening MID-CARD (18/25/30 crossings) appears the moment its age is crossed instead
@@ -370,16 +395,29 @@ namespace ThanksNoThanks
                     : Vector3.one;
             }
             ReflectHostReveals(_game.State == GameState.Playing);
+            ReflectBreakupPlate(_game.State == GameState.Playing);
             UpdateBrightness();
         }
 
-        // Show-reaction veil: dark alpha follows (health+energy)/2 via ShowMood, smoothed so it never
-        // flickers. Only dims live gameplay; the opener/finale read at full brightness.
+        // Transient «РАССТАЛИСЬ» plate: advance its own ~2s clock and mirror visibility (only while
+        // Playing). The timer keeps its state, so leaving play simply hides it.
+        private void ReflectBreakupPlate(bool playing)
+        {
+            _breakupTimer.Advance(Time.deltaTime);
+            bool show = playing && _breakupTimer.Visible;
+            if (_breakupPlate.activeSelf != show) _breakupPlate.SetActive(show);
+        }
+
+        // Show-reaction veil: dark alpha follows (health+energy+relationships)/3 via ShowMood, smoothed so
+        // it never flickers. Only dims live gameplay; the opener/finale read at full brightness. Until
+        // relationships have gone live (open OR lost) they pass as «full» (100) so they never dim early.
         private void UpdateBrightness()
         {
             if (_brightness == null) return;
+            bool relCounts = _game.RelationshipsOpen || _game.RelationshipsLost;
+            int rel = relCounts ? _game.Scales.Relationships : 100;
             float target = _game.State == GameState.Playing
-                ? (float)ShowMood.DarkAlphaFor(_game.Scales.Health, _game.Scales.Energy)
+                ? (float)ShowMood.DarkAlphaFor(_game.Scales.Health, _game.Scales.Energy, rel)
                 : 0f;
             _brightnessAlpha = Mathf.MoveTowards(_brightnessAlpha, target, 0.6f * Time.deltaTime);
             var c = _brightness.color;
@@ -576,6 +614,15 @@ namespace ThanksNoThanks
             DisplayFx(burnoutTxt);
             _burnoutPlate.SetActive(false);
 
+            // ---- Breakup notice: transient red «РАССТАЛИСЬ» plate (shown ~2s on a breakup) ----
+            _breakupPlate = NewSolid("BreakupPlate", _gamePanel.transform, TimerRed).gameObject;
+            Anchor(_breakupPlate.GetComponent<RectTransform>(), new Vector2(0.775f, 0.70f), new Vector2(360, 96));
+            var breakupTxt = NewText("BreakupText", _breakupPlate.transform,
+                "РАССТАЛИСЬ", 40, TextAnchor.MiddleCenter, Color.white, _display);
+            Stretch(breakupTxt.rectTransform);
+            DisplayFx(breakupTxt);
+            _breakupPlate.SetActive(false);
+
             BuildHostReactions();
         }
 
@@ -649,9 +696,10 @@ namespace ThanksNoThanks
             Anchor(lbl.rectTransform, new Vector2(0.5f, 0.82f), new Vector2(320, 34));
 
             _balancerTrackWidth = 320f;
-            var track = NewSprite("Track", _balancerGroup.transform, Sprite("balancer-track"));
-            Anchor(track.rectTransform, new Vector2(0.5f, 0.34f), new Vector2(_balancerTrackWidth, 46));
-            _balancerMarker = NewSprite("Marker", track.transform, Sprite("balancer-marker")).rectTransform;
+            _balancerTrackImg = NewSprite("Track", _balancerGroup.transform, Sprite("balancer-track"));
+            Anchor(_balancerTrackImg.rectTransform, new Vector2(0.5f, 0.34f), new Vector2(_balancerTrackWidth, 46));
+            _balancerMarkerImg = NewSprite("Marker", _balancerTrackImg.transform, Sprite("balancer-marker"));
+            _balancerMarker = _balancerMarkerImg.rectTransform;
             Anchor(_balancerMarker, new Vector2(0.5f, 0.5f), new Vector2(58, 78));
         }
 
@@ -713,9 +761,14 @@ namespace ThanksNoThanks
         }
 
         private void OnMoneyOpened()  { if (!_moneyTutorialSeen)  ShowTutorial(MoneyTutorialText,  ref _moneyTutorialSeen); }
+        private void OnRelationshipsOpened() { if (!_relTutorialSeen) ShowTutorial(RelationshipsTutorialText, ref _relTutorialSeen); }
         private void OnEnergyOpened() { if (!_energyTutorialSeen) ShowTutorial(EnergyTutorialText, ref _energyTutorialSeen); }
         private void OnHealthOpened() { if (!_healthTutorialSeen) ShowTutorial(HealthTutorialText, ref _healthTutorialSeen); }
         private void OnBurnoutEntered(){ if (!_burnoutHintSeen)  ShowTutorial(BurnoutHintText,   ref _burnoutHintSeen); }
+
+        // Breakup: flash the transient «РАССТАЛИСЬ» plate (auto-hides on its own ~2s clock, reflected in
+        // Update). The balancer HUD hides itself off Game.RelationshipsLost on the next ApplyAgeGates.
+        private void OnRelationshipBrokeUp() => _breakupTimer.Show("РАССТАЛИСЬ");
 
         // Shared S5 hint: pauses the game (freezes age, drains, cost-of-living, decay and the card timer)
         // and shows the modal. The one-shot «seen» flag is set at show time (the hint always resolves via
@@ -765,6 +818,7 @@ namespace ThanksNoThanks
             if (playing && !_wasPlaying)
             {
                 _moneyTutorialSeen = false;
+                _relTutorialSeen = false;
                 _energyTutorialSeen = false;
                 _healthTutorialSeen = false;
                 _burnoutHintSeen = false;
@@ -774,6 +828,8 @@ namespace ThanksNoThanks
                 _crankCap.Reset();
                 _breath.Reset();
                 _burnoutPlate.SetActive(false);
+                _breakupTimer.Hide();
+                _breakupPlate.SetActive(false);
                 _brightnessAlpha = 0f;
                 // Host reveals reset each life: no stale bubble/banner carried across a restart.
                 _bubbleTimer.Hide();
@@ -892,7 +948,8 @@ namespace ThanksNoThanks
             int a = Mathf.FloorToInt(age);
             _ageBadge.SetActive(true);
             _moneyPill.SetActive(a >= MoneyAge);
-            _balancerGroup.SetActive(a >= RelationshipsAge);
+            // Balancer reveals at 20 and hides again after a breakup (partner gone — MD06 reopen deferred).
+            _balancerGroup.SetActive(a >= RelationshipsAge && !_game.RelationshipsLost);
             _energyGroup.SetActive(a >= EnergyAge);
             _healthGroup.SetActive(a >= HealthAge);
         }

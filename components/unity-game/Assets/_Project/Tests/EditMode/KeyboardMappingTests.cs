@@ -15,8 +15,10 @@ namespace ThanksNoThanks.Tests
     public class KeyboardMappingTests
     {
         private static List<GameInput> M(bool l, bool r, bool enter, bool numEnter,
-            bool moneyTick, bool moneyTickRepeat = false, bool energyPulse = false)
-            => KeyboardInputSource.Map(l, r, enter, numEnter, moneyTick, moneyTickRepeat, energyPulse).ToList();
+            bool moneyTick, bool moneyTickRepeat = false, bool energyPulse = false,
+            bool relUp = false, bool relDown = false)
+            => KeyboardInputSource.Map(l, r, enter, numEnter, moneyTick, moneyTickRepeat, energyPulse,
+                relUp, relDown).ToList();
 
         [Test]
         public void LeftArrow_IsAnswerYes()
@@ -55,6 +57,39 @@ namespace ThanksNoThanks.Tests
         {
             CollectionAssert.AreEqual(new[] { GameInput.EnergyPulse },
                 M(false, false, false, false, false, false, true));
+        }
+
+        [Test]
+        public void UpArrow_IsRelationUp()
+        {
+            CollectionAssert.AreEqual(new[] { GameInput.RelationUp },
+                M(false, false, false, false, false, false, false, true));
+        }
+
+        [Test]
+        public void DownArrow_IsRelationDown()
+        {
+            CollectionAssert.AreEqual(new[] { GameInput.RelationDown },
+                M(false, false, false, false, false, false, false, false, true));
+        }
+
+        [Test]
+        public void RelationAxis_IsIndependentOfTheAnswerArrows()
+        {
+            // ← / → are the discrete ДА/НЕТ answers; ↑ / ↓ are the held RELATION_AXIS — no cross-talk.
+            CollectionAssert.AreEqual(new[] { GameInput.AnswerYes },
+                M(true, false, false, false, false), "← is still only ДА");
+            CollectionAssert.AreEqual(new[] { GameInput.AnswerYes, GameInput.RelationUp },
+                M(true, false, false, false, false, false, false, true),
+                "← + ↑ yield both the answer and the axis, distinctly");
+        }
+
+        [Test]
+        public void BothArrows_ResolveToRelationUp_SafeDirection()
+        {
+            // Fumbling both ↑ and ↓ pulls UP (away from a breakup), never down — mutually exclusive wire.
+            CollectionAssert.AreEqual(new[] { GameInput.RelationUp },
+                M(false, false, false, false, false, false, false, true, true));
         }
 
         [Test]

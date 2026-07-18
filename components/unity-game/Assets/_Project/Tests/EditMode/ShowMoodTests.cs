@@ -52,5 +52,28 @@ namespace ThanksNoThanks.Tests
             // Negative (dead) scales are floored at 0 before averaging.
             Assert.AreEqual(ShowMood.DarkAlpha(50), ShowMood.DarkAlphaFor(100, -20), Eps);
         }
+
+        [Test]
+        public void DarkAlphaFor_ThreeScales_AveragesHealthEnergyRelationships()
+        {
+            // all full → no veil; one scale empty → mean 200/3 ≈ 66.7 → matching DarkAlpha.
+            Assert.AreEqual(0.0, ShowMood.DarkAlphaFor(100, 100, 100), Eps, "all full → no veil");
+            Assert.AreEqual(ShowMood.DarkAlpha(200 / 3.0), ShowMood.DarkAlphaFor(100, 100, 0), Eps,
+                "sagging relationships alone dims the show (mean of the three)");
+            // Negative (dead/lost) scales floored at 0 before averaging.
+            Assert.AreEqual(ShowMood.DarkAlphaFor(100, 100, 0), ShowMood.DarkAlphaFor(100, 100, -30), Eps);
+        }
+
+        [Test]
+        public void DarkAlphaFor_ThreeScales_IsMonotonicInRelationships()
+        {
+            double prev = ShowMood.DarkAlphaFor(60, 60, 0);
+            for (int r = 1; r <= 100; r++)
+            {
+                double a = ShowMood.DarkAlphaFor(60, 60, r);
+                Assert.LessOrEqual(a, prev + Eps, $"veil never darkens as relationships rise (at {r})");
+                prev = a;
+            }
+        }
     }
 }

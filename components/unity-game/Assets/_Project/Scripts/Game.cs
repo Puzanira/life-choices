@@ -74,6 +74,19 @@ namespace ThanksNoThanks
         public const int BurnoutExitEnergyAbove = 40;      // снимается сам при энергии >40%
         public const double BurnoutIncomeMult = 0.5;       // крутилка «тяжелеет» — доход ×0.5
 
+        // ---- live relationships balancer (tunable; canon §Отношения) ----
+        // The fourth live scale: a balancer to hold inside a zone while cranking/breathing/answering.
+        // Opens at 20 (YA03 «первая любовь»), starts at 55% (Scales.Reset), target zone 40–75%.
+        public const int RelationshipsOpenAge = 20;        // балансир открывается в 20 (YA03, OPEN:Отн)
+        public const int RelZoneMin = 40;                  // ниже — риск разрыва
+        public const int RelZoneMax = 75;                  // выше — «красная зона» (задушил вниманием)
+        public const double RelDriftPerSec = 0.6;          // дрейф вниз ≈0.6%/сек, пока балансир открыт
+        public const double RelDriftMarriedPerSec = 0.3;   // в браке (MD01=ДА) мягче — вдвое медленнее
+        public const double RelBalancerPerSec = 1.5;       // RELATION_AXIS ↑/↓ тянет маркер ≈1.5%/сек
+        public const double RelOverloadPenaltyPerSec = 0.3;// >75% — доп. штраф вниз (риск ссоры)
+        public const float RelBreakupSeconds = 10f;        // суммарно ~10 сек ниже зоны → разрыв
+        public const int RelBreakupValue = 20;             // после разрыва шкала падает сюда (одиноко)
+
         private List<Card> _deck;
         private List<Card> _reserve = new();             // top-up pool for skipped chain-gated cards
         private readonly Func<IReadOnlyList<Card>> _deckFactory; // re-samples a fresh deck per life
@@ -116,6 +129,24 @@ namespace ThanksNoThanks
         public bool HealthDecaying { get; private set; }
         /// <summary>Temporary «выгорание»: entered at energy ≤10%, exits above 40%. Halves crank income while on.</summary>
         public bool Burnout { get; private set; }
+
+        // ---- live relationships balancer state ----
+        private int _relAxis;                 // RELATION_AXIS for THIS tick: -1/0/+1, consumed each tick
+        private double _relFrac;              // fractional accumulator (sub-1%/s drift/pull integrates exact)
+        private double _relBelowZoneSeconds;  // CUMULATIVE time spent below the zone floor (canon «суммарно»)
+
+        /// <summary>True while the relationships balancer is live (open at 20 via YA03; closed again on a
+        /// breakup). Drives the balancer HUD reveal and the drift/axis/breakup integration.</summary>
+        public bool RelationshipsOpen { get; private set; }
+        /// <summary>True once <see cref="Answer"/> resolves MD01=ДА (свадьба) — softens the drift (canon:
+        /// «реже балансировать»). Cleared by a breakup and on a fresh life.</summary>
+        public bool Married { get; private set; }
+        /// <summary>True once a breakup has fired this life (partner gone). Keeps the balancer closed (the
+        /// MD06 second chance that would reopen it is deferred) and folds the loss into the show tone.</summary>
+        public bool RelationshipsLost { get; private set; }
+        /// <summary>«Красная зона»: relationships above <see cref="RelZoneMax"/> while open — задушил
+        /// вниманием, penalty pulling back down. Read by the driver for the red-zone HUD tint.</summary>
+        public bool RelationshipRedZone => RelationshipsOpen && Scales.Relationships > RelZoneMax;
 
         /// <summary>Live money in ₽ (fractional; negative allowed). Authoritative for the HUD pill.</summary>
         public double Money { get; private set; }
@@ -192,6 +223,12 @@ namespace ThanksNoThanks
         public event Action EnergyOpened;
         /// <summary>Fired the first time health starts decaying (Age 30) — drives the S5 health hint + pause.</summary>
         public event Action HealthOpened;
+        /// <summary>Fired the first time the relationships balancer opens (Age 20, YA03) — drives the S5
+        /// «держите отношения в зоне — ↑/↓» hint + pause.</summary>
+        public event Action RelationshipsOpened;
+        /// <summary>Fired the instant a breakup resolves (relationships spent ~10s cumulative below the
+        /// zone floor): partner gone, balancer closed. NO death — drives the transient «РАССТАЛИСЬ» plate.</summary>
+        public event Action RelationshipBrokeUp;
         /// <summary>
         /// Fired whenever burnout is entered (energy ≤10%). The driver shows the brief S5 hint only on
         /// the FIRST time per life (one-shot) and drives the S7 state plate off <see cref="Burnout"/>.
@@ -257,6 +294,8 @@ namespace ThanksNoThanks
                     else if (input == GameInput.AnswerNo) Answer(false);
                     else if (input == GameInput.MoneyTick) Crank();
                     else if (input == GameInput.EnergyPulse) Breathe(); // already rhythm-validated by the driver
+                    else if (input == GameInput.RelationUp) SetRelationAxis(+1);
+                    else if (input == GameInput.RelationDown) SetRelationAxis(-1);
                     break;
                 case GameState.Finale:
                     if (input == GameInput.Confirm) ToOpener();
@@ -283,6 +322,7 @@ namespace ThanksNoThanks
             _coasting = false;
             ResetMoney();
             ResetHealthEnergy();
+            ResetRelationships();
             State = GameState.Playing;
             StateChanged?.Invoke();
             Advance();
@@ -326,6 +366,7 @@ namespace ThanksNoThanks
                     Age += AgeSlowTickPerSecond * dt;
 
                 if (CheckMoneyOpen()) return;      // open money (18) → tutorial pause may freeze this frame
+                if (CheckRelationshipsOpen()) return; // open relationships balancer (20) → hint + pause
                 if (CheckEnergyOpen()) return;     // open energy (25) → «дыхание» hint + pause
                 if (CheckHealthDecayOpen()) return;// health starts decaying (30) → hint + pause
                 if (CheckScheduledFatal()) return; // «за вами пришли» once age crosses card.Age+n
@@ -334,6 +375,7 @@ namespace ThanksNoThanks
             IntegrateMoney(dt);                    // cost-of-living + installment drains (real-time)
             IntegrateHealth(dt);                   // decay from 30 (×LT01 modifier), real-time
             IntegrateEnergy(dt);                   // drain from 25 + burnout enter/exit, real-time
+            IntegrateRelationships(dt);            // drift + RELATION_AXIS + breakup (no death), real-time
 
             if (Scales.HealthDepleted) { End("здоровье не выдержало"); return; }
             if (EnergyOpen && Scales.EnergyDepleted) { End("полное выгорание"); return; }
@@ -371,6 +413,19 @@ namespace ThanksNoThanks
             if (HealthDecaying || Age < HealthDecayFromAge) return false;
             HealthDecaying = true;
             HealthOpened?.Invoke();
+            return Paused;
+        }
+
+        // The relationships balancer opens the first time Age reaches 20 (YA03 «первая любовь», OPEN:Отн):
+        // starts at 55% (already restored by Scales.Reset), drift + axis + breakup begin from here. Fires
+        // the S5 «держите отношения в зоне» hint. Once a breakup has closed it (RelationshipsLost) the
+        // age gate does NOT reopen it — the MD06 second chance that would is deferred. Returns true if a
+        // listener paused the frame (parallels money/energy/health opens).
+        private bool CheckRelationshipsOpen()
+        {
+            if (RelationshipsOpen || RelationshipsLost || Age < RelationshipsOpenAge) return false;
+            RelationshipsOpen = true;
+            RelationshipsOpened?.Invoke();
             return Paused;
         }
 
@@ -554,6 +609,13 @@ namespace ThanksNoThanks
                 case "KEK04":
                     if (yes) HealHealth(Kek04HealthBonus);
                     break;
+                case "MD01":
+                    // Свадьба (MD01=ДА): relationships enter «реже балансировать» — the drift softens to
+                    // RelDriftMarriedPerSec. НЕТ (свобода) leaves the full drift. Only meaningful while the
+                    // balancer is open (canon MD01 «если Отн открыта») — never latch married after a
+                    // breakup has closed it. Cleared by a breakup.
+                    if (yes && RelationshipsOpen) Married = true;
+                    break;
             }
         }
 
@@ -599,6 +661,7 @@ namespace ThanksNoThanks
             _coasting = false;
             ResetMoney();
             ResetHealthEnergy();
+            ResetRelationships();
             CurrentCard = null;
             State = GameState.Opener;
             StateChanged?.Invoke();
@@ -688,6 +751,84 @@ namespace ThanksNoThanks
             {
                 Burnout = false;
             }
+        }
+
+        // ================================================================ live relationships balancer
+
+        private void ResetRelationships()
+        {
+            RelationshipsOpen = false;
+            Married = false;
+            RelationshipsLost = false;
+            _relAxis = 0;
+            _relFrac = 0;
+            _relBelowZoneSeconds = 0;
+            // Scales.Reset() (in StartLife/ToOpener) has already restored Relationships = 55.
+        }
+
+        // RELATION_AXIS ↑/↓: latch the held direction for the NEXT integration tick, which consumes and
+        // clears it. No-op unless relationships are open and the run is live/unpaused (inert in the
+        // opener/finale/tutorial — HandleInput only routes it in Playing; this adds the open+pause guard).
+        private void SetRelationAxis(int dir)
+        {
+            if (!RelationshipsOpen || Paused) return;
+            _relAxis = dir;
+        }
+
+        // Relationships balancer integration (real-time, fractional accumulator like health/energy):
+        // constant downward drift (softened while married), the held RELATION_AXIS pull (±1.5%/s), an
+        // over-attention penalty above the zone, and the CUMULATIVE below-zone breakup timer. There is
+        // NO death here — failure is a breakup (partner leaves), not a game over.
+        private void IntegrateRelationships(float dt)
+        {
+            if (!RelationshipsOpen) return;
+
+            double rate = -(Married ? RelDriftMarriedPerSec : RelDriftPerSec); // drift down
+            rate += _relAxis * RelBalancerPerSec;                              // held axis (±)
+            if (Scales.Relationships > RelZoneMax)                             // задушил вниманием →
+                rate -= RelOverloadPenaltyPerSec;                             // extra pull back toward zone
+            _relAxis = 0;                                                      // consume this tick's axis
+
+            _relFrac += rate * dt;
+            int whole = (int)_relFrac;   // truncates toward zero → symmetric for up and down
+            if (whole != 0)
+            {
+                _relFrac -= whole;
+                Scales.Relationships = Math.Max(0, Math.Min(100, Scales.Relationships + whole));
+            }
+
+            // Breakup: canon «ниже 40% суммарно ~10 сек» — CUMULATIVE below-zone time (not a continuous
+            // streak), so brief repeated dips add up over the life. Never reset except on breakup/restart.
+            if (Scales.Relationships < RelZoneMin)
+            {
+                _relBelowZoneSeconds += dt;
+                if (_relBelowZoneSeconds >= RelBreakupSeconds)
+                    BreakUp();
+            }
+        }
+
+        // Partner leaves after too long below the zone. Resets the balancer (closed), clears marriage,
+        // drops the scale to a lonely value (folds into the show tone + the natural-ending tone), and
+        // records a necrolog line. NOT a death — the run continues, just without a partner.
+        private void BreakUp()
+        {
+            Married = false;
+            RelationshipsOpen = false;
+            RelationshipsLost = true;
+            _relAxis = 0;
+            _relFrac = 0;
+            _relBelowZoneSeconds = 0;
+            Scales.Relationships = RelBreakupValue;
+
+            _entries.Add(new NecrologEntry
+            {
+                Age = (int)Age,
+                Order = int.MaxValue - 1,   // sorts after same-age card lines
+                Line = "Отношения не удержали — расстались.",
+                IsRond = false,
+            });
+
+            RelationshipBrokeUp?.Invoke();
         }
 
         // «Пора подлечиться!» (LT08): a condition-triggered system card, single-shot per life. Eligible

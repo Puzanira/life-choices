@@ -30,7 +30,22 @@ namespace ThanksNoThanks
         /// So the value <see cref="Game"/> receives always means «a well-timed breath happened» → +energy;
         /// mashing / sparse presses never reach the logic. Keeps <see cref="Game"/> semantic-only.
         /// </summary>
-        EnergyPulse
+        EnergyPulse,
+
+        /// <summary>
+        /// RELATION_AXIS ↑ — «держать балансир отношений вверх» (keyboard: ↑; later a physical balance
+        /// lever/joystick). Unlike the discrete answer/crank events this is a HELD axis: the source
+        /// re-emits it EVERY frame the key is down, and <see cref="Game"/> applies one tick's worth of
+        /// upward pull then clears the axis (a consume-per-tick model), so holding pulls the marker
+        /// steadily up while released lets the drift take over. Inert unless relationships are open and
+        /// the run is live/unpaused. Keeps <see cref="Game"/> semantic-only.
+        /// </summary>
+        RelationUp,
+
+        /// <summary>RELATION_AXIS ↓ — same held-axis model as <see cref="RelationUp"/>, pulling the
+        /// balancer marker DOWN (keyboard: ↓). Emitted every frame the key is held. If both ↑ and ↓ are
+        /// held the source resolves to ↑ (safe direction) — the two are mutually exclusive on the wire.</summary>
+        RelationDown
     }
 
     /// <summary>
