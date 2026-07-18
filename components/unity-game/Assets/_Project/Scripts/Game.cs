@@ -37,8 +37,31 @@ namespace ThanksNoThanks
         {
             { "MD03", 60 },   // отпуск
             { "LT02", 120 },  // операция
-            { "LT08", 100 },  // подлечиться (вне scope)
+            { "LT08", 100 },  // подлечиться (система, condition-triggered)
         };
+
+        // ---- live health (tunable; canon §Здоровье + §Сводка констант) ----
+        public const int HealthDecayFromAge = 30;         // до 30 не убывает; с 30 тает
+        // Base decay per REAL second while decaying. Canon reference ≈1%/s; tuned to 0.7 so even the
+        // worst-case slowest run (every card times out) survives «ничего плохого → доживаешь» — a real
+        // player answering faster loses far less. #1 playtest tunable (see report §calibration/tension).
+        public const double HealthDecayPerSec = 0.7;
+        public const double Lt01NeglectDecayMult = 2.0;   // LT01=НЕТ «забросил» → декей ×2
+        public const double Lt01CareDecayMult = 0.5;      // LT01=ДА «занялся» → декей ×0.5
+        public const int Kek04HealthBonus = 5;            // KEK04=ДА ЗОЖ-секта → разовый небольшой плюс
+        public const int Lt08TriggerAge = 30;             // LT08 «Пора подлечиться!» eligible age ≥30…
+        public const int Lt08TriggerHealthBelow = 40;     // …AND when health < 40%
+        public const int Lt02EligibleHealthBelow = 50;    // LT02 операция drawable only when health < 50%
+
+        // ---- live energy (tunable; canon §Энергия) ----
+        public const int EnergyOpenAge = 25;              // энергия открывается в 25 (YA05)
+        public const double EnergyDrainPerSec = 0.7;      // дренаж ≈0.7%/сек, пока энергия открыта
+        public const int BreathEnergyGain = 3;            // корректный ритм-цикл дыхания → +3%
+
+        // ---- burnout (temporary; canon §Энергия §Выгорание) ----
+        public const int BurnoutEnterEnergyAtOrBelow = 10; // входит при энергии ≤10%
+        public const int BurnoutExitEnergyAbove = 40;      // снимается сам при энергии >40%
+        public const double BurnoutIncomeMult = 0.5;       // крутилка «тяжелеет» — доход ×0.5
 
         private List<Card> _deck;
         private List<Card> _reserve = new();             // top-up pool for skipped chain-gated cards
@@ -67,6 +90,22 @@ namespace ThanksNoThanks
         private readonly List<ActiveMult> _mults = new();
         private readonly List<MoneyDrain> _drains = new();
 
+        // ---- live health / energy (dt-injected integration, like money; the int scale in Scales stays
+        //      authoritative for card Δ, this layer decays/drains it in real time via a fractional
+        //      accumulator so sub-1%-per-second steps integrate exactly and legacy Δ tests are untouched) ----
+        private double _healthDecayFrac;    // accumulated fractional health decay pending a whole −1
+        private double _energyDrainFrac;    // accumulated fractional energy drain pending a whole −1
+        private double _healthDecayMult = 1.0; // set by LT01 (×2 забросил / ×0.5 занялся)
+        private Card _lt08;                  // condition-triggered system heal card (from DeckPlan)
+        private bool _lt08Triggered;         // single-shot per life
+
+        /// <summary>True once the energy scale has opened (Age ≥ <see cref="EnergyOpenAge"/>). One-shot per life.</summary>
+        public bool EnergyOpen { get; private set; }
+        /// <summary>True once health has begun decaying (Age ≥ <see cref="HealthDecayFromAge"/>). One-shot per life.</summary>
+        public bool HealthDecaying { get; private set; }
+        /// <summary>Temporary «выгорание»: entered at energy ≤10%, exits above 40%. Halves crank income while on.</summary>
+        public bool Burnout { get; private set; }
+
         /// <summary>Live money in ₽ (fractional; negative allowed). Authoritative for the HUD pill.</summary>
         public double Money { get; private set; }
 
@@ -87,7 +126,11 @@ namespace ThanksNoThanks
         /// </summary>
         public bool CurrentCardBlocked { get; private set; }
 
-        /// <summary>Current income multiplier (product of active FROM-gated multipliers). ≥ 1 unless wiped.</summary>
+        /// <summary>
+        /// Current income multiplier (product of active FROM-gated multipliers). ≥ 1 unless wiped.
+        /// While <see cref="Burnout"/> is active the crank «тяжелеет» — the product is halved
+        /// (<see cref="BurnoutIncomeMult"/>), folded in here so every income path pays the same.
+        /// </summary>
         public double IncomeMultiplier
         {
             get
@@ -95,6 +138,7 @@ namespace ThanksNoThanks
                 double m = 1.0;
                 foreach (var a in _mults)
                     if (a.FromAge == 0 || Age >= a.FromAge) m *= a.Value;
+                if (Burnout) m *= BurnoutIncomeMult;
                 return m;
             }
         }
@@ -112,6 +156,15 @@ namespace ThanksNoThanks
         public event Action CardChanged;
         /// <summary>Fired the first time money opens in a life (drives the S5 tutorial overlay + pause).</summary>
         public event Action MoneyOpened;
+        /// <summary>Fired the first time energy opens (Age 25) — drives the S5 «дыхание» hint + pause.</summary>
+        public event Action EnergyOpened;
+        /// <summary>Fired the first time health starts decaying (Age 30) — drives the S5 health hint + pause.</summary>
+        public event Action HealthOpened;
+        /// <summary>
+        /// Fired whenever burnout is entered (energy ≤10%). The driver shows the brief S5 hint only on
+        /// the FIRST time per life (one-shot) and drives the S7 state plate off <see cref="Burnout"/>.
+        /// </summary>
+        public event Action BurnoutEntered;
 
         public Game(IEnumerable<Card> deck, Func<bool> coin = null, IEnumerable<Card> reserve = null)
         {
@@ -147,6 +200,7 @@ namespace ThanksNoThanks
         {
             _deck = plan?.Deck?.ToList() ?? new List<Card>();
             _reserve = plan?.Reserve?.ToList() ?? new List<Card>();
+            _lt08 = plan?.Lt08;   // condition-triggered system heal card for this life (may be null)
         }
 
         private static Func<bool> DefaultCoin()
@@ -170,6 +224,7 @@ namespace ThanksNoThanks
                     if (input == GameInput.AnswerYes) Answer(true);
                     else if (input == GameInput.AnswerNo) Answer(false);
                     else if (input == GameInput.MoneyTick) Crank();
+                    else if (input == GameInput.EnergyPulse) Breathe(); // already rhythm-validated by the driver
                     break;
                 case GameState.Finale:
                     if (input == GameInput.Confirm) ToOpener();
@@ -195,6 +250,7 @@ namespace ThanksNoThanks
             _scheduledFatalCause = null;
             _coasting = false;
             ResetMoney();
+            ResetHealthEnergy();
             State = GameState.Playing;
             StateChanged?.Invoke();
             Advance();
@@ -213,8 +269,17 @@ namespace ThanksNoThanks
                 if (_coasting)
                 {
                     Age += AgeCatchUpPerSecond * dt;
-                    if (CheckMoneyOpen()) return; // tutorial pause can fire even during the coast
+                    // NO open-checks here (deliberate): nothing NEW opens while coasting to the
+                    // reckoning — an S5 hint pausing the death coast would be absurd. Scales already
+                    // open keep draining below; an unopened scale has no drain to compete with anyway.
                     IntegrateMoney(dt);
+                    IntegrateHealth(dt);               // live drains keep running while coasting —
+                    IntegrateEnergy(dt);               // the reckoning doesn't freeze your body
+                    // Deaths compete by first threshold crossed. TIE-BREAK (documented): when a scale
+                    // hits zero within the SAME tick the scheduled age is reached, the scale death wins —
+                    // it «happened» during the coast, before the knock on the door.
+                    if (Scales.HealthDepleted) { End("здоровье не выдержало"); return; }
+                    if (EnergyOpen && Scales.EnergyDepleted) { End("полное выгорание"); return; }
                     CheckScheduledFatal();
                 }
                 return;
@@ -228,11 +293,19 @@ namespace ThanksNoThanks
                 else
                     Age += AgeSlowTickPerSecond * dt;
 
-                if (CheckMoneyOpen()) return;      // open money → tutorial pause may freeze this frame
+                if (CheckMoneyOpen()) return;      // open money (18) → tutorial pause may freeze this frame
+                if (CheckEnergyOpen()) return;     // open energy (25) → «дыхание» hint + pause
+                if (CheckHealthDecayOpen()) return;// health starts decaying (30) → hint + pause
                 if (CheckScheduledFatal()) return; // «за вами пришли» once age crosses card.Age+n
             }
 
             IntegrateMoney(dt);                    // cost-of-living + installment drains (real-time)
+            IntegrateHealth(dt);                   // decay from 30 (×LT01 modifier), real-time
+            IntegrateEnergy(dt);                   // drain from 25 + burnout enter/exit, real-time
+
+            if (Scales.HealthDepleted) { End("здоровье не выдержало"); return; }
+            if (EnergyOpen && Scales.EnergyDepleted) { End("полное выгорание"); return; }
+            MaybeTriggerLt08();                    // «Пора подлечиться!» when health<40% & age≥30
 
             CardTimer -= dt;
             if (CardTimer <= 0f)
@@ -249,11 +322,36 @@ namespace ThanksNoThanks
             return Paused;
         }
 
+        // Opens the energy scale the first time Age reaches 25 (YA05 «первая усталость»). Fires the
+        // «дыхание» hint; energy starts draining from here. Returns true if a listener paused the frame.
+        private bool CheckEnergyOpen()
+        {
+            if (EnergyOpen || Age < EnergyOpenAge) return false;
+            EnergyOpen = true;
+            EnergyOpened?.Invoke();
+            return Paused;
+        }
+
+        // Health starts decaying at 30 (canon: до 30 не убывает). Fires the health hint. Returns true
+        // if a listener paused the frame.
+        private bool CheckHealthDecayOpen()
+        {
+            if (HealthDecaying || Age < HealthDecayFromAge) return false;
+            HealthDecaying = true;
+            HealthOpened?.Invoke();
+            return Paused;
+        }
+
         // A CHAIN child is drawable only after its parent resolved ДА. Parents always precede their
         // children in age order, so by the time we reach a gated card its parent is already answered.
         private bool GatedOff(Card c)
             => c.RequiresParentYes != null
                && !(_answers.TryGetValue(c.RequiresParentYes, out var yes) && yes);
+
+        // LT02 «Операция» carries its canonical condition «если Здр<50%»: drawable only when health is
+        // below the eligibility threshold at draw time; otherwise skipped/substituted like a chain gate.
+        private bool HealthGatedOff(Card c)
+            => c.Id == "LT02" && Scales.Health >= Lt02EligibleHealthBelow;
 
         private void Advance()
         {
@@ -263,7 +361,7 @@ namespace ThanksNoThanks
                 _index++;
                 if (_index >= _deck.Count) { EndOfDeck(); return; }
                 var c = _deck[_index];
-                if (GatedOff(c))                  // parent said НЕТ / never appeared → skip child…
+                if (GatedOff(c) || HealthGatedOff(c)) // parent≠ДА, or LT02 while healthy → skip…
                 {
                     Substitute(c);                // …and top up from the reserve (drawn count 25–30)
                     continue;
@@ -376,6 +474,10 @@ namespace ThanksNoThanks
                 }
             }
 
+            // Card-id specials on the live layer: LT01 sets the health-decay modifier (both answers),
+            // KEK04=ДА gives a small one-shot health plus. Runs regardless of NOCONS (KEK04 is NOCONS).
+            ApplyCardSpecial(card, yes);
+
             // Delayed fatal (RND01): ДА schedules «за вами пришли» for card.Age + n, life continues.
             if (yes && card.DelayedFatalYears > 0)
             {
@@ -385,9 +487,33 @@ namespace ThanksNoThanks
 
             if (yes && card.YesIsFatal) { End(card.FatalCause); return; }
             if (Scales.HealthDepleted) { End("здоровье не выдержало"); return; }
-            if (Scales.EnergyDepleted) { End("полное выгорание"); return; }
+            if (EnergyOpen && Scales.EnergyDepleted) { End("полное выгорание"); return; }
 
+            MaybeTriggerLt08();   // a health-hit card may drop below 40% → «Пора подлечиться!»
             Advance();
+        }
+
+        // LT01 modifier + KEK04 bonus. LT02→80% / LT08→80% heals ride the normal Δ path (Set), so they
+        // are NOT duplicated here. LT01 also carries its own ±2 Δ via the normal path; this only sets
+        // the ongoing decay multiplier.
+        private void ApplyCardSpecial(Card card, bool yes)
+        {
+            switch (card.Id)
+            {
+                case "LT01":
+                    _healthDecayMult = yes ? Lt01CareDecayMult : Lt01NeglectDecayMult;
+                    break;
+                case "KEK04":
+                    if (yes) HealHealth(Kek04HealthBonus);
+                    break;
+            }
+        }
+
+        // Raise health by a whole amount, clamped to 100; card Δ owns the rest (this is only for the
+        // KEK04 system bonus, which is otherwise a NOCONS card).
+        private void HealHealth(int amount)
+        {
+            Scales.Health = Math.Min(100, Scales.Health + amount);
         }
 
         // Survived the whole deck with nothing pending → reached old age; tone by relationships.
@@ -424,6 +550,7 @@ namespace ThanksNoThanks
             _scheduledFatalCause = null;
             _coasting = false;
             ResetMoney();
+            ResetHealthEnergy();
             CurrentCard = null;
             State = GameState.Opener;
             StateChanged?.Invoke();
@@ -446,6 +573,90 @@ namespace ThanksNoThanks
         {
             if (!MoneyOpen || Paused) return;
             Money += MoneyTickIncome * IncomeMultiplier;
+        }
+
+        // ================================================================ live health / energy
+
+        private void ResetHealthEnergy()
+        {
+            EnergyOpen = false;
+            HealthDecaying = false;
+            Burnout = false;
+            _healthDecayFrac = 0;
+            _energyDrainFrac = 0;
+            _healthDecayMult = 1.0;
+            _lt08Triggered = false;
+            // Scales.Reset() (in StartLife/ToOpener) has already restored Health/Energy = 100.
+        }
+
+        // Health decay from 30, per REAL second, scaled by the LT01 modifier. Fractional accumulator so a
+        // sub-1%/s rate decrements the int scale exactly on whole crossings (dt-injected — no wall clock).
+        private void IntegrateHealth(float dt)
+        {
+            if (!HealthDecaying || Scales.Health <= 0) return;
+            _healthDecayFrac += HealthDecayPerSec * _healthDecayMult * dt;
+            int whole = (int)_healthDecayFrac;
+            if (whole <= 0) return;
+            _healthDecayFrac -= whole;
+            Scales.Health = Math.Max(0, Scales.Health - whole);
+        }
+
+        // Energy drain from 25 (real-time, fractional accumulator) + burnout enter/exit tracking.
+        private void IntegrateEnergy(float dt)
+        {
+            if (!EnergyOpen) return;
+            if (Scales.Energy > 0)
+            {
+                _energyDrainFrac += EnergyDrainPerSec * dt;
+                int whole = (int)_energyDrainFrac;
+                if (whole > 0)
+                {
+                    _energyDrainFrac -= whole;
+                    Scales.Energy = Math.Max(0, Scales.Energy - whole);
+                }
+            }
+            UpdateBurnout();
+        }
+
+        // ENERGY_PULSE (a rhythm-VALID breath, already filtered by the driver): restore +3%, clamped to
+        // 100, and re-evaluate burnout (a good breath can lift you back out). No-op before energy opens.
+        private void Breathe()
+        {
+            if (!EnergyOpen || Paused) return;
+            Scales.Energy = Math.Min(100, Scales.Energy + BreathEnergyGain);
+            UpdateBurnout();
+        }
+
+        // Temporary «выгорание»: latch on at energy ≤10%, release above 40% (hysteresis, re-enterable).
+        // Entering fires an event; the driver shows the one-shot hint and the S7 plate off Burnout.
+        private void UpdateBurnout()
+        {
+            if (!Burnout && Scales.Energy <= BurnoutEnterEnergyAtOrBelow)
+            {
+                Burnout = true;
+                BurnoutEntered?.Invoke();
+            }
+            else if (Burnout && Scales.Energy > BurnoutExitEnergyAbove)
+            {
+                Burnout = false;
+            }
+        }
+
+        // «Пора подлечиться!» (LT08): a condition-triggered system card, single-shot per life. Eligible
+        // only when health < 40% AND age ≥ 30; inserted into the remaining deck near the current age so
+        // it comes up next. It is a BLOCK$ card (100₽) — if broke it shows blocked and skips (canon:
+        // «ленился по здоровью — чинить нечем»); if paid, its ДА Δ heals health → 80% via the normal path.
+        private void MaybeTriggerLt08()
+        {
+            if (_lt08Triggered || _lt08 == null) return;
+            if (Age < Lt08TriggerAge || Scales.Health >= Lt08TriggerHealthBelow) return;
+            _lt08Triggered = true;
+
+            var card = _lt08;
+            card.Age = Math.Max(Lt08TriggerAge, (int)Math.Ceiling(Age));
+            int at = _deck.FindIndex(_index + 1, c => c.Age > card.Age);
+            if (at < 0) at = _deck.Count;
+            _deck.Insert(at, card);
         }
 
         // Real-time money integration for one Tick step (cost-of-living + active installment drains).

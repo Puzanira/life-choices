@@ -92,11 +92,26 @@ namespace ThanksNoThanks
         private GameObject _blockBanner;
 
         // Tutorial overlay (S5): dimmed bg + yellow modal + «ПОНЯТНО»; freezes the game while up.
+        // Reused for every hint: money (18), energy (25), health (30) and the first burnout.
         private GameObject _tutorialOverlay;
         private Text _tutorialText;
         private bool _tutorialShowing;
         private bool _moneyTutorialSeen;   // one-shot per life; reset on a fresh life
+        private bool _energyTutorialSeen;
+        private bool _healthTutorialSeen;
+        private bool _burnoutHintSeen;
         private bool _wasPlaying;
+
+        // Burnout state plate (S7): dim-cobalt «ВЫГОРАНИЕ» banner, shown while Game.Burnout is on.
+        private GameObject _burnoutPlate;
+
+        // Show-reaction brightness veil: full-screen dark Image whose alpha lerps with overall state
+        // (ShowMood), «шоу тускнеет» as health+energy sag. Above the panels, below the tutorial overlay.
+        private Image _brightness;
+        private float _brightnessAlpha;
+
+        // Breath rhythm validator (E in a calm cadence → valid pulse → +energy). Clock advanced in Update.
+        private readonly BreathRhythm _breath = new();
 
         private Coroutine _cardAnim;
         private Coroutine _moneyPulse;
@@ -110,6 +125,24 @@ namespace ThanksNoThanks
             "Крутите ПРОБЕЛ — и деньги потекут. Но жизнь идёт своим чередом:\n" +
             "содержать себя стоит денег каждую секунду.\n\n" +
             "Рук всего две — крутить и отвечать придётся разом.";
+
+        private const string EnergyTutorialText =
+            "ПЕРВАЯ УСТАЛОСТЬ!\n\n" +
+            "Появилась ЭНЕРГИЯ — и она тает сама собой.\n" +
+            "Дышите РИТМИЧНО: жмите E в спокойном темпе, не долбите.\n\n" +
+            "Ровное дыхание возвращает силы.";
+
+        private const string HealthTutorialText =
+            "ЗДОРОВЬЕ НАЧАЛО ТАЯТЬ.\n\n" +
+            "С этого возраста ЗДОРОВЬЕ убывает само по себе.\n" +
+            "Лечиться можно за деньги — если накопили.\n\n" +
+            "Запустите — организм не выдержит.";
+
+        private const string BurnoutHintText =
+            "ВЫГОРАНИЕ!\n\n" +
+            "Всё даётся тяжелее — деньги идут вдвое медленнее.\n" +
+            "Подышите (E), чтобы прийти в себя.\n\n" +
+            "Отпустит само, когда энергия восстановится.";
 
         // ---- public inspection accessors (visual-assembly PlayMode tests) ----
         public RectTransform CanvasRect { get; private set; }
@@ -130,6 +163,9 @@ namespace ThanksNoThanks
         public GameObject TutorialOverlay => _tutorialOverlay;
         public bool TutorialShowing => _tutorialShowing;
         public GameObject BlockBanner => _blockBanner;
+        public GameObject BurnoutPlate => _burnoutPlate;
+        public Image BrightnessVeil => _brightness;
+        public Text TutorialText => _tutorialText;
 
         /// <summary>Test hook: run the age-gated HUD visibility for an arbitrary age.</summary>
         public void DebugApplyAgeGates(float age) => ApplyAgeGates(age);
@@ -152,6 +188,9 @@ namespace ThanksNoThanks
             _game.StateChanged += Refresh;
             _game.CardChanged += OnCardChanged;
             _game.MoneyOpened += OnMoneyOpened;
+            _game.EnergyOpened += OnEnergyOpened;
+            _game.HealthOpened += OnHealthOpened;
+            _game.BurnoutEntered += OnBurnoutEntered;
             Refresh();
         }
 
@@ -167,6 +206,9 @@ namespace ThanksNoThanks
                 _game.StateChanged -= Refresh;
                 _game.CardChanged -= OnCardChanged;
                 _game.MoneyOpened -= OnMoneyOpened;
+                _game.EnergyOpened -= OnEnergyOpened;
+                _game.HealthOpened -= OnHealthOpened;
+                _game.BurnoutEntered -= OnBurnoutEntered;
             }
         }
 
@@ -207,6 +249,16 @@ namespace ThanksNoThanks
                 }
                 return;
             }
+
+            if (input == GameInput.EnergyPulse)
+            {
+                // Rhythm gate lives HERE (pure BreathRhythm): Game receives the pulse only on a valid
+                // cadence, so mashing / sparse taps never restore energy. Inert outside live gameplay.
+                if (_game.State != GameState.Playing) return;
+                if (_breath.Pulse()) _game.HandleInput(GameInput.EnergyPulse);
+                return;
+            }
+
             _game.HandleInput(input);
         }
 
@@ -228,11 +280,20 @@ namespace ThanksNoThanks
         {
             if (_game == null) return;
             _crankCap.Advance(Time.deltaTime);   // deterministic clock for the income cap
+            _breath.Advance(Time.deltaTime);     // deterministic clock for the breathing rhythm
             _game.Tick(Time.deltaTime);
             if (_game.State == GameState.Playing)
             {
                 _ageText.text = Mathf.FloorToInt(_game.Age).ToString();
                 _moneyText.text = FormatMoney(_game.Money);   // live: ticks up on crank, drains down
+                // Live health/energy bars + balancer move on their own (decay/drain/breath), not just on cards.
+                var s = _game.Scales;
+                _healthFill.fillAmount = Mathf.Clamp01(s.Health / 100f);
+                _energyFill.fillAmount = Mathf.Clamp01(s.Energy / 100f);
+                float rel = Mathf.Clamp01(s.Relationships / 100f);
+                _balancerMarker.anchoredPosition = new Vector2((rel - 0.5f) * _balancerTrackWidth, 0f);
+                if (_burnoutPlate.activeSelf != _game.Burnout) _burnoutPlate.SetActive(_game.Burnout);
+
                 float remaining = Mathf.Max(0f, _game.CardTimer);
                 _timerText.text = Mathf.CeilToInt(remaining).ToString();
                 float t = Mathf.Clamp01(remaining / Game.CardSeconds);
@@ -243,6 +304,20 @@ namespace ThanksNoThanks
                     ? Vector3.one * (1f + 0.08f * Mathf.Sin(Time.time * 12f))
                     : Vector3.one;
             }
+            UpdateBrightness();
+        }
+
+        // Show-reaction veil: dark alpha follows (health+energy)/2 via ShowMood, smoothed so it never
+        // flickers. Only dims live gameplay; the opener/finale read at full brightness.
+        private void UpdateBrightness()
+        {
+            if (_brightness == null) return;
+            float target = _game.State == GameState.Playing
+                ? (float)ShowMood.DarkAlphaFor(_game.Scales.Health, _game.Scales.Energy)
+                : 0f;
+            _brightnessAlpha = Mathf.MoveTowards(_brightnessAlpha, target, 0.6f * Time.deltaTime);
+            var c = _brightness.color;
+            _brightness.color = new Color(c.r, c.g, c.b, _brightnessAlpha);
         }
 
         // ================================================================ HUD build
@@ -268,6 +343,11 @@ namespace ThanksNoThanks
             BuildOpener(canvasGo.transform);
             BuildGamePanel(canvasGo.transform);
             BuildFinale(canvasGo.transform);
+
+            // Show-reaction veil: above the panels (dims the whole show), below the tutorial overlay.
+            _brightness = NewSolid("BrightnessVeil", canvasGo.transform, new Color(0.02f, 0.03f, 0.10f, 0f));
+            Stretch(_brightness.rectTransform);
+
             BuildTutorialOverlay(canvasGo.transform);   // top-most: dims every screen when up
         }
 
@@ -412,6 +492,15 @@ namespace ThanksNoThanks
             var noText = NewText("NoText", _noPlate.transform, "СПАСИБО,\nНЕ НАДО", 46, TextAnchor.MiddleCenter, Color.white, _display);
             Stretch(noText.rectTransform);
             DisplayFx(noText);
+
+            // ---- Burnout state plate (S7): dim-cobalt banner, shown only while Game.Burnout is on ----
+            _burnoutPlate = NewSolid("BurnoutPlate", _gamePanel.transform, CobaltDeep).gameObject;
+            Anchor(_burnoutPlate.GetComponent<RectTransform>(), new Vector2(0.5f, 0.70f), new Vector2(560, 96));
+            var burnoutTxt = NewText("BurnoutText", _burnoutPlate.transform,
+                "ВЫГОРАНИЕ", 44, TextAnchor.MiddleCenter, Muted, _display);
+            Stretch(burnoutTxt.rectTransform);
+            DisplayFx(burnoutTxt);
+            _burnoutPlate.SetActive(false);
         }
 
         private GameObject BuildBar(string name, Vector2 anchor, string label, string icon,
@@ -512,21 +601,29 @@ namespace ThanksNoThanks
             _tutorialOverlay.SetActive(false);
         }
 
-        private void OnMoneyOpened()
+        private void OnMoneyOpened()  { if (!_moneyTutorialSeen)  ShowTutorial(MoneyTutorialText,  ref _moneyTutorialSeen); }
+        private void OnEnergyOpened() { if (!_energyTutorialSeen) ShowTutorial(EnergyTutorialText, ref _energyTutorialSeen); }
+        private void OnHealthOpened() { if (!_healthTutorialSeen) ShowTutorial(HealthTutorialText, ref _healthTutorialSeen); }
+        private void OnBurnoutEntered(){ if (!_burnoutHintSeen)  ShowTutorial(BurnoutHintText,   ref _burnoutHintSeen); }
+
+        // Shared S5 hint: pauses the game (freezes age, drains, cost-of-living, decay and the card timer)
+        // and shows the modal. The one-shot «seen» flag is set at show time (the hint always resolves via
+        // dismiss). Opens don't collide — each pauses until dismissed — so a stacked show is simply skipped.
+        private void ShowTutorial(string text, ref bool seen)
         {
-            if (_moneyTutorialSeen || _tutorialShowing) return;
+            if (_tutorialShowing) return;
+            seen = true;
             _tutorialShowing = true;
-            _tutorialText.text = MoneyTutorialText;
+            _tutorialText.text = text;
             _tutorialOverlay.transform.SetAsLastSibling();
             _tutorialOverlay.SetActive(true);
-            _game.Paused = true;   // freeze age, drains, cost-of-living and the card timer while the hint is up
+            _game.Paused = true;
         }
 
         private void DismissTutorial()
         {
             if (!_tutorialShowing) return;
             _tutorialShowing = false;
-            _moneyTutorialSeen = true;
             _tutorialOverlay.SetActive(false);
             _game.Paused = false;
         }
@@ -544,14 +641,20 @@ namespace ThanksNoThanks
             _gamePanel.SetActive(playing);
             _finalePanel.SetActive(finale);
 
-            // Fresh life → the money tutorial is armed again and any leftover overlay is cleared.
+            // Fresh life → every hint is armed again, breathing re-seeds, and leftover state is cleared.
             if (playing && !_wasPlaying)
             {
                 _moneyTutorialSeen = false;
+                _energyTutorialSeen = false;
+                _healthTutorialSeen = false;
+                _burnoutHintSeen = false;
                 _tutorialShowing = false;
                 _tutorialOverlay.SetActive(false);
                 _game.Paused = false;
                 _crankCap.Reset();
+                _breath.Reset();
+                _burnoutPlate.SetActive(false);
+                _brightnessAlpha = 0f;
             }
             if (!playing && _tutorialShowing) DismissTutorial();
             _wasPlaying = playing;

@@ -15,8 +15,8 @@ namespace ThanksNoThanks.Tests
     public class KeyboardMappingTests
     {
         private static List<GameInput> M(bool l, bool r, bool enter, bool numEnter,
-            bool moneyTick, bool moneyTickRepeat = false)
-            => KeyboardInputSource.Map(l, r, enter, numEnter, moneyTick, moneyTickRepeat).ToList();
+            bool moneyTick, bool moneyTickRepeat = false, bool energyPulse = false)
+            => KeyboardInputSource.Map(l, r, enter, numEnter, moneyTick, moneyTickRepeat, energyPulse).ToList();
 
         [Test]
         public void LeftArrow_IsAnswerYes()
@@ -48,6 +48,13 @@ namespace ThanksNoThanks.Tests
         {
             CollectionAssert.AreEqual(new[] { GameInput.MoneyTickRepeat },
                 M(false, false, false, false, false, true));
+        }
+
+        [Test]
+        public void EKey_IsEnergyPulse()
+        {
+            CollectionAssert.AreEqual(new[] { GameInput.EnergyPulse },
+                M(false, false, false, false, false, false, true));
         }
 
         [Test]

@@ -50,12 +50,28 @@ namespace ThanksNoThanks.Tests
         [Test]
         public void ExcludedIds_NeverDrawn_AcrossSeeds()
         {
-            Assert.AreEqual(13, DeckSampler.Excluded.Count, "exactly the 13 hard-excluded IDs");
+            Assert.AreEqual(12, DeckSampler.Excluded.Count, "exactly the 12 hard-excluded IDs (LT08 un-excluded)");
+            Assert.IsFalse(DeckSampler.Excluded.Contains("LT08"), "LT08 is no longer hard-excluded (canon 2026-07-18)");
             for (int seed = 0; seed < 40; seed++)
             {
                 var ids = Sample(seed).Select(c => c.Id).ToHashSet();
                 foreach (var bad in DeckSampler.Excluded)
                     Assert.IsFalse(ids.Contains(bad), $"excluded {bad} must never appear (seed {seed})");
+            }
+        }
+
+        [Test]
+        public void Lt08_NeverSampledIntoDeck_ButCarriedOnThePlan()
+        {
+            // Un-excluded, yet pulled out of sampling: LT08 is a condition-triggered SYSTEM card that
+            // Game inserts on demand — it must never appear as a random draw, and the plan carries it.
+            for (int seed = 0; seed < 40; seed++)
+            {
+                var plan = DeckSampler.BuildPlan(AllCards(), new System.Random(seed));
+                Assert.IsFalse(plan.Deck.Any(c => c.Id == "LT08"), $"LT08 never randomly sampled (seed {seed})");
+                Assert.IsFalse(plan.Reserve.Any(c => c.Id == "LT08"), $"LT08 not in the reserve either (seed {seed})");
+                Assert.IsNotNull(plan.Lt08, $"the plan carries LT08 for conditional insertion (seed {seed})");
+                Assert.AreEqual("LT08", plan.Lt08.Id, $"plan.Lt08 is the heal card (seed {seed})");
             }
         }
 

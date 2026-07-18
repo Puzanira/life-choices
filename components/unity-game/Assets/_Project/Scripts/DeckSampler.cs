@@ -14,6 +14,14 @@ namespace ThanksNoThanks
     {
         public List<Card> Deck = new();
         public List<Card> Reserve = new();   // age-sorted, ungated, never-excluded normals
+
+        /// <summary>
+        /// LT08 «Пора подлечиться!» — a conditional SYSTEM card. Un-excluded from the hard list but
+        /// NEVER randomly sampled into <see cref="Deck"/>: it is carried here and inserted by
+        /// <see cref="Game"/> the moment health &lt; 40% AND age ≥ 30 first hold (single-shot per life).
+        /// Null when the card isn't present in the parsed set.
+        /// </summary>
+        public Card Lt08;
     }
 
     /// <summary>
@@ -49,12 +57,17 @@ namespace ThanksNoThanks
         public const int MidTarget = 3;
         public const int OldTarget = 4;
 
-        // Hard-excluded — these IDs must never be drawn (enforced by a test).
+        // Hard-excluded — these IDs must never be drawn (enforced by a test). LT08 is NO LONGER here:
+        // it is un-excluded (canon 2026-07-18) but pulled out of sampling into DeckPlan.Lt08 and
+        // condition-inserted by Game (health<40% & age≥30), so it still never appears randomly.
         public static readonly HashSet<string> Excluded = new()
         {
             "CR00", "CR01", "CR02", "CR03", "CR04", "CR05", "CR06", "CR07", "CR08", "CR09",
-            "LT08", "MD06", "RND05",
+            "MD06", "RND05",
         };
+
+        // System card extracted from the pool before sampling (never a random draw); see DeckPlan.Lt08.
+        private const string SystemHealthCardId = "LT08";
 
         // Milestones always present at their canonical age (I02 intro is pinned first).
         private static readonly string[] UnconditionalMilestones =
@@ -97,6 +110,13 @@ namespace ThanksNoThanks
             foreach (var c in allCards)
                 if (!Excluded.Contains(c.Id))
                     byId[c.Id] = c;
+
+            // Pull LT08 out of the sampling pool: it is a condition-triggered system card, inserted by
+            // Game — never a random draw (would otherwise fire via its RANDOM_TRIGGER flag). Carried on
+            // the plan; its final age is set by Game at insertion time.
+            Card lt08 = null;
+            if (byId.TryGetValue(SystemHealthCardId, out lt08))
+                byId.Remove(SystemHealthCardId);
 
             var deck = new List<Card>();
             var handled = new HashSet<string>();
@@ -179,7 +199,7 @@ namespace ThanksNoThanks
             foreach (var c in reserve) c.Age = AssignAge(c, rng);
             reserve.Sort((a, b) => a.Age != b.Age ? a.Age.CompareTo(b.Age) : a.Order.CompareTo(b.Order));
 
-            return new DeckPlan { Deck = deck, Reserve = reserve };
+            return new DeckPlan { Deck = deck, Reserve = reserve, Lt08 = lt08 };
         }
 
         private static void ClampSize(List<Card> deck, List<Card> normals, List<Card> leftover, Random rng)

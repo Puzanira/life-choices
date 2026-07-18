@@ -37,23 +37,26 @@ namespace ThanksNoThanks
                          kb.enterKey.wasPressedThisFrame,
                          kb.numpadEnterKey.wasPressedThisFrame,
                          crank == CrankEmit.Press,
-                         crank == CrankEmit.Repeat))
+                         crank == CrankEmit.Repeat,
+                         kb.eKey.wasPressedThisFrame))
                 Received?.Invoke(input);
         }
 
         /// <summary>
         /// Pure key→semantic mapping. Engine-agnostic so the control scheme is deterministically testable.
         /// ← = ДА, → = СПАСИБО НЕ НАДО, Enter/Numpad-Enter = CONFIRM; a FRESH Space keydown = MONEY_TICK,
-        /// a held-Space autorepeat = MONEY_TICK_REPEAT (income-only — never confirms screens).
+        /// a held-Space autorepeat = MONEY_TICK_REPEAT (income-only — never confirms screens); a fresh
+        /// E keydown = ENERGY_PULSE (raw breath — the driver rhythm-validates before it reaches Game).
         /// </summary>
         public static IEnumerable<GameInput> Map(bool left, bool right, bool enter, bool numpadEnter,
-            bool moneyTick, bool moneyTickRepeat)
+            bool moneyTick, bool moneyTickRepeat, bool energyPulse = false)
         {
             if (left) yield return GameInput.AnswerYes;
             if (right) yield return GameInput.AnswerNo;
             if (enter || numpadEnter) yield return GameInput.Confirm;
             if (moneyTick) yield return GameInput.MoneyTick;
             if (moneyTickRepeat) yield return GameInput.MoneyTickRepeat;
+            if (energyPulse) yield return GameInput.EnergyPulse;
         }
     }
 }

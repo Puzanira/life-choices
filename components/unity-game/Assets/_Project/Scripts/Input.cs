@@ -21,7 +21,16 @@ namespace ThanksNoThanks
         /// it INERT outside Playing and on the tutorial: held Space must never confirm screens or
         /// dismiss hints. <see cref="Game"/> never receives this value.
         /// </summary>
-        MoneyTickRepeat
+        MoneyTickRepeat,
+
+        /// <summary>
+        /// ENERGY_PULSE — «дыхание» (keyboard: E; later a physical breathing lever). The RAW key press
+        /// goes to the driver, which validates the RHYTHM (a pure <see cref="BreathRhythm"/> with an
+        /// injectable clock) and forwards this value to <see cref="Game"/> ONLY on a valid breath cycle.
+        /// So the value <see cref="Game"/> receives always means «a well-timed breath happened» → +energy;
+        /// mashing / sparse presses never reach the logic. Keeps <see cref="Game"/> semantic-only.
+        /// </summary>
+        EnergyPulse
     }
 
     /// <summary>
