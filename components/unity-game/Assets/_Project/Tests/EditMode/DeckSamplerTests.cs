@@ -50,11 +50,11 @@ namespace ThanksNoThanks.Tests
         [Test]
         public void ExcludedIds_NeverDrawn_AcrossSeeds()
         {
-            // After the crisis increment (2026-07-19) only CR09 (депрессия) + MD06 + RND05 stay hard-excluded.
-            // CR00–CR08 are un-excluded (carried on the plan, played as a sequenced state — see the crisis
-            // test below); LT08 was un-excluded earlier (carried on DeckPlan.Lt08).
-            Assert.AreEqual(3, DeckSampler.Excluded.Count, "exactly CR09, MD06, RND05 stay hard-excluded");
-            Assert.IsTrue(DeckSampler.Excluded.Contains("CR09"), "CR09 (депрессия) stays hard-excluded");
+            // After the depression increment (2026-07-19) only MD06 + RND05 stay hard-excluded. CR00–CR08
+            // (crisis) and CR09 (депрессия) are un-excluded — carried on the plan and played as sequenced
+            // states — and LT08 was un-excluded earlier (carried on DeckPlan.Lt08).
+            Assert.AreEqual(2, DeckSampler.Excluded.Count, "exactly MD06, RND05 stay hard-excluded");
+            Assert.IsFalse(DeckSampler.Excluded.Contains("CR09"), "CR09 (депрессия) is no longer hard-excluded");
             Assert.IsFalse(DeckSampler.Excluded.Contains("LT08"), "LT08 is no longer hard-excluded (canon 2026-07-18)");
             foreach (var cr in new[] { "CR00", "CR01", "CR05", "CR08" })
                 Assert.IsFalse(DeckSampler.Excluded.Contains(cr), $"{cr} un-excluded (crisis increment)");
@@ -98,6 +98,22 @@ namespace ThanksNoThanks.Tests
                 Assert.IsFalse(plan.Reserve.Any(c => c.Id == "LT08"), $"LT08 not in the reserve either (seed {seed})");
                 Assert.IsNotNull(plan.Lt08, $"the plan carries LT08 for conditional insertion (seed {seed})");
                 Assert.AreEqual("LT08", plan.Lt08.Id, $"plan.Lt08 is the heal card (seed {seed})");
+            }
+        }
+
+        [Test]
+        public void Depression_NeverSampledIntoDeck_ButCarriedOnThePlan()
+        {
+            // CR09 (депрессия) is un-excluded yet — like LT08 and the crisis block — pulled out of sampling:
+            // Game enters it as the crisis tail (a RANDOM_TRIGGER roll after ResumeAfterCrisis), never a draw.
+            for (int seed = 0; seed < 40; seed++)
+            {
+                var plan = DeckSampler.BuildPlan(AllCards(), new System.Random(seed));
+                Assert.IsFalse(plan.Deck.Any(c => c.Id == "CR09"), $"CR09 never randomly sampled (seed {seed})");
+                Assert.IsFalse(plan.Reserve.Any(c => c.Id == "CR09"), $"CR09 not in the reserve either (seed {seed})");
+                Assert.IsFalse(plan.Crisis.Any(c => c.Id == "CR09"), $"CR09 not in the crisis block (seed {seed})");
+                Assert.IsNotNull(plan.Depression, $"the plan carries CR09 for the depression tail (seed {seed})");
+                Assert.AreEqual("CR09", plan.Depression.Id, $"plan.Depression is the depression card (seed {seed})");
             }
         }
 

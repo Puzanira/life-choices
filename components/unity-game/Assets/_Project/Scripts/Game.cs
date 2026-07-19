@@ -120,6 +120,20 @@ namespace ThanksNoThanks
         // INVERT warning «молчание = ДА» is readable before silence auto-accepts. #1 crisis tunable (report).
         public const float ImpulseSeconds = 3f;
 
+        // ---- depression / «тёмная полоса» (CR09) mini-game (tunable; canon crisis-content.md §1) ----
+        // After the crisis resolves, a RANDOM_TRIGGER roll may drop the show into depression: a HARD
+        // grayscale «собраться» mini-game DELIBERATELY OPPOSITE to the energy breathing (fast even rhythm).
+        // Here the pulse is SLOW and SPARSE — wait and catch, don't mash. All values are dt/seed-injected.
+        public const double DepressionChance = 0.5;        // per-life probability the crisis tail → depression
+        public const int DepressionGraySteps = 5;          // 5 gray steps: 5 = full B&W, 0 = full colour (exit)
+        public const float DepressionPulseIntervalMin = 2.5f; // dim pulse appears rarely — lower bound (~2.5s)
+        public const float DepressionPulseIntervalMax = 3f;   // …upper bound (~3s), seeded/injectable roll
+        public const float DepressionPulseWindow = 0.6f;   // hit-window while the dim pulse is lit (~0.6s)
+        // Anti-mash lockout: any press that ISN'T a clean catch arms this; while it's up a press inside the
+        // window is discarded (still a miss). A masher re-arms it every press, so a rapid/continuous press
+        // can never coincide with an unlocked window — mashing can't win (canon «не долбить, а ловить»).
+        public const float DepressionPressLockout = 1f;
+
         private List<Card> _deck;
         private List<Card> _reserve = new();             // top-up pool for skipped chain-gated cards
         private readonly Func<IReadOnlyList<Card>> _deckFactory; // re-samples a fresh deck per life
@@ -250,6 +264,45 @@ namespace ThanksNoThanks
         /// <summary>Fired when the crisis ends and ordinary play resumes (the suspended card is restored).</summary>
         public event Action CrisisEnded;
 
+        // ---- depression «тёмная полоса» (CR09) state ----
+        private Card _depressionCard;        // CR09 carried on the plan (never a random draw); null → no depression
+        private bool _depressionDone;        // one-shot per life: latched the moment the crisis tail rolls
+        private int _depGray;                // gray steps remaining: DepressionGraySteps = full B&W, 0 = restored
+        private float _depPulseElapsed;      // time since the last window closed (counts toward the next pulse)
+        private float _depPulseNextInterval; // rolled length of the current wait (~2.5–3s)
+        private float _depPulseWindow;       // time left in the OPEN hit-window (>0 while the dim pulse is lit)
+        private float _depPressLockout;      // anti-mash: while >0 an in-window press is discarded (still a miss)
+        private readonly Random _depRng = new();  // engine-free RNG for the pulse interval + the entry roll
+
+        /// <summary>Test/tuning seam: supplies the NEXT pulse interval in seconds. null → a uniform draw in
+        /// [<see cref="DepressionPulseIntervalMin"/>,<see cref="DepressionPulseIntervalMax"/>]. Survives
+        /// <see cref="StartLife"/> so a deterministic test can pin every pulse.</summary>
+        public Func<float> DepressionPulseInterval;
+
+        /// <summary>Test/tuning seam: supplies whether the crisis tail rolls into depression. null → a
+        /// <see cref="DepressionChance"/> coin from the internal RNG. Injected so a test can force both the
+        /// occurs and the doesn't-occur cases deterministically.</summary>
+        public Func<bool> DepressionTriggerRoll;
+
+        /// <summary>True while the depression mini-game is active: the screen is B&W, the 5 scales are paused,
+        /// and the ONLY input is the CONFIRM catch on the dim pulse. NO death path — exit is via 5 catches.</summary>
+        public bool InDepression { get; private set; }
+
+        /// <summary>Gray steps remaining, <see cref="DepressionGraySteps"/> (full B&W) down to 0 (full colour
+        /// → exit). The driver drives the desaturation-overlay alpha off this (colour returns a step per catch).</summary>
+        public int DepressionGray => _depGray;
+
+        /// <summary>True while the dim pulse is lit (the ~0.6s hit-window is open) — a CONFIRM now is a catch.
+        /// Read by the driver to reveal the faint centre pulse indicator (S8).</summary>
+        public bool DepressionPulsing { get; private set; }
+
+        /// <summary>Fired the instant depression begins — drives the muted «ТЁМНАЯ ПОЛОСА…» banner (S8).</summary>
+        public event Action DepressionStarted;
+        /// <summary>Fired on each successful catch (a step of colour returns) — drives a muted host mutter.</summary>
+        public event Action DepressionProgressed;
+        /// <summary>Fired when depression lifts (5 catches → full colour) and ordinary play resumes.</summary>
+        public event Action DepressionEnded;
+
         /// <summary>Live money in ₽ (fractional; negative allowed). Authoritative for the HUD pill.</summary>
         public double Money { get; private set; }
 
@@ -372,6 +425,7 @@ namespace ThanksNoThanks
             _deck = plan?.Deck?.ToList() ?? new List<Card>();
             _reserve = plan?.Reserve?.ToList() ?? new List<Card>();
             _lt08 = plan?.Lt08;   // condition-triggered system heal card for this life (may be null)
+            _depressionCard = plan?.Depression;   // CR09 carried on the plan (may be null); entered by Game only
             BuildCrisisLists(plan?.Crisis);
         }
 
@@ -407,6 +461,14 @@ namespace ThanksNoThanks
                     if (input == GameInput.Confirm) StartLife();
                     break;
                 case GameState.Playing:
+                    // Depression intercepts EVERYTHING: the only live input is the CONFIRM catch on the dim
+                    // pulse (scales paused — crank/breath/axis/child/answers are all inert). CONFIRM here is
+                    // the catch, NOT a restart (we are mid-Playing), and NOT a child press (driver defers).
+                    if (InDepression)
+                    {
+                        if (input == GameInput.Confirm) DepressionPress();
+                        break;
+                    }
                     // Crisis intercepts the two answer levers (←/→); crank/breath/axis/child are inert
                     // during the crisis (hands are on the blitz buttons — canon, scales paused too).
                     if (_phase == CrisisPhase.Blitz)
@@ -458,6 +520,7 @@ namespace ThanksNoThanks
             ResetRelationships();
             ResetChild();
             ResetCrisis();
+            ResetDepression();
             State = GameState.Playing;
             StateChanged?.Invoke();
             Advance();
@@ -473,6 +536,10 @@ namespace ThanksNoThanks
             // scales are DELIBERATELY paused during the crisis (see TickCrisis) — no passive drain, no
             // spurious scale death; the crisis can only kill via an impulse-card Δ/fatal (contract).
             if (_phase != CrisisPhase.None) { TickCrisis(dt); return; }
+
+            // Depression owns the whole tick while active: only the slow pulse scheduler runs. The 5 scales
+            // are paused (like the crisis) and there is NO death path — the ONLY exit is the mini-game.
+            if (InDepression) { TickDepression(dt); return; }
 
             if (CurrentCard == null)
             {
@@ -834,6 +901,7 @@ namespace ThanksNoThanks
             ResetRelationships();
             ResetChild();
             ResetCrisis();
+            ResetDepression();
             CurrentCard = null;
             State = GameState.Opener;
             StateChanged?.Invoke();
@@ -981,6 +1049,7 @@ namespace ThanksNoThanks
             _suspendedCard = null;
             CrisisEnded?.Invoke();
             CardChanged?.Invoke();                // driver re-renders the resumed card (normal HUD)
+            MaybeEnterDepression();               // RANDOM_TRIGGER tail: the crisis may drop into «тёмная полоса»
         }
 
         // Injected-time tick while a crisis phase is active: only the fast blitz/impulse timer runs — the
@@ -993,6 +1062,120 @@ namespace ThanksNoThanks
             if (_crisisTimer > 0f) return;
             if (_phase == CrisisPhase.Blitz) BlitzTimeout();
             else if (_phase == CrisisPhase.Impulse) ResolveImpulse(true); // молчание = ДА
+        }
+
+        // ================================================================ depression «тёмная полоса» (CR09)
+
+        private void ResetDepression()
+        {
+            InDepression = false;
+            DepressionPulsing = false;
+            _depressionDone = false;
+            _depGray = 0;
+            _depPulseElapsed = 0f;
+            _depPulseNextInterval = 0f;
+            _depPulseWindow = 0f;
+            _depPressLockout = 0f;
+        }
+
+        // Crisis tail: a one-shot RANDOM_TRIGGER roll (canon: «иногда после кризиса»). Latches _depressionDone
+        // either way so it can never re-roll this life; only fires when the plan actually carries CR09.
+        private void MaybeEnterDepression()
+        {
+            if (_depressionDone || _depressionCard == null) return;
+            _depressionDone = true;   // one-shot per life whether or not it hits
+            bool roll = DepressionTriggerRoll != null
+                ? DepressionTriggerRoll()
+                : _depRng.NextDouble() < DepressionChance;
+            if (roll) EnterDepression();
+        }
+
+        // Enter depression: full B&W, scales paused, the slow-pulse scheduler armed. The suspended normal
+        // card stays CurrentCard (its timer is frozen while InDepression) and resumes on exit — no death path.
+        private void EnterDepression()
+        {
+            InDepression = true;
+            DepressionPulsing = false;
+            _depGray = DepressionGraySteps;   // start fully desaturated
+            _depPulseElapsed = 0f;
+            _depPulseWindow = 0f;
+            _depPressLockout = 0f;
+            _depPulseNextInterval = PickDepressionInterval();
+            DepressionStarted?.Invoke();      // driver: muted «ТЁМНАЯ ПОЛОСА…» banner + B&W overlay
+        }
+
+        // The next wait between dim pulses: an injected value (test/tuning) or a uniform draw in [min,max].
+        private float PickDepressionInterval()
+        {
+            if (DepressionPulseInterval != null) return Math.Max(0.01f, DepressionPulseInterval());
+            return DepressionPulseIntervalMin
+                   + (float)(_depRng.NextDouble() * (DepressionPulseIntervalMax - DepressionPulseIntervalMin));
+        }
+
+        // Injected-time tick while depressed: count down the anti-mash lockout, hold the ~0.6s hit-window,
+        // and count a MISS (colour slips a step toward gray) when a lit pulse closes UNPRESSED (canon: «не
+        // нажал в окне … цвет уползает обратно»). NO scale drain, NO death — the ONLY exit is 5 catches.
+        private void TickDepression(float dt)
+        {
+            if (_depPressLockout > 0f)
+                _depPressLockout = Math.Max(0f, _depPressLockout - dt);
+
+            if (DepressionPulsing)
+            {
+                _depPulseWindow -= dt;
+                if (_depPulseWindow <= 0f)          // window closed with no valid catch → missed pulse
+                {
+                    DepressionPulsing = false;
+                    SlipDepressionBack();            // colour uползает обратно (floored at full gray)
+                    _depPulseElapsed = 0f;
+                    _depPulseNextInterval = PickDepressionInterval();
+                }
+            }
+            else
+            {
+                _depPulseElapsed += dt;
+                if (_depPulseElapsed >= _depPulseNextInterval)   // time to flash → open the hit-window
+                {
+                    DepressionPulsing = true;
+                    _depPulseWindow = DepressionPulseWindow;
+                }
+            }
+        }
+
+        // CONFIRM during depression. A press strictly INSIDE the open window (and not inside the anti-mash
+        // lockout) is a clean catch: one step of colour returns; 5 catches (gray → 0) lifts depression. Any
+        // other press — before/after the window, or while locked out (mashing) — is a MISS: colour slips a
+        // step back AND (re)arms the lockout, so a rapid/continuous press can never bank a catch.
+        private void DepressionPress()
+        {
+            if (!InDepression) return;
+            if (DepressionPulsing && _depPressLockout <= 0f)
+            {
+                DepressionPulsing = false;
+                _depGray = Math.Max(0, _depGray - 1);   // +1 step of colour
+                _depPulseElapsed = 0f;
+                _depPulseNextInterval = PickDepressionInterval();
+                DepressionProgressed?.Invoke();         // driver: muted host mutter «…ну же…»
+                if (_depGray <= 0) ExitDepression();    // full colour → depression lifted
+            }
+            else
+            {
+                SlipDepressionBack();                   // мимо/долбёж → colour slips a step back
+                _depPressLockout = DepressionPressLockout;
+            }
+        }
+
+        // A miss: colour slips one step back toward full gray, floored at the start (never below 0 colour —
+        // i.e. never above DepressionGraySteps). There is NO death, so a stuck player simply stays gray.
+        private void SlipDepressionBack()
+            => _depGray = Math.Min(DepressionGraySteps, _depGray + 1);
+
+        // Depression lifted — hand control back to ordinary play on the (frozen) suspended card.
+        private void ExitDepression()
+        {
+            InDepression = false;
+            DepressionPulsing = false;
+            DepressionEnded?.Invoke();
         }
 
         // ================================================================ money crank

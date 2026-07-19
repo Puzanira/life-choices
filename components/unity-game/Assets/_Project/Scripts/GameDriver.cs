@@ -139,6 +139,19 @@ namespace ThanksNoThanks
         private Image _brightness;
         private float _brightnessAlpha;
 
+        // ---- depression «тёмная полоса» (S8): full-screen B&W wash + grain, dim centre pulse, progress pips.
+        // Built hidden; shown only while Game.InDepression. The veil alpha steps with Game.DepressionGray so
+        // colour returns a step per catch; the grain is a static seeded-noise overlay; the pulse indicator
+        // reveals only on the ~0.6s hit-window. Above the brightness veil, below the tutorial overlay.
+        private GameObject _depressionGroup;
+        private Image _depressionVeil;     // near-opaque gray wash — alpha = DepressionGray/5 · max
+        private Image _depressionGrain;    // faint static noise (runtime-seeded texture)
+        private Image _depressionPulse;    // faint centre dot, visible only while DepressionPulsing
+        private Image[] _depPips;          // 5-step colour-progress readout
+        private int _depMutterCount;       // muttering index (one muted host line per catch)
+        // Depression colour tokens.
+        private static readonly Color GrayWash = new(0.50f, 0.50f, 0.53f);   // the B&W wash tint
+
         // Breath rhythm validator (E in a calm cadence → valid pulse → +energy). Clock advanced in Update.
         private readonly BreathRhythm _breath = new();
 
@@ -245,6 +258,9 @@ namespace ThanksNoThanks
         public Text HostBannerText => _bannerText;
         public bool HostBubbleVisible => _bubbleTimer.Visible;
         public bool HostBannerVisible => _bannerTimer.Visible;
+        public GameObject DepressionOverlay => _depressionGroup;
+        public Image DepressionVeil => _depressionVeil;
+        public Image DepressionPulseIndicator => _depressionPulse;
 
         /// <summary>Test hook: run the age-gated HUD visibility for an arbitrary age.</summary>
         public void DebugApplyAgeGates(float age) => ApplyAgeGates(age);
@@ -294,6 +310,8 @@ namespace ThanksNoThanks
             _game.CrisisStarted += OnCrisisStarted;
             _game.CrisisBlitzAdvanced += OnCrisisBlitzAdvanced;
             _game.CrisisImpulseStarted += OnCrisisImpulseStarted;
+            _game.DepressionStarted += OnDepressionStarted;
+            _game.DepressionProgressed += OnDepressionProgressed;
         }
 
         private void UnsubscribeGame()
@@ -311,6 +329,8 @@ namespace ThanksNoThanks
             _game.CrisisStarted -= OnCrisisStarted;
             _game.CrisisBlitzAdvanced -= OnCrisisBlitzAdvanced;
             _game.CrisisImpulseStarted -= OnCrisisImpulseStarted;
+            _game.DepressionStarted -= OnDepressionStarted;
+            _game.DepressionProgressed -= OnDepressionProgressed;
         }
 
         /// <summary>
@@ -380,10 +400,12 @@ namespace ThanksNoThanks
             // Enter double-duty: during gameplay with the child scale open (and no tutorial up — that case
             // returned above), Enter/CONFIRM means «жать по вспышке» → CHILD_PRESS. Everywhere else it stays
             // CONFIRM (start the game / restart from the finale / dismiss a hint), so the child mechanic
-            // never steals those. Game itself only honours the press inside the open flash window.
+            // never steals those. Game itself only honours the press inside the open flash window. NOT during
+            // depression: there CONFIRM is the pulse catch (Game routes it), so the child press must defer.
             if (input == GameInput.Confirm
                 && _game.State == GameState.Playing
-                && _game.ChildOpen)
+                && _game.ChildOpen
+                && !_game.InDepression)
             {
                 _game.HandleInput(GameInput.ChildPress);
                 return;
@@ -452,6 +474,7 @@ namespace ThanksNoThanks
             ReflectHostReveals(_game.State == GameState.Playing);
             ReflectBreakupPlate(_game.State == GameState.Playing);
             UpdateBrightness();
+            ReflectDepression();   // B&W wash + grain + pulse while Game.InDepression (above the show veil)
         }
 
         // Midlife-crisis render (S6 blitz / S13 impulse). Reuses the card marquee (thought/impulse text),
@@ -592,6 +615,8 @@ namespace ThanksNoThanks
             // Show-reaction veil: above the panels (dims the whole show), below the tutorial overlay.
             _brightness = NewSolid("BrightnessVeil", canvasGo.transform, new Color(0.02f, 0.03f, 0.10f, 0f));
             Stretch(_brightness.rectTransform);
+
+            BuildDepressionOverlay(canvasGo.transform);  // B&W wash + grain + pulse (above the show veil)
 
             BuildTutorialOverlay(canvasGo.transform);   // top-most: dims every screen when up
         }
@@ -966,6 +991,115 @@ namespace ThanksNoThanks
             _tutorialOverlay.SetActive(false);
         }
 
+        // Depression «тёмная полоса» (S8): a HARD black-&-white wash + static grain over the whole show, a
+        // faint centre pulse the player must catch, and a 5-step colour-progress readout. Built hidden; the
+        // whole group is toggled by Game.InDepression and driven in ReflectDepression.
+        private void BuildDepressionOverlay(Transform parent)
+        {
+            _depressionGroup = NewGroup("Depression", parent);
+
+            // B&W wash: a near-opaque gray Image whose alpha steps DOWN as colour returns (5 catches → clear).
+            _depressionVeil = NewSolid("DepressionVeil", _depressionGroup.transform, new Color(GrayWash.r, GrayWash.g, GrayWash.b, 0.85f));
+            Stretch(_depressionVeil.rectTransform);
+
+            // Static grain: a faint seeded-noise texture stretched over the screen (self-contained, no asset).
+            _depressionGrain = NewSprite("DepressionGrain", _depressionGroup.transform, MakeGrainSprite());
+            Stretch(_depressionGrain.rectTransform);
+            _depressionGrain.color = new Color(1f, 1f, 1f, 0.06f);
+
+            // «Собраться» label + hint (muted).
+            var label = NewText("DepLabel", _depressionGroup.transform,
+                "СОБРАТЬСЯ", 64, TextAnchor.MiddleCenter, new Color(0.85f, 0.85f, 0.88f), _display);
+            Anchor(label.rectTransform, new Vector2(0.5f, 0.72f), new Vector2(1200, 120));
+            var hint = NewText("DepHint", _depressionGroup.transform,
+                "жмите Enter точно по тусклому пульсу — медленно и метко", 30, TextAnchor.MiddleCenter,
+                new Color(0.7f, 0.7f, 0.74f), _body);
+            Anchor(hint.rectTransform, new Vector2(0.5f, 0.64f), new Vector2(1200, 60));
+
+            // Dim centre pulse — a faint soft dot, revealed only while the hit-window is open.
+            _depressionPulse = NewSprite("DepressionPulse", _depressionGroup.transform, Sprite("star-white"));
+            _depressionPulse.color = new Color(0.9f, 0.9f, 0.95f, 0.28f);
+            Anchor(_depressionPulse.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(150, 150));
+            _depressionPulse.gameObject.SetActive(false);
+
+            // 5-step colour-progress pips (a step fills gold per catch).
+            _depPips = new Image[Game.DepressionGraySteps];
+            const float pipW = 70f, gap = 26f;
+            float total = _depPips.Length * pipW + (_depPips.Length - 1) * gap;
+            for (int i = 0; i < _depPips.Length; i++)
+            {
+                var pip = NewSolid("DepPip" + i, _depressionGroup.transform, new Color(1f, 1f, 1f, 0.15f));
+                float x = -total / 2f + pipW / 2f + i * (pipW + gap);
+                var rt = pip.rectTransform;
+                rt.anchorMin = rt.anchorMax = new Vector2(0.5f, 0.34f);
+                rt.pivot = new Vector2(0.5f, 0.5f);
+                rt.anchoredPosition = new Vector2(x, 0f);
+                rt.sizeDelta = new Vector2(pipW, 22f);
+                _depPips[i] = pip;
+            }
+
+            _depressionGroup.SetActive(false);
+        }
+
+        // A small seeded noise texture used as static «зерно». Deterministic (fixed seed) so it never
+        // flickers between builds; stretched full-screen and drawn very faint.
+        private static UnityEngine.Sprite MakeGrainSprite()
+        {
+            const int n = 128;
+            var tex = new Texture2D(n, n, TextureFormat.RGBA32, false) { filterMode = FilterMode.Point, wrapMode = TextureWrapMode.Repeat };
+            var rng = new System.Random(20260719);
+            var px = new Color32[n * n];
+            for (int i = 0; i < px.Length; i++)
+            {
+                byte v = (byte)rng.Next(256);
+                px[i] = new Color32(v, v, v, 255);
+            }
+            tex.SetPixels32(px);
+            tex.Apply();
+            return UnityEngine.Sprite.Create(tex, new Rect(0, 0, n, n), new Vector2(0.5f, 0.5f), 100f);
+        }
+
+        // Depression started (CR09): muted «ТЁМНАЯ ПОЛОСА…» banner + reset the mutter cycle.
+        private void OnDepressionStarted()
+        {
+            _depMutterCount = 0;
+            ShowBannerText(HostContent.BannerFor("CR09"), muted: true);
+        }
+
+        // Each successful catch: a muted host mutter as a step of colour returns.
+        private void OnDepressionProgressed()
+        {
+            _depMutterCount++;
+            _bubbleTimer.Show(HostContent.DepressionMutterFor(_depMutterCount));
+        }
+
+        // Toggle + drive the depression overlay (called every frame from Update). The veil alpha steps with
+        // the gray level, the pulse dot reveals only on the hit-window, and the pips fill as colour returns.
+        private void ReflectDepression()
+        {
+            bool dep = _game != null && _game.State == GameState.Playing && _game.InDepression;
+            if (_depressionGroup.activeSelf != dep) _depressionGroup.SetActive(dep);
+            if (!dep) return;
+
+            float grayT = Mathf.Clamp01(_game.DepressionGray / (float)Game.DepressionGraySteps);
+            var vc = _depressionVeil.color;
+            _depressionVeil.color = new Color(vc.r, vc.g, vc.b, grayT * 0.85f);   // 5 gray → 0.85, 0 → clear
+            _depressionGrain.color = new Color(1f, 1f, 1f, 0.06f * grayT);
+
+            bool pulsing = _game.DepressionPulsing;
+            if (_depressionPulse.gameObject.activeSelf != pulsing) _depressionPulse.gameObject.SetActive(pulsing);
+            if (pulsing)
+            {
+                float a = 0.22f + 0.14f * Mathf.Sin(Time.time * 4f);   // slow faint throb
+                _depressionPulse.color = new Color(0.9f, 0.9f, 0.95f, a);
+                _depressionPulse.rectTransform.localScale = Vector3.one * (1f + 0.10f * Mathf.Sin(Time.time * 4f));
+            }
+
+            int restored = Game.DepressionGraySteps - _game.DepressionGray;   // filled steps of colour
+            for (int i = 0; i < _depPips.Length; i++)
+                _depPips[i].color = i < restored ? Bulb : new Color(1f, 1f, 1f, 0.15f);
+        }
+
         private void OnMoneyOpened()  { if (!_moneyTutorialSeen)  ShowTutorial(MoneyTutorialText,  ref _moneyTutorialSeen); }
         private void OnRelationshipsOpened() { if (!_relTutorialSeen) ShowTutorial(RelationshipsTutorialText, ref _relTutorialSeen); }
         private void OnEnergyOpened() { if (!_energyTutorialSeen) ShowTutorial(EnergyTutorialText, ref _energyTutorialSeen); }
@@ -1042,6 +1176,8 @@ namespace ThanksNoThanks
                 _breakupTimer.Hide();
                 _breakupPlate.SetActive(false);
                 RestoreNormalPlates();   // clear any crisis relabel/highlight carried across a restart
+                _depressionGroup.SetActive(false);   // no B&W wash carried across a restart
+                _depMutterCount = 0;
                 _brightnessAlpha = 0f;
                 // Host reveals reset each life: no stale bubble/banner carried across a restart.
                 _bubbleTimer.Hide();

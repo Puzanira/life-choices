@@ -50,6 +50,18 @@ namespace ThanksNoThanks
         public static string BlitzNagFor(int number)
             => BlitzNags[((number - 1) % BlitzNags.Length + BlitzNags.Length) % BlitzNags.Length];
 
+        /// <summary>
+        /// Ведущий's muted/distorted depression mutterings (crisis-content §1) — short, low-energy lines of
+        /// nudging encouragement, tone «подсева, без восторга». Shown one per successful catch as the colour
+        /// returns. Cycled by <see cref="DepressionMutterFor"/>.
+        /// </summary>
+        public static readonly string[] DepressionMutterings =
+            { "…ну же…", "…почти…", "…вот так…" };
+
+        /// <summary>Muttering for catch number <paramref name="number"/> (1-based), cycled over the pool.</summary>
+        public static string DepressionMutterFor(int number)
+            => DepressionMutterings[((number - 1) % DepressionMutterings.Length + DepressionMutterings.Length) % DepressionMutterings.Length];
+
         /// <summary>S13 impulse-round warning: INVERT means silence accepts — press → to decline.</summary>
         public const string ImpulseInvertWarning = "МОЛЧАНИЕ = ДА!";
         /// <summary>S13 sub-line prompting the active decline (the highlighted «СПАСИБО, НЕ НАДО» → button).</summary>
