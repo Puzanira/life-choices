@@ -39,6 +39,22 @@ namespace ThanksNoThanks
         /// <summary>Card id whose banner is intentionally un-celebratory (dim styling in the driver).</summary>
         public const string MutedBannerId = "CR09";
 
+        /// <summary>
+        /// Ведущий's fast, mockingly-hurrying nag lines shouted over the blitz thoughts (crisis-content §2).
+        /// The driver shows one per thought (indexed by thought number), keeping the pressure up.
+        /// </summary>
+        public static readonly string[] BlitzNags =
+            { "Быстрее!", "Соберись!", "Не тормозим!", "Улыбаемся!", "Всё хорошо, правда?", "Держим лицо!" };
+
+        /// <summary>Nag line for blitz thought <paramref name="number"/> (1-based), cycled over the pool.</summary>
+        public static string BlitzNagFor(int number)
+            => BlitzNags[((number - 1) % BlitzNags.Length + BlitzNags.Length) % BlitzNags.Length];
+
+        /// <summary>S13 impulse-round warning: INVERT means silence accepts — press → to decline.</summary>
+        public const string ImpulseInvertWarning = "МОЛЧАНИЕ = ДА!";
+        /// <summary>S13 sub-line prompting the active decline (the highlighted «СПАСИБО, НЕ НАДО» → button).</summary>
+        public const string ImpulseDeclinePrompt = "ЖМИ «СПАСИБО, НЕ НАДО» →";
+
         /// <summary>Fallback banner for any TIMELINE card without a named rubric (none in the current deck).</summary>
         public const string GenericBanner = "НОВАЯ ВЕХА!";
 

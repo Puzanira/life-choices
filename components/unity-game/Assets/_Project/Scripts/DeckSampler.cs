@@ -22,6 +22,14 @@ namespace ThanksNoThanks
         /// Null when the card isn't present in the parsed set.
         /// </summary>
         public Card Lt08;
+
+        /// <summary>
+        /// Кризис среднего возраста (CR00–CR08), id-отсортирован. Un-excluded из hard-list, но НИКОГДА не
+        /// сэмплируется в <see cref="Deck"/>/<see cref="Reserve"/>: кризис проигрывается особым СЕКВЕНСНЫМ
+        /// состоянием в <see cref="Game"/> (CR00-триггер в 45–50 → блиц CR01–05 → импульс CR06–08), не как
+        /// случайный дро. CR09 (депрессия) остаётся hard-excluded (отдельный инкремент). Пусто, если карт нет.
+        /// </summary>
+        public List<Card> Crisis = new();
     }
 
     /// <summary>
@@ -57,17 +65,24 @@ namespace ThanksNoThanks
         public const int MidTarget = 3;
         public const int OldTarget = 4;
 
-        // Hard-excluded — these IDs must never be drawn (enforced by a test). LT08 is NO LONGER here:
-        // it is un-excluded (canon 2026-07-18) but pulled out of sampling into DeckPlan.Lt08 and
-        // condition-inserted by Game (health<40% & age≥30), so it still never appears randomly.
+        // Hard-excluded — these IDs must never be drawn (enforced by a test). LT08 is NO LONGER here
+        // (un-excluded 2026-07-18, pulled into DeckPlan.Lt08). CR00–CR08 are ALSO un-excluded now (canon
+        // 2026-07-19 crisis-blitz-impulse): they parse and load, but — like LT08 — are pulled out of the
+        // sampling pool into DeckPlan.Crisis and played by Game as a special sequenced state (the 45–50
+        // crisis), never as random draws. CR09 (депрессия) stays hard-excluded — a separate increment.
         public static readonly HashSet<string> Excluded = new()
         {
-            "CR00", "CR01", "CR02", "CR03", "CR04", "CR05", "CR06", "CR07", "CR08", "CR09",
-            "MD06", "RND05",
+            "CR09", "MD06", "RND05",
         };
 
         // System card extracted from the pool before sampling (never a random draw); see DeckPlan.Lt08.
         private const string SystemHealthCardId = "LT08";
+
+        // Crisis block extracted from the pool before sampling (never random draws); see DeckPlan.Crisis.
+        // CR00 (баннер-триггер) + CR01–CR05 (блиц) + CR06–CR08 (импульс). CR09 is NOT here — it stays
+        // hard-excluded above. Order is the id order Game relies on (blitz = CR01..05, impulse = CR06..08).
+        private static readonly string[] CrisisCardIds =
+            { "CR00", "CR01", "CR02", "CR03", "CR04", "CR05", "CR06", "CR07", "CR08" };
 
         // Milestones always present at their canonical age (I02 intro is pinned first).
         private static readonly string[] UnconditionalMilestones =
@@ -117,6 +132,17 @@ namespace ThanksNoThanks
             Card lt08 = null;
             if (byId.TryGetValue(SystemHealthCardId, out lt08))
                 byId.Remove(SystemHealthCardId);
+
+            // Pull the crisis block (CR00–CR08) out of the sampling pool: like LT08, un-excluded so it
+            // parses, but never a random draw — Game plays it as the special 45–50 sequenced state. Kept
+            // in id order (CR00..CR08) so Game can slice blitz (CR01–05) and impulse (CR06–08) directly.
+            var crisis = new List<Card>();
+            foreach (var id in CrisisCardIds)
+                if (byId.TryGetValue(id, out var cr))
+                {
+                    crisis.Add(cr);
+                    byId.Remove(id);
+                }
 
             var deck = new List<Card>();
             var handled = new HashSet<string>();
@@ -199,7 +225,7 @@ namespace ThanksNoThanks
             foreach (var c in reserve) c.Age = AssignAge(c, rng);
             reserve.Sort((a, b) => a.Age != b.Age ? a.Age.CompareTo(b.Age) : a.Order.CompareTo(b.Order));
 
-            return new DeckPlan { Deck = deck, Reserve = reserve, Lt08 = lt08 };
+            return new DeckPlan { Deck = deck, Reserve = reserve, Lt08 = lt08, Crisis = crisis };
         }
 
         private static void ClampSize(List<Card> deck, List<Card> normals, List<Card> leftover, Random rng)

@@ -117,6 +117,8 @@ namespace ThanksNoThanks
                 card.IsRond = flags.Contains("ROND");
                 card.IsForced = flags.Contains("FORCED");
                 card.IsBlockCost = flags.Contains("BLOCK$");
+                card.IsBlitz = flags.Contains("BLITZ");     // кризис-мысль (CR00–CR05)
+                card.IsInvert = flags.Contains("INVERT");   // импульс-карта (CR06–CR08): молчание=ДА
                 card.LongEffects = ParseLongEffects(Field(row, ColLong));
                 // Probabilistic inclusion keys on RANDOM_TRIGGER; legacy "RANDOM" means the same
                 // (old snapshot). RANDOM_OUTCOME is a separate, mechanically-inert marker.

@@ -82,8 +82,16 @@ namespace ThanksNoThanks
         private Image _noPlate;
         private RectTransform _yesRect;
         private RectTransform _noRect;
+        private Text _yesPlateText;   // relabelled during the crisis blitz («ВСЁ НОРМАЛЬНО» / «О НЕТ»)
+        private Text _noPlateText;
         private const float YesTilt = -2f;
         private const float NoTilt = 2f;
+
+        // ---- midlife crisis HUD (S6 blitz / S13 impulse); built hidden, shown only while Game.InCrisis ----
+        private GameObject _crisisInfo;       // top readout: «МЫСЛЬ N/5 · ПРОВАЛОВ: K» / «ИМПУЛЬС N/3»
+        private Text _crisisInfoText;
+        private GameObject _impulseWarning;   // S13 INVERT plate: «МОЛЧАНИЕ = ДА! · ЖМИ СПАСИБО НЕ НАДО →»
+        private bool _crisisUiActive;         // true while the plates/timer are in crisis mode (for restore)
 
         // Timer ring
         private Image _timerFill;
@@ -228,6 +236,11 @@ namespace ThanksNoThanks
         public Text TutorialText => _tutorialText;
         public GameObject HostBubble => _hostBubble;
         public Text HostBubbleText => _bubbleText;
+        public GameObject CrisisInfo => _crisisInfo;
+        public Text CrisisInfoText => _crisisInfoText;
+        public GameObject ImpulseWarning => _impulseWarning;
+        public Text YesPlateText => _yesPlateText;
+        public Text NoPlateText => _noPlateText;
         public GameObject HostBanner => _bannerRoot;
         public Text HostBannerText => _bannerText;
         public bool HostBubbleVisible => _bubbleTimer.Visible;
@@ -278,6 +291,9 @@ namespace ThanksNoThanks
             _game.BurnoutEntered += OnBurnoutEntered;
             _game.RelationshipBrokeUp += OnRelationshipBrokeUp;
             _game.ChildOpened += OnChildOpened;
+            _game.CrisisStarted += OnCrisisStarted;
+            _game.CrisisBlitzAdvanced += OnCrisisBlitzAdvanced;
+            _game.CrisisImpulseStarted += OnCrisisImpulseStarted;
         }
 
         private void UnsubscribeGame()
@@ -292,6 +308,9 @@ namespace ThanksNoThanks
             _game.BurnoutEntered -= OnBurnoutEntered;
             _game.RelationshipBrokeUp -= OnRelationshipBrokeUp;
             _game.ChildOpened -= OnChildOpened;
+            _game.CrisisStarted -= OnCrisisStarted;
+            _game.CrisisBlitzAdvanced -= OnCrisisBlitzAdvanced;
+            _game.CrisisImpulseStarted -= OnCrisisImpulseStarted;
         }
 
         /// <summary>
@@ -394,8 +413,13 @@ namespace ThanksNoThanks
             _crankCap.Advance(Time.deltaTime);   // deterministic clock for the income cap
             _breath.Advance(Time.deltaTime);     // deterministic clock for the breathing rhythm
             _game.Tick(Time.deltaTime);
-            if (_game.State == GameState.Playing)
+            if (_game.State == GameState.Playing && _game.InCrisis)
             {
+                RenderCrisis();   // S6 blitz / S13 impulse — reuses the plates + timer ring, freezes normal HUD
+            }
+            else if (_game.State == GameState.Playing)
+            {
+                if (_crisisUiActive) RestoreNormalPlates();   // just resumed from a crisis → restore the plates
                 _ageText.text = Mathf.FloorToInt(_game.Age).ToString();
                 _moneyText.text = FormatMoney(_game.Money);   // live: ticks up on crank, drains down
                 // Live health/energy bars + balancer move on their own (decay/drain/breath), not just on cards.
@@ -429,6 +453,73 @@ namespace ThanksNoThanks
             ReflectBreakupPlate(_game.State == GameState.Playing);
             UpdateBrightness();
         }
+
+        // Midlife-crisis render (S6 blitz / S13 impulse). Reuses the card marquee (thought/impulse text),
+        // the two answer plates (relabelled), and the timer ring (on the fast crisis clock). The normal HUD
+        // (bars/money/balancer) is intentionally frozen — the 5 scales are paused in Game during the crisis.
+        private void RenderCrisis()
+        {
+            _crisisUiActive = true;
+            var c = _game.CurrentCard;
+            _cardText.text = c != null ? c.Question : "";
+
+            // BLOCK$ visuals never apply during a crisis.
+            _blockVeil.SetActive(false);
+            _blockBanner.SetActive(false);
+            _cardPriceText.gameObject.SetActive(false);
+
+            bool blitz = _game.Phase == CrisisPhase.Blitz;
+            if (blitz)
+            {
+                // «ВСЁ НОРМАЛЬНО» jumps sides each thought; ← = left plate (yes), → = right plate (no).
+                bool normalLeft = _game.BlitzNormalOnLeft;
+                _yesPlateText.text = normalLeft ? "ВСЁ\nНОРМАЛЬНО" : "О НЕТ";
+                _noPlateText.text = normalLeft ? "О НЕТ" : "ВСЁ\nНОРМАЛЬНО";
+                _yesPlate.color = Color.white;
+                _noPlate.color = Color.white;
+                _crisisInfoText.text = $"МЫСЛЬ {_game.BlitzThoughtNumber}/5     ПРОВАЛОВ: {_game.BlitzFails}";
+            }
+            else
+            {
+                // Impulse: normal levers work (← = поддаться/ДА, → = «СПАСИБО, НЕ НАДО»). Highlight the → decline.
+                _yesPlateText.text = "ПОДДАТЬСЯ";
+                _noPlateText.text = "СПАСИБО,\nНЕ НАДО";
+                _yesPlate.color = Color.white;
+                _noPlate.color = Bulb;   // gold-highlight the safe active decline
+                _crisisInfoText.text = $"ИМПУЛЬС {_game.ImpulseCardNumber}/3";
+            }
+            if (!_crisisInfo.activeSelf) _crisisInfo.SetActive(true);
+            if (_impulseWarning.activeSelf == blitz) _impulseWarning.SetActive(!blitz);
+
+            // Fast crisis timer on the ring (2s blitz / 3s impulse).
+            float remaining = Mathf.Max(0f, _game.CrisisTimer);
+            _timerText.text = Mathf.CeilToInt(remaining).ToString();
+            _timerFill.fillAmount = Mathf.Clamp01(remaining / Mathf.Max(0.0001f, _game.CrisisTimerMax));
+            _timerFill.color = TimerHot;
+            _timerText.transform.localScale = Vector3.one * (1f + 0.08f * Mathf.Sin(Time.time * 14f));
+        }
+
+        // Restore the plates + hide the crisis widgets when ordinary play resumes (called once on the
+        // first normal frame after a crisis). OnCardChanged (fired by ResumeAfterCrisis) re-renders the card.
+        private void RestoreNormalPlates()
+        {
+            _crisisUiActive = false;
+            _yesPlateText.text = "ДА";
+            _noPlateText.text = "СПАСИБО,\nНЕ НАДО";
+            _yesPlate.color = Color.white;
+            _noPlate.color = Color.white;
+            if (_crisisInfo != null) _crisisInfo.SetActive(false);
+            if (_impulseWarning != null) _impulseWarning.SetActive(false);
+        }
+
+        // Crisis entered (CR00): announce «КРИЗИС СРЕДНЕГО ВОЗРАСТА! БЛИЦ!» on the rubric banner.
+        private void OnCrisisStarted() => ShowBannerText(HostContent.BannerFor("CR00"), muted: false);
+
+        // Each new blitz thought: shout a hurrying host-nag line in the speech bubble (S3).
+        private void OnCrisisBlitzAdvanced() => _bubbleTimer.Show(HostContent.BlitzNagFor(_game.BlitzThoughtNumber));
+
+        // Impulse round opened: the S13 warning plate reveals via RenderCrisis; nothing else needed here.
+        private void OnCrisisImpulseStarted() { }
 
         // Child button: reveal off Game.ChildOpen (not age-gated — opens on MD02=ДА, hides after LT04), and
         // light the bulb bright gold + pulse while the flash window is open (Game.ChildFlashing), dim else.
@@ -648,6 +739,7 @@ namespace ThanksNoThanks
             var yesText = NewText("YesText", _yesPlate.transform, "ДА", 64, TextAnchor.MiddleCenter, Ink, _display);
             Stretch(yesText.rectTransform);
             DisplayFx(yesText);
+            _yesPlateText = yesText;
 
             _noPlate = NewSprite("NoPlate", _gamePanel.transform, Sprite("plate-no"));
             _noPlate.type = Image.Type.Sliced;
@@ -657,6 +749,7 @@ namespace ThanksNoThanks
             var noText = NewText("NoText", _noPlate.transform, "СПАСИБО,\nНЕ НАДО", 46, TextAnchor.MiddleCenter, Color.white, _display);
             Stretch(noText.rectTransform);
             DisplayFx(noText);
+            _noPlateText = noText;
 
             // ---- Burnout state plate (S7): dim-cobalt banner, shown only while Game.Burnout is on ----
             _burnoutPlate = NewSolid("BurnoutPlate", _gamePanel.transform, CobaltDeep).gameObject;
@@ -676,7 +769,31 @@ namespace ThanksNoThanks
             DisplayFx(breakupTxt);
             _breakupPlate.SetActive(false);
 
+            BuildCrisisHud();
             BuildHostReactions();
+        }
+
+        // Midlife-crisis HUD: a top readout (blitz progress + fail count / impulse index) and the S13 INVERT
+        // warning plate. Both start hidden and are shown by RenderCrisis only while Game.InCrisis. The blitz's
+        // two buttons and the fast timer REUSE the existing answer plates + timer ring (relabelled in-place).
+        private void BuildCrisisHud()
+        {
+            _crisisInfo = NewSolid("CrisisInfo", _gamePanel.transform, CobaltDeep).gameObject;
+            Anchor(_crisisInfo.GetComponent<RectTransform>(), new Vector2(0.5f, 0.965f), new Vector2(720, 64));
+            _crisisInfoText = NewText("CrisisInfoText", _crisisInfo.transform,
+                "", 34, TextAnchor.MiddleCenter, TextLight, _display);
+            Stretch(_crisisInfoText.rectTransform);
+            DisplayFx(_crisisInfoText);
+            _crisisInfo.SetActive(false);
+
+            _impulseWarning = NewSolid("ImpulseWarning", _gamePanel.transform, TimerRed).gameObject;
+            Anchor(_impulseWarning.GetComponent<RectTransform>(), new Vector2(0.5f, 0.32f), new Vector2(900, 160));
+            var warn = NewText("ImpulseWarnText", _impulseWarning.transform,
+                HostContent.ImpulseInvertWarning + "\n" + HostContent.ImpulseDeclinePrompt,
+                46, TextAnchor.MiddleCenter, Color.white, _display);
+            Stretch(warn.rectTransform);
+            DisplayFx(warn);
+            _impulseWarning.SetActive(false);
         }
 
         // Host speech bubble (S3, yellow bubble.png 9-slice) + rubric banner (S4). Both start hidden.
@@ -924,6 +1041,7 @@ namespace ThanksNoThanks
                 _burnoutPlate.SetActive(false);
                 _breakupTimer.Hide();
                 _breakupPlate.SetActive(false);
+                RestoreNormalPlates();   // clear any crisis relabel/highlight carried across a restart
                 _brightnessAlpha = 0f;
                 // Host reveals reset each life: no stale bubble/banner carried across a restart.
                 _bubbleTimer.Hide();
@@ -983,12 +1101,15 @@ namespace ThanksNoThanks
 
         // Show the rubric band for a TIMELINE card. CR09 is styled muted (out-of-scope crisis; text baked).
         private void ShowBanner(Card c)
+            => ShowBannerText(HostContent.BannerFor(c.Id), muted: c.Id == HostContent.MutedBannerId);
+
+        // Show an arbitrary rubric-band caption (used by TIMELINE cards and the crisis CR00 banner).
+        private void ShowBannerText(string text, bool muted)
         {
-            bool muted = c.Id == HostContent.MutedBannerId;
             _bannerBand.color = muted ? CobaltDeep : Bulb;
             _bannerText.color = muted ? Muted : Ink;
-            _bannerText.text = HostContent.BannerFor(c.Id);
-            _bannerTimer.Show(_bannerText.text);
+            _bannerText.text = text;
+            _bannerTimer.Show(text);
             _bannerRoot.transform.SetAsLastSibling();   // draw over the card
         }
 

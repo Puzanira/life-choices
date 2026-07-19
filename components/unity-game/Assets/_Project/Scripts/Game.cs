@@ -7,6 +7,14 @@ namespace ThanksNoThanks
     public enum GameState { Opener, Playing, Finale }
 
     /// <summary>
+    /// Sub-mode of <see cref="GameState.Playing"/> during the midlife crisis (CR00–CR08). <see cref="None"/>
+    /// is ordinary card play; <see cref="Blitz"/> is the 5×2s thought sprint (CR01–CR05); <see cref="Impulse"/>
+    /// is the INVERT round (CR06–CR08) entered only after ≥2 blitz fails. The normal card loop is suspended
+    /// while a crisis phase is active and resumes exactly where it left off afterwards.
+    /// </summary>
+    public enum CrisisPhase { None, Blitz, Impulse }
+
+    /// <summary>
     /// Which way a card resolved — the semantic input to the host's speech-bubble tone.
     /// <see cref="Timeout"/> means the 5-second timer ran out (the mechanical answer was still a coin
     /// flip, but the host reacts to the silence, not the random pick).
@@ -104,6 +112,14 @@ namespace ThanksNoThanks
         public const int ChildPressGain = 4;              // успел по вспышке → шкала ребёнка чуть вверх
         public const int ChildStartValue = 70;            // шкала ребёнка на открытии (MD02=ДА)
 
+        // ---- midlife crisis: blitz + impulse (tunable; canon crisis-content.md §2) ----
+        public const int CrisisTriggerAge = 45;            // кризис в 45–50: fires once when Age first reaches 45
+        public const float BlitzSeconds = 2f;              // 2 сек на кризис-мысль (не 5, как обычная карта)
+        public const int ImpulseFailThreshold = 2;         // ≥2 провала в блице → раунд импульса (иначе пропуск)
+        // Impulse reaction window. Canon gives no number (it's «надо срочно нажать»); tuned to 3s so the
+        // INVERT warning «молчание = ДА» is readable before silence auto-accepts. #1 crisis tunable (report).
+        public const float ImpulseSeconds = 3f;
+
         private List<Card> _deck;
         private List<Card> _reserve = new();             // top-up pool for skipped chain-gated cards
         private readonly Func<IReadOnlyList<Card>> _deckFactory; // re-samples a fresh deck per life
@@ -188,6 +204,51 @@ namespace ThanksNoThanks
         /// <summary>Fired the instant the child scale opens (MD02=ДА, «свадьба+2») — drives the S5
         /// «ПОПОЛНЕНИЕ! жмите Enter по вспышке» hint + pause, one-shot per life.</summary>
         public event Action ChildOpened;
+
+        // ---- midlife crisis (blitz + impulse) state ----
+        private List<Card> _blitzThoughts;      // CR01..CR05 (from the plan); null when no crisis in this plan
+        private List<Card> _impulseCards;       // CR06..CR08 (from the plan); null when absent
+        private bool _crisisDone;               // one-shot per life (set at trigger, so it can't re-fire)
+        private CrisisPhase _phase = CrisisPhase.None;
+        private int _blitzIndex;                // 0..4 current thought
+        private int _blitzFails;                // промахи/«О НЕТ»/таймауты — ≥2 opens the impulse round
+        private bool _blitzNormalOnLeft;        // «ВСЁ НОРМАЛЬНО» side for the CURRENT thought (seeded)
+        private int _impulseIndex;              // 0..2 into CR06..CR08
+        private float _crisisTimer;             // countdown for the current thought / impulse card
+        private readonly Random _blitzRng = new();
+        private Card _suspendedCard;            // normal card interrupted by the crisis (resumed after)
+        private float _suspendedTimer;          // its remaining card timer, restored on resume
+        private bool _suspendedBlocked;         // its BLOCK$ state, restored on resume
+
+        /// <summary>Test/tuning seam: supplies whether «ВСЁ НОРМАЛЬНО» is on the LEFT for the next thought.
+        /// null → a coin from the internal RNG. Injected so a test can pin the side sequence (both sides).</summary>
+        public Func<bool> BlitzNormalOnLeftRoll;
+
+        /// <summary>Current crisis phase (None while in ordinary play). Read by the driver to render S6/S13.</summary>
+        public CrisisPhase Phase => _phase;
+        /// <summary>True while any crisis phase is active — the normal card loop is suspended.</summary>
+        public bool InCrisis => _phase != CrisisPhase.None;
+        /// <summary>Blitz fails so far this crisis (промахи/«О НЕТ»/таймауты). ≥<see cref="ImpulseFailThreshold"/> → impulse.</summary>
+        public int BlitzFails => _blitzFails;
+        /// <summary>Current blitz thought number, 1..5 (for the S6 «мысль N/5» readout). 0 outside blitz.</summary>
+        public int BlitzThoughtNumber => _phase == CrisisPhase.Blitz ? _blitzIndex + 1 : 0;
+        /// <summary>Which side «ВСЁ НОРМАЛЬНО» is on for the current thought: true = LEFT (←), false = RIGHT (→).</summary>
+        public bool BlitzNormalOnLeft => _blitzNormalOnLeft;
+        /// <summary>The current impulse card number, 1..3 (S13 readout). 0 outside the impulse round.</summary>
+        public int ImpulseCardNumber => _phase == CrisisPhase.Impulse ? _impulseIndex + 1 : 0;
+        /// <summary>Remaining time on the current crisis thought/impulse (mirrors <see cref="CardTimer"/>).</summary>
+        public float CrisisTimer => _crisisTimer;
+        /// <summary>The full duration of the current crisis timer (2s blitz / 3s impulse) for the ring fill.</summary>
+        public float CrisisTimerMax => _phase == CrisisPhase.Impulse ? ImpulseSeconds : BlitzSeconds;
+
+        /// <summary>Fired the instant the crisis begins (CR00): drives the S6 «КРИЗИС… БЛИЦ!» banner.</summary>
+        public event Action CrisisStarted;
+        /// <summary>Fired for each new blitz thought (incl. the first): drives the S6 host-nag bubble + relabel.</summary>
+        public event Action CrisisBlitzAdvanced;
+        /// <summary>Fired when the impulse round opens (≥2 fails): drives the S13 INVERT warning.</summary>
+        public event Action CrisisImpulseStarted;
+        /// <summary>Fired when the crisis ends and ordinary play resumes (the suspended card is restored).</summary>
+        public event Action CrisisEnded;
 
         /// <summary>Live money in ₽ (fractional; negative allowed). Authoritative for the HUD pill.</summary>
         public double Money { get; private set; }
@@ -311,6 +372,21 @@ namespace ThanksNoThanks
             _deck = plan?.Deck?.ToList() ?? new List<Card>();
             _reserve = plan?.Reserve?.ToList() ?? new List<Card>();
             _lt08 = plan?.Lt08;   // condition-triggered system heal card for this life (may be null)
+            BuildCrisisLists(plan?.Crisis);
+        }
+
+        // Slice the plan's crisis block (CR00..CR08, id-sorted) into the blitz thoughts (CR01–CR05) and the
+        // impulse cards (CR06–CR08) Game sequences. Null lists (no crisis in this plan) → crisis never fires.
+        private void BuildCrisisLists(List<Card> crisis)
+        {
+            _blitzThoughts = null;
+            _impulseCards = null;
+            if (crisis == null || crisis.Count == 0) return;
+            var blitz = crisis.Where(c => c.Id == "CR01" || c.Id == "CR02" || c.Id == "CR03"
+                                          || c.Id == "CR04" || c.Id == "CR05").ToList();
+            var impulse = crisis.Where(c => c.Id == "CR06" || c.Id == "CR07" || c.Id == "CR08").ToList();
+            if (blitz.Count > 0) _blitzThoughts = blitz;
+            if (impulse.Count > 0) _impulseCards = impulse;
         }
 
         private static Func<bool> DefaultCoin()
@@ -331,6 +407,21 @@ namespace ThanksNoThanks
                     if (input == GameInput.Confirm) StartLife();
                     break;
                 case GameState.Playing:
+                    // Crisis intercepts the two answer levers (←/→); crank/breath/axis/child are inert
+                    // during the crisis (hands are on the blitz buttons — canon, scales paused too).
+                    if (_phase == CrisisPhase.Blitz)
+                    {
+                        if (input == GameInput.AnswerYes) BlitzPress(pressedLeft: true);   // ← = левая кнопка
+                        else if (input == GameInput.AnswerNo) BlitzPress(pressedLeft: false); // → = правая
+                        break;
+                    }
+                    if (_phase == CrisisPhase.Impulse)
+                    {
+                        // INVERT: → = «СПАСИБО, НЕ НАДО» (отказ/НЕТ); ← = поддаться (ДА). Молчание = ДА (в Tick).
+                        if (input == GameInput.AnswerNo) ResolveImpulse(false);
+                        else if (input == GameInput.AnswerYes) ResolveImpulse(true);
+                        break;
+                    }
                     if (input == GameInput.AnswerYes) Answer(true);
                     else if (input == GameInput.AnswerNo) Answer(false);
                     else if (input == GameInput.MoneyTick) Crank();
@@ -366,6 +457,7 @@ namespace ThanksNoThanks
             ResetHealthEnergy();
             ResetRelationships();
             ResetChild();
+            ResetCrisis();
             State = GameState.Playing;
             StateChanged?.Invoke();
             Advance();
@@ -376,6 +468,11 @@ namespace ThanksNoThanks
         {
             if (State != GameState.Playing) return;
             if (Paused) return; // tutorial overlay up — freeze age, drains, cost-of-living and the card timer
+
+            // Crisis owns the whole tick while active: only the fast blitz/impulse timer runs. The 5 live
+            // scales are DELIBERATELY paused during the crisis (see TickCrisis) — no passive drain, no
+            // spurious scale death; the crisis can only kill via an impulse-card Δ/fatal (contract).
+            if (_phase != CrisisPhase.None) { TickCrisis(dt); return; }
 
             if (CurrentCard == null)
             {
@@ -412,6 +509,7 @@ namespace ThanksNoThanks
                 if (CheckRelationshipsOpen()) return; // open relationships balancer (20) → hint + pause
                 if (CheckEnergyOpen()) return;     // open energy (25) → «дыхание» hint + pause
                 if (CheckHealthDecayOpen()) return;// health starts decaying (30) → hint + pause
+                if (CheckCrisisTrigger()) return;  // кризис среднего возраста (45–50) → blitz, one-shot
                 if (CheckScheduledFatal()) return; // «за вами пришли» once age crosses card.Age+n
             }
 
@@ -587,6 +685,22 @@ namespace ThanksNoThanks
             if (card.StartsAgeTimer)
                 AgeRunning = true; // ДА и НЕТ равнозначны: «шаг всё равно происходит»
 
+            if (ApplyResolvedConsequences(card, yes,
+                    timeout ? AnswerSide.Timeout : yes ? AnswerSide.Yes : AnswerSide.No))
+                return;   // the run ended (fatal / scale depletion) — no advance
+
+            Advance();
+        }
+
+        /// <summary>
+        /// Apply a resolved card's consequences on the chosen side: Δ (BLOCK$ price handling), long effects,
+        /// necrolog line, card-id specials, the host reaction hook, and the delayed/immediate fatal + live
+        /// scale-death checks. Returns true if the run ended (so the caller skips advancing). Shared by the
+        /// ordinary <see cref="Answer(bool,bool)"/> path and the crisis impulse round, so both apply identical
+        /// consequences. Does NOT touch the age timer or the BLOCK$-blocked skip — those are Answer-specific.
+        /// </summary>
+        private bool ApplyResolvedConsequences(Card card, bool yes, AnswerSide side)
+        {
             if (!card.IsNoCons)
             {
                 // BLOCK$: the price (BlockPrices[id]) is the ONE authoritative money cost — the same number
@@ -623,7 +737,7 @@ namespace ThanksNoThanks
             // Host reaction hook: announce the resolution (card + side) BEFORE the fatal/advance fork,
             // so the bubble reflects THIS choice no matter what happens next. Timeout carries the «skip»
             // tone even though the mechanical pick above was a coin flip.
-            AnswerResolved?.Invoke(card, timeout ? AnswerSide.Timeout : yes ? AnswerSide.Yes : AnswerSide.No);
+            AnswerResolved?.Invoke(card, side);
 
             // Delayed fatal (RND01): ДА schedules «за вами пришли» for card.Age + n, life continues.
             if (yes && card.DelayedFatalYears > 0)
@@ -632,12 +746,12 @@ namespace ThanksNoThanks
                 _scheduledFatalCause = card.FatalCause;
             }
 
-            if (yes && card.YesIsFatal) { End(card.FatalCause); return; }
-            if (Scales.HealthDepleted) { End("здоровье не выдержало"); return; }
-            if (EnergyOpen && Scales.EnergyDepleted) { End("полное выгорание"); return; }
+            if (yes && card.YesIsFatal) { End(card.FatalCause); return true; }
+            if (Scales.HealthDepleted) { End("здоровье не выдержало"); return true; }
+            if (EnergyOpen && Scales.EnergyDepleted) { End("полное выгорание"); return true; }
 
             MaybeTriggerLt08();   // a health-hit card may drop below 40% → «Пора подлечиться!»
-            Advance();
+            return false;
         }
 
         // LT01 modifier + KEK04 bonus. LT02→80% / LT08→80% heals ride the normal Δ path (Set), so they
@@ -719,9 +833,166 @@ namespace ThanksNoThanks
             ResetHealthEnergy();
             ResetRelationships();
             ResetChild();
+            ResetCrisis();
             CurrentCard = null;
             State = GameState.Opener;
             StateChanged?.Invoke();
+        }
+
+        // ================================================================ midlife crisis (blitz + impulse)
+
+        private void ResetCrisis()
+        {
+            _phase = CrisisPhase.None;
+            _crisisDone = false;
+            _blitzIndex = 0;
+            _blitzFails = 0;
+            _blitzNormalOnLeft = false;
+            _impulseIndex = 0;
+            _crisisTimer = 0f;
+            _suspendedCard = null;
+            _suspendedTimer = 0f;
+            _suspendedBlocked = false;
+        }
+
+        // Fires once when Age first reaches 45 (canon 45–50 window floor), provided the plan carries the
+        // crisis block. One-shot per life (_crisisDone latches at trigger). Returns true when it fired so
+        // the tick stops here — the next tick runs TickCrisis instead of ordinary play.
+        private bool CheckCrisisTrigger()
+        {
+            if (_crisisDone || _phase != CrisisPhase.None) return false;
+            if (_blitzThoughts == null || _blitzThoughts.Count == 0) return false;
+            if (Age < CrisisTriggerAge) return false;
+            EnterCrisis();
+            return true;
+        }
+
+        // Suspend the current normal card and open the blitz. CR00 (баннер) is a driver-only flourish
+        // (HostContent.BannerFor("CR00")); the mechanic is the 5 thoughts. Latches _crisisDone so nothing
+        // can re-trigger this life (not even mid-crisis).
+        private void EnterCrisis()
+        {
+            _crisisDone = true;
+            _suspendedCard = CurrentCard;         // resumed verbatim after the crisis
+            _suspendedTimer = CardTimer;
+            _suspendedBlocked = CurrentCardBlocked;
+            _phase = CrisisPhase.Blitz;
+            _blitzIndex = 0;
+            _blitzFails = 0;
+            CrisisStarted?.Invoke();              // driver: «КРИЗИС СРЕДНЕГО ВОЗРАСТА! БЛИЦ!»
+            StartBlitzThought();
+        }
+
+        // Put up the current thought (CR0N): its text as CurrentCard, a fresh 2s timer, and a seeded
+        // «ВСЁ НОРМАЛЬНО» side. Blitz thoughts carry NO Δ — only the fail counter matters.
+        private void StartBlitzThought()
+        {
+            CurrentCard = _blitzThoughts[_blitzIndex];
+            CurrentCardBlocked = false;
+            _blitzNormalOnLeft = BlitzNormalOnLeftRoll != null
+                ? BlitzNormalOnLeftRoll()
+                : _blitzRng.Next(2) == 0;
+            _crisisTimer = BlitzSeconds;
+            CardTimer = BlitzSeconds;             // mirror for the driver's timer ring
+            CrisisBlitzAdvanced?.Invoke();        // driver: host-nag bubble + relabel the two buttons
+        }
+
+        // A blitz button press. Correct = pressing the «ВСЁ НОРМАЛЬНО» side in time; pressing «О НЕТ» (the
+        // other side) is a fail. ← maps to the LEFT button, → to the RIGHT.
+        private void BlitzPress(bool pressedLeft)
+        {
+            bool pressedNormal = pressedLeft == _blitzNormalOnLeft; // hit «ВСЁ НОРМАЛЬНО»?
+            if (!pressedNormal) _blitzFails++;                      // «О НЕТ» / wrong side → +1 провал
+            AdvanceBlitz();
+        }
+
+        // Timer ran out on a thought — «не успел» counts as a fail (canon), then the next thought.
+        private void BlitzTimeout()
+        {
+            _blitzFails++;
+            AdvanceBlitz();
+        }
+
+        private void AdvanceBlitz()
+        {
+            _blitzIndex++;
+            if (_blitzIndex >= _blitzThoughts.Count) { EndBlitz(); return; }
+            StartBlitzThought();
+        }
+
+        // After the 5 thoughts: ≥2 fails opens the impulse round; otherwise the crisis ends and ordinary
+        // play resumes (impulse skipped entirely at 0–1 fails — canon).
+        private void EndBlitz()
+        {
+            if (_blitzFails >= ImpulseFailThreshold && _impulseCards != null && _impulseCards.Count > 0)
+                EnterImpulse();
+            else
+                ResumeAfterCrisis();
+        }
+
+        private void EnterImpulse()
+        {
+            _phase = CrisisPhase.Impulse;
+            _impulseIndex = 0;
+            StartImpulseCard();
+            CrisisImpulseStarted?.Invoke();       // driver: S13 INVERT warning «молчание = ДА»
+        }
+
+        // Put up the current impulse card (CR06..CR08). Its «Когда» has no real age, so we stamp the
+        // player's current age onto it so its necrolog line sorts around midlife rather than at 0/end.
+        private void StartImpulseCard()
+        {
+            var card = _impulseCards[_impulseIndex];
+            card.Age = Math.Max(CrisisTriggerAge, (int)Age);
+            CurrentCard = card;
+            CurrentCardBlocked = false;
+            _crisisTimer = ImpulseSeconds;
+            CardTimer = ImpulseSeconds;
+        }
+
+        // Resolve an impulse card. INVERT: yes = поддаться (impulsive act, consequences apply); no =
+        // «СПАСИБО, НЕ НАДО» (declined). Silence/timeout routes here as yes (handled in TickCrisis). The
+        // resolved side's Δ/flags/necrolog apply exactly like a normal card — an impulse Δ/fatal CAN end
+        // the run (the only way the crisis kills). Otherwise advance to the next impulse card / resume.
+        private void ResolveImpulse(bool yes)
+        {
+            var card = CurrentCard;
+            if (card == null) return;
+            _answers[card.Id] = yes;
+            if (ApplyResolvedConsequences(card, yes, yes ? AnswerSide.Yes : AnswerSide.No))
+                return;   // impulse-card Δ/fatal ended the run
+            AdvanceImpulse();
+        }
+
+        private void AdvanceImpulse()
+        {
+            _impulseIndex++;
+            if (_impulseIndex >= _impulseCards.Count) { ResumeAfterCrisis(); return; }
+            StartImpulseCard();
+        }
+
+        // Crisis over — restore the suspended normal card exactly and hand control back to ordinary play.
+        private void ResumeAfterCrisis()
+        {
+            _phase = CrisisPhase.None;
+            CurrentCard = _suspendedCard;
+            CardTimer = _suspendedTimer;
+            CurrentCardBlocked = _suspendedBlocked;
+            _suspendedCard = null;
+            CrisisEnded?.Invoke();
+            CardChanged?.Invoke();                // driver re-renders the resumed card (normal HUD)
+        }
+
+        // Injected-time tick while a crisis phase is active: only the fast blitz/impulse timer runs — the
+        // 5 live scales are paused (no drain, no spurious death). Blitz timeout = a fail; impulse timeout =
+        // ДА (INVERT: silence accepts).
+        private void TickCrisis(float dt)
+        {
+            _crisisTimer -= dt;
+            CardTimer = Math.Max(0f, _crisisTimer);
+            if (_crisisTimer > 0f) return;
+            if (_phase == CrisisPhase.Blitz) BlitzTimeout();
+            else if (_phase == CrisisPhase.Impulse) ResolveImpulse(true); // молчание = ДА
         }
 
         // ================================================================ money crank
