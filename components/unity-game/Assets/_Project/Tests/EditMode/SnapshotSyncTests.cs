@@ -35,6 +35,18 @@ namespace ThanksNoThanks.Tests
         }
 
         [Test]
+        public void Snapshot_Header_Has15Columns_IncludingTone()
+        {
+            var asset = Resources.Load<TextAsset>("scenes");
+            Assert.IsNotNull(asset, "Resources/scenes present");
+            // Header line carries no quoted commas, so a plain split is exact.
+            string headerLine = Normalize(asset.text).Split('\n')[0];
+            var cols = headerLine.Split(',');
+            Assert.AreEqual(15, cols.Length, "snapshot header has 15 columns (14th «Длительный эффект», 15th «Тон»)");
+            Assert.AreEqual("Тон", cols[14].Trim(), "the 15th column is «Тон»");
+        }
+
+        [Test]
         public void Snapshot_LoadedByResources_MatchesDiskContent()
         {
             // The copy Unity actually serves (Resources.Load) is the same bytes we guard on disk.

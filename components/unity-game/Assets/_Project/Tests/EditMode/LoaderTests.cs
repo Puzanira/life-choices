@@ -15,6 +15,30 @@ namespace ThanksNoThanks.Tests
         private const string HeaderLine14 =
             "ID,Карточка,Когда,Тип,ДА-проза,ДА-Δ,НЕТ-проза,НЕТ-Δ,ВедущийДА,ВедущийНЕТ,НекроДА,НекроНЕТ,Флаги,Длительный эффект\n";
 
+        // Canon 2026-07-19 header with the 15th column «Тон».
+        private const string HeaderLine15 =
+            "ID,Карточка,Когда,Тип,ДА-проза,ДА-Δ,НЕТ-проза,НЕТ-Δ,ВедущийДА,ВедущийНЕТ,НекроДА,НекроНЕТ,Флаги,Длительный эффект,Тон\n";
+
+        [Test]
+        public void ToneColumn_Parses_WhenSet_NullWhenBlank_TolerantWhenAbsent()
+        {
+            string csv = HeaderLine15 +
+                // 15 cols: explicit «absurd» tag in the last column.
+                "KEK01,Мем,4–8,Кек,,Дн −1,,—,,,—,—,\"NOCONS, ROND\",,absurd\n" +
+                // 15 cols but a blank «Тон» cell → null.
+                "YA01,Работа,18,Развилка,,Дн +2,,—,,,ДА,—,,,\n" +
+                // 14 cols (old snapshot, no «Тон» column at all) → tolerated, Tone stays null.
+                "CH04,Дерево,6–12,Детство,,Эн −1,,—,,,ЛазилиДА,—,ROND,\n";
+
+            var byId = CardLoader.ParseAll(csv).ToDictionary(c => c.Id);
+            Assert.AreEqual("absurd", byId["KEK01"].Tone, "explicit «Тон» tag read from col 14");
+            Assert.IsNull(byId["YA01"].Tone, "blank «Тон» cell → null");
+            Assert.IsNull(byId["CH04"].Tone, "a shorter row (no «Тон» column) → null, no crash");
+            // Trailing «Тон» column must not shift the flags/long-effect columns.
+            Assert.IsTrue(byId["KEK01"].IsRond, "flags (col 12) still parse with a trailing «Тон» column");
+            Assert.IsTrue(byId["KEK01"].IsNoCons, "NOCONS flag still parses");
+        }
+
         [Test]
         public void Tolerant_Parses_QuotedCommas_BlankFields_BothMinusSigns_NonContiguousIds()
         {

@@ -66,16 +66,22 @@ namespace ThanksNoThanks
         }
 
         /// <summary>
-        /// Single tunable tone heuristic (PLACEHOLDER — see class summary). Exact where it can be:
-        /// timeout → Skip, ДА-into-FATAL → Fatal, ROND «кек» flavour → Absurd. Otherwise a rough read of
-        /// the chosen side's Δ: any gamble (±N) / money-loss / health-hit / big net-negative → Risky;
-        /// big net-positive → Positive; low-impact ДА → Positive (bold), low-impact НЕТ → Cautious.
+        /// Tone selection: <b>fatal/skip precedence → explicit «Тон» tag → heuristic</b>. Exact where it
+        /// can be: timeout → Skip, ДА-into-FATAL → Fatal. Then the design agent's explicit <see cref="Card.Tone"/>
+        /// tag (positive/risky/absurd/cautious) if set — this replaces the Δ-heuristic for cards it mistags
+        /// (кек/соблазны). Otherwise the PLACEHOLDER heuristic: ROND «кек» flavour → Absurd, then a rough read
+        /// of the chosen side's Δ (gamble/money-loss/health-hit/big net-negative → Risky; big net-positive →
+        /// Positive; low-impact ДА → Positive, low-impact НЕТ → Cautious).
         /// </summary>
         public HostTone Classify(Card card, AnswerSide side)
         {
             if (side == AnswerSide.Timeout) return HostTone.Skip;
             bool yes = side == AnswerSide.Yes;
             if (yes && card.YesIsFatal) return HostTone.Fatal;
+
+            // Explicit «Тон» tag (canon col 14) beats the heuristic — the designer's authoritative read for
+            // cards where Δ misfires. Unknown/blank tags fall through to the heuristic below.
+            if (TryParseTone(card.Tone, out var tagged)) return tagged;
 
             // ROND «кек»-карты — комедийная оценка, которой нет в Δ (кек и риск бывают одинаковы по Δ).
             if (card.IsRond) return HostTone.Absurd;
@@ -98,6 +104,25 @@ namespace ThanksNoThanks
             if (gamble || moneyLoss || healthHit || net <= RiskyNetThreshold) return HostTone.Risky;
             if (net >= PositiveNetThreshold) return HostTone.Positive;
             return yes ? HostTone.Positive : HostTone.Cautious;   // low-impact: смелое ДА / осторожное НЕТ
+        }
+
+        /// <summary>
+        /// Parse a canon «Тон» tag (positive/risky/absurd/cautious, case-insensitive) into a pool
+        /// <see cref="HostTone"/>. Blank/unknown → false (caller falls through to the heuristic). Fatal/skip
+        /// are NOT valid explicit tags — those tones stay driven by flag/timeout precedence, not the column.
+        /// </summary>
+        internal static bool TryParseTone(string tag, out HostTone tone)
+        {
+            tone = default;
+            if (string.IsNullOrWhiteSpace(tag)) return false;
+            switch (tag.Trim().ToLowerInvariant())
+            {
+                case "positive": tone = HostTone.Positive; return true;
+                case "risky":    tone = HostTone.Risky;    return true;
+                case "absurd":   tone = HostTone.Absurd;   return true;
+                case "cautious": tone = HostTone.Cautious; return true;
+                default:         return false;
+            }
         }
     }
 }

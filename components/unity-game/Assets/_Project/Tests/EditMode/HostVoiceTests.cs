@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using NUnit.Framework;
 using ThanksNoThanks;
+using UnityEngine;
 
 namespace ThanksNoThanks.Tests
 {
@@ -14,7 +15,7 @@ namespace ThanksNoThanks.Tests
     {
         private static Card Card(string id = "X", string hostYes = null, string hostNo = null,
             IReadOnlyList<ScaleDelta> yes = null, IReadOnlyList<ScaleDelta> no = null,
-            bool fatal = false, bool rond = false)
+            bool fatal = false, bool rond = false, string tone = null)
         {
             return new Card
             {
@@ -22,7 +23,7 @@ namespace ThanksNoThanks.Tests
                 HostYes = hostYes, HostNo = hostNo,
                 YesDeltas = yes ?? Array.Empty<ScaleDelta>(),
                 NoDeltas = no ?? Array.Empty<ScaleDelta>(),
-                YesIsFatal = fatal, IsRond = rond,
+                YesIsFatal = fatal, IsRond = rond, Tone = tone,
                 Flags = Array.Empty<string>(),
             };
         }
@@ -84,6 +85,87 @@ namespace ThanksNoThanks.Tests
         {
             var v = AlwaysShow();
             Assert.AreEqual(HostTone.Cautious, v.Classify(Card(no: Array.Empty<ScaleDelta>()), AnswerSide.No));
+        }
+
+        // ---- explicit «Тон» tag (canon col 14): tag > heuristic, but fatal/skip still win ----
+
+        [Test]
+        public void ExplicitTone_BeatsHeuristic_WhenSet()
+        {
+            var v = AlwaysShow();
+            // Δ would read «risky» (money loss), but the design tagged this card «absurd» (кек-flavour).
+            var c = Card(yes: new[] { Add(Scale.Money, -3) }, tone: "absurd");
+            Assert.AreEqual(HostTone.Absurd, v.Classify(c, AnswerSide.Yes),
+                "explicit «Тон» tag overrides the Δ-heuristic that would say risky");
+            // A «risky» tag on a card whose Δ is net-positive (heuristic would say Positive).
+            var c2 = Card(yes: new[] { Add(Scale.Money, 3) }, tone: "risky");
+            Assert.AreEqual(HostTone.Risky, v.Classify(c2, AnswerSide.Yes),
+                "explicit «Тон» tag overrides a positive-reading Δ");
+        }
+
+        [Test]
+        public void ExplicitTone_ParsesAllFourTags_CaseInsensitive()
+        {
+            var v = AlwaysShow();
+            Assert.AreEqual(HostTone.Positive, v.Classify(Card(tone: "positive"), AnswerSide.Yes));
+            Assert.AreEqual(HostTone.Risky, v.Classify(Card(tone: "RISKY"), AnswerSide.Yes));
+            Assert.AreEqual(HostTone.Absurd, v.Classify(Card(tone: " Absurd "), AnswerSide.Yes));
+            Assert.AreEqual(HostTone.Cautious, v.Classify(Card(tone: "cautious"), AnswerSide.No));
+        }
+
+        [Test]
+        public void ExplicitTone_UnknownOrBlank_FallsThroughToHeuristic()
+        {
+            var v = AlwaysShow();
+            // Blank / unknown tag → heuristic (money loss reads risky).
+            Assert.AreEqual(HostTone.Risky, v.Classify(Card(yes: new[] { Add(Scale.Money, -3) }, tone: ""), AnswerSide.Yes));
+            Assert.AreEqual(HostTone.Risky, v.Classify(Card(yes: new[] { Add(Scale.Money, -3) }, tone: null), AnswerSide.Yes));
+            Assert.AreEqual(HostTone.Risky, v.Classify(Card(yes: new[] { Add(Scale.Money, -3) }, tone: "весёлый"), AnswerSide.Yes),
+                "an unrecognised tag is ignored, not adopted");
+        }
+
+        [Test]
+        public void ExplicitTone_DoesNotOverride_FatalOrSkip()
+        {
+            var v = AlwaysShow();
+            // FATAL still wins over a «positive» tag on the ДА side.
+            Assert.AreEqual(HostTone.Fatal, v.Classify(Card(fatal: true, tone: "positive"), AnswerSide.Yes),
+                "fatal precedence beats the explicit tag");
+            // Timeout still reads Skip regardless of the tag.
+            Assert.AreEqual(HostTone.Skip, v.Classify(Card(tone: "positive"), AnswerSide.Timeout),
+                "skip (timeout) precedence beats the explicit tag");
+        }
+
+        [Test]
+        public void Named_BeatsExplicitTone_AndPool()
+        {
+            var v = AlwaysShow();   // rng would otherwise emit a pool line
+            // Named ДА line must win even when an explicit «Тон» tag is present.
+            var c = Card(hostYes: "Умница!", tone: "absurd", yes: new[] { Add(Scale.Money, -9) });
+            Assert.AreEqual("Умница!", v.Pick(c, AnswerSide.Yes),
+                "named line beats explicit tone (priority: named > tag > heuristic)");
+        }
+
+        // ---- canon spot-check: the real snapshot's tags flow through parse → classify ----
+
+        [Test]
+        public void CanonSnapshot_TaggedCards_ClassifyByTag_UntaggedByHeuristic()
+        {
+            var asset = Resources.Load<TextAsset>("scenes");
+            Assert.IsNotNull(asset, "Resources/scenes present");
+            var v = AlwaysShow();
+            var byId = new Dictionary<string, Card>();
+            foreach (var card in CardLoader.ParseAll(asset.text)) byId[card.Id] = card;
+
+            // KEK01 tagged «absurd», RND01 tagged «risky» (DELAY+FATAL → not an immediate fatal on ДА).
+            Assert.AreEqual("absurd", byId["KEK01"].Tone, "KEK01 carries the absurd tag from col 14");
+            Assert.AreEqual(HostTone.Absurd, v.Classify(byId["KEK01"], AnswerSide.Yes), "KEK01 pool = absurd");
+            Assert.AreEqual("risky", byId["RND01"].Tone, "RND01 carries the risky tag from col 14");
+            Assert.IsFalse(byId["RND01"].YesIsFatal, "RND01 is a delayed fatal, so the fatal branch is skipped on ДА");
+            Assert.AreEqual(HostTone.Risky, v.Classify(byId["RND01"], AnswerSide.Yes), "RND01 pool = risky");
+
+            // A card with no «Тон» tag still classifies purely by the heuristic (tag is null → fall through).
+            Assert.IsNull(byId["I02"].Tone, "I02 has no tone tag");
         }
 
         // ---- source priority: named beats pool ----

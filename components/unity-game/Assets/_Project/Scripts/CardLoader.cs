@@ -18,8 +18,9 @@ namespace ThanksNoThanks
     ///  • RANDOM_OUTCOME → random OUTCOME marker (already carried by ±N deltas); mechanical no-op.
     ///  • legacy "RANDOM" → mapped to RANDOM_TRIGGER (backward compat with the old snapshot).
     ///
-    /// The optional 14th column «Длительный эффект» (MULT/DRAIN/FROM/DUR grammar) is tolerated
-    /// both when present and when absent — flags always live in column 12, so it is simply ignored.
+    /// The optional 14th column «Длительный эффект» (MULT/DRAIN/FROM/DUR grammar) and 15th column
+    /// «Тон» (explicit host-tone tag) are tolerated both when present and when absent — flags always
+    /// live in column 12, so trailing columns are read positionally and a shorter row yields null.
     /// </summary>
     public static class CardLoader
     {
@@ -56,6 +57,7 @@ namespace ThanksNoThanks
         private const int ColNoNecro = 11;
         private const int ColFlags = 12;
         private const int ColLong = 13;   // «Длительный эффект» (MULT/DRAIN/FROM/DUR), tolerant if absent
+        private const int ColTone = 14;   // «Тон» — explicit host-tone tag, tolerant if absent (blank = null)
 
         public static List<Card> LoadSubset(string csv, IEnumerable<string> ids)
         {
@@ -110,6 +112,9 @@ namespace ThanksNoThanks
                     // an empty or dash cell falls back to the tone pool downstream. NAMED beats the pool.
                     HostYes = CleanNecrolog(Field(row, ColHostYes)),
                     HostNo = CleanNecrolog(Field(row, ColHostNo)),
+                    // «Тон» (col 14): explicit host-tone tag. Same «— / blank → null» cleaning; a row
+                    // with fewer columns (old snapshot) yields null → HostVoice keeps its heuristic.
+                    Tone = CleanNecrolog(Field(row, ColTone)),
                     Flags = flags,
                 };
                 card.IsNoCons = flags.Contains("NOCONS");

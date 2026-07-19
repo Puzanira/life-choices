@@ -86,6 +86,15 @@ namespace ThanksNoThanks
         /// </summary>
         public bool IsTimeline;
 
+        /// <summary>
+        /// «Тон» (col 14, 2026-07-19 canon): the design agent's EXPLICIT host-tone tag
+        /// (positive/risky/absurd/cautious) for cards where the Δ-heuristic misfires (кек-карты,
+        /// соблазны). Empty/null when the CSV cell is blank → <see cref="HostVoice"/> falls back to
+        /// its heuristic. Raw string here (parsed to <see cref="HostTone"/> in HostVoice); fatal/skip
+        /// precedence and the named «Ведущий» line still override it.
+        /// </summary>
+        public string Tone;
+
         public IReadOnlyList<string> Flags = System.Array.Empty<string>();
 
         public bool IsNoCons;         // NOCONS — intro card, apply nothing / no necrolog line
