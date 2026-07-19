@@ -40,6 +40,25 @@ def face(img,cx,cy,col=INK,r=22):
     d.ellipse([cx-r*0.45-4,cy-r*0.3,cx-r*0.45+4,cy-r*0.3+10],fill=col)
     d.ellipse([cx+r*0.45-4,cy-r*0.3,cx+r*0.45+4,cy-r*0.3+10],fill=col)
     d.arc([cx-r*0.55,cy-r*0.2,cx+r*0.55,cy+r*0.55],20,160,fill=col,width=6)
+def star(img,cx,cy,r,fill=WHITE,oc=None,ow=0,pts=5):
+    d=ImageDraw.Draw(img); p=[]
+    for k in range(pts*2):
+        a=math.pi/2+k*math.pi/pts; rr=r if k%2==0 else r*0.42
+        p.append((cx+rr*math.cos(a),cy-rr*math.sin(a)))
+    d.polygon(p,fill=fill,outline=oc,width=ow)
+def heart(img,cx,cy,s,col):  # чистое сердце (без артефактов-полос)
+    d=ImageDraw.Draw(img); r=s*0.30
+    d.ellipse([cx-2*r,cy-r,cx,cy+r],fill=col); d.ellipse([cx,cy-r,cx+2*r,cy+r],fill=col)
+    d.polygon([(cx-1.9*r,cy+0.28*r),(cx+1.9*r,cy+0.28*r),(cx,cy+1.7*r)],fill=col)
+def bolt(img,cx,cy,s,col):
+    d=ImageDraw.Draw(img)
+    d.polygon([(cx+0.12*s,cy-0.5*s),(cx-0.34*s,cy+0.08*s),(cx-0.02*s,cy+0.08*s),
+               (cx-0.12*s,cy+0.5*s),(cx+0.34*s,cy-0.06*s),(cx+0.02*s,cy-0.06*s)],fill=col,outline=INK,width=2)
+def mute(img,cx,cy,s,col=INK):  # значок «тишина»: динамик + перечёркивание
+    d=ImageDraw.Draw(img)
+    d.rectangle([cx-0.5*s,cy-0.16*s,cx-0.18*s,cy+0.16*s],fill=col)
+    d.polygon([(cx-0.18*s,cy-0.16*s),(cx+0.06*s,cy-0.34*s),(cx+0.06*s,cy+0.34*s),(cx-0.18*s,cy+0.16*s)],fill=col)
+    d.line([(cx-0.5*s,cy+0.42*s),(cx+0.42*s,cy-0.42*s)],fill=NO,width=max(4,int(0.11*s)))
 _sd=ImageDraw.Draw(Image.new("RGBA",(10,10)))
 def tw(t,f): b=_sd.textbbox((0,0),t,font=f); return b[2]-b[0]
 def wrap(t,f,mw):
@@ -87,7 +106,10 @@ def money(img,x,y,val,w=330,mult=None):  # СИНЯЯ пилюля (styleframe),
     d.text((lx,y+ph+22),lbl,font=lf,fill=CDEEP,anchor="lm"); img.alpha_composite(icon("coin",28),(lx+lw+8,y+ph+8))
 def stat(img,x,y,label,frac,col,ic=None,w=290):  # белая капсула: иконка+бар, подпись под ней
     ph=72; panel(img,[x,y,x+w,y+ph],ph//2,WHITE,INK,6); d=ImageDraw.Draw(img)
-    if ic: img.alpha_composite(icon(ic,ph-16),(x+8,y+8))
+    icx,icy=x+ph//2,y+ph//2
+    if ic=="heart": heart(img,icx,icy,ph-24,HEALTH)
+    elif ic=="lightning": bolt(img,icx,icy,ph-20,ENERGY)
+    elif ic: img.alpha_composite(icon(ic,ph-16),(x+8,y+8))
     bx0,bx1=x+ph+2,x+w-18; by0,by1=y+ph//2-13,y+ph//2+13
     d.rounded_rectangle([bx0,by0,bx1,by1],13,fill=TRACK,outline=(0,0,0,45),width=2)
     d.rounded_rectangle([bx0,by0,bx0+int((bx1-bx0)*frac),by1],13,fill=col)
@@ -118,10 +140,12 @@ def timer(img,cx,cy,frac,num,rad=90):
     inr=rad-30; d.ellipse([cx-inr,cy-inr,cx+inr,cy+inr],fill=COBALT)
     d.text((cx,cy),str(num),font=font(66),fill=WHITE,anchor="mm")
 def bubble(img,x,y,text,w=320,h=150):
-    panel(img,[x,y,x+w,y+h-30],34,YEL,INK,7)
-    d=ImageDraw.Draw(img); d.polygon([(x+60,y+h-46),(x+140,y+h-46),(x+60,y+h)],fill=YEL,outline=INK,width=6)
-    d.rectangle([x+66,y+h-52,x+134,y+h-44],fill=YEL)
-    ln,f,lh=fit(text,w-44,h-70,hi=46); block(img,x+w//2,y+(h-30)//2,ln,f,lh,BROWN)
+    bb=y+h-34  # низ тела; хвост крепится встык, без наложения на тело/текст
+    panel(img,[x,y,x+w,bb],34,YEL,INK,7)
+    d=ImageDraw.Draw(img); tx=x+70
+    d.polygon([(tx,bb-4),(tx+70,bb-4),(tx,bb+30)],fill=YEL,outline=INK,width=6)
+    d.line([(tx+3,bb-1),(tx+64,bb-1)],fill=YEL,width=10)  # закрыть шов контура тела
+    ln,f,lh=fit(text,w-44,(h-34)-40,hi=46); block(img,x+w//2,y+(h-34)//2,ln,f,lh,BROWN)
 def card(img,cx,cy,text,w=900,h=430,sub=None,dim=False,textcol=WHITE):
     box=[cx-w//2,cy-h//2,cx+w//2,cy+h//2]
     panel(img,box,46,COBALT,WHITE,18)
@@ -187,15 +211,17 @@ def S3():
     answers(img); save(img,"S3-adult.png")
 def S4():
     img=full(); block(img,W//2,H//2-40,["ПОРА","ЗАРАБАТЫВАТЬ!"],font(150),168,YEL,6,NO)
-    ImageDraw.Draw(img).text((W//2,H//2+180),"★ теперь у вас есть работа ★",font=font(48),fill=WHITE,anchor="mm")
+    kick="теперь у вас есть работа"; kf=font(48); kw=tw(kick,kf); ky=H//2+180
+    ImageDraw.Draw(img).text((W//2,ky),kick,font=kf,fill=WHITE,anchor="mm")
+    star(img,W//2-kw//2-48,ky,22,YEL,INK,3); star(img,W//2+kw//2+48,ky,22,YEL,INK,3)
     save(img,"S4-banner.png")
 def S5():
     img=bg(); hud_full(img,18,"₽ 0",1.0,1.0,0.5); card(img,W//2,520,"…",w=760,h=300)
     ov=Image.new("RGBA",img.size,(16,23,51,150)); img.alpha_composite(ov)
-    panel(img,[W//2-560,300,W//2+560,760],40,YEL,INK,8)
-    block(img,W//2,410,wrap("Поздравляем, теперь у вас есть работа!",font(56),1000),font(56),72,BROWN)
-    block(img,W//2,560,wrap("Крутите вот эту ручку — и у вас будут деньги. Не крутите — денег не будет!",font(38),960),font(38),50,(74,54,0,255))
-    plate(img,W//2,690,420,120,"ПОНЯТНО  (Enter)",COBALT,WHITE); save(img,"S5-tutorial.png")
+    panel(img,[W//2-560,300,W//2+560,796],40,YEL,INK,8)
+    block(img,W//2,408,wrap("Поздравляем, теперь у вас есть работа!",font(56),1000),font(56),72,BROWN)
+    block(img,W//2,548,wrap("Крутите вот эту ручку — и у вас будут деньги. Не крутите — денег не будет!",font(38),960),font(38),50,(74,54,0,255))
+    plate(img,W//2,702,420,116,"ПОНЯТНО  (Enter)",COBALT,WHITE); save(img,"S5-tutorial.png")
 def S6():
     img=bg(); badge(img,46,30,47); timer(img,W//2,150,0.9,2)
     d=ImageDraw.Draw(img)
@@ -216,7 +242,9 @@ def S8():
     # пульс
     img.alpha_composite((lambda g: (ImageDraw.Draw(g).ellipse([W//2-40,760,W//2+40,840],fill=(255,255,255,90)),g)[1])(Image.new("RGBA",img.size,(0,0,0,0))).filter(ImageFilter.GaussianBlur(10)))
     plate(img,W//2,940,460,150,"СОБРАТЬСЯ",WHITE,INK)
-    d.text((W//2,860),"…нажми в такт пульсу…",font=font(34),fill=(210,210,210,255),anchor="mm")
+    tp="нажми в такт пульсу"; tf=font(34); tpw=tw(tp,tf)
+    panel(img,[W//2-tpw//2-30,838,W//2+tpw//2+30,894],16,(14,16,28,240),None,0,shadow=False)
+    d.text((W//2,866),tp,font=tf,fill=(245,245,250,255),anchor="mm",stroke_width=3,stroke_fill=(0,0,0,255))
     img=Image.merge("RGB",[c.point(lambda v:int(v*0.85)) for c in img.convert("RGB").convert("L").split()*1]) if False else img
     gr=img.convert("L").convert("RGBA")
     # зерно
@@ -227,9 +255,9 @@ def S8():
     gn=Image.new("RGBA",(W,H),(0,0,0,0)); gn.putalpha(noise.resize((W,H))); gimg.alpha_composite(gn)
     save(gimg,"S8-depression.png")
 def S9():
-    img=bg(); hud_full(img,39,"₽ 8 400",0.6,0.55,0.48)
-    timer(img,W//2,250,0.5,5); child(img,1720,860,90,lit=True); bubble(img,300,560,"Скорее!")
-    card(img,W//2,540,"Обычная жизнь идёт…",w=760,h=320); answers(img,y=940); save(img,"S9-child.png")
+    img=bg(); hud_full(img,39,"₽ 8 400",0.6,0.55,0.48,child_lit=True)
+    timer(img,W//2,250,0.5,5); bubble(img,1430,150,"Скорее!",w=300,h=150)
+    card(img,W//2,560,"Обычная жизнь идёт…",w=760,h=320); answers(img,y=940); save(img,"S9-child.png")
 def S10():
     img=bg(); badge(img,46,30,58); money(img,270,30,"₽ 30"); stat(img,626,30,"ЗДОРОВЬЕ",0.22,HEALTH,ic="heart")
     card(img,W//2,470,"Пора подлечиться!",w=820,h=360,sub="цена 100 ₽",dim=True)
@@ -249,14 +277,16 @@ def S12(): finale("S12-finale-fatal.png","вы сунули палец в роз
 def S13():
     img=bg(); badge(img,46,30,48); timer(img,W//2,150,0.9,2); bubble(img,300,560,"Ну-ну…")
     ov=Image.new("RGBA",img.size,(20,20,50,90)); img.alpha_composite(ov)
-    card(img,W//2,470,"КУПИТЬ МОТОЦИКЛ И ГНАТЬ 200?!",w=940,h=340,sub="⚠ молчание = ДА")
+    card(img,W//2,470,"КУПИТЬ МОТОЦИКЛ И ГНАТЬ 200?!",w=940,h=340,sub="молчание = ДА")
+    sw=tw("молчание = ДА",font(30)); mute(img,W//2-sw//2-48,686,38)
     plate(img,1310,940,470,180,"СПАСИБО, НЕ НАДО",NO,WHITE); plate(img,610,940,420,180,"ДА",DA,INK)
     arrow(img,1602,940,54,NO,left=False); save(img,"S13-impulse.png")
 def S14():
     img=bg(); hud_full(img,40,"₽ 5 200",0.6,0.5,0.5); timer(img,W//2,250,0.5,5); bubble(img,1520,320,"Ещё разок?")
     card(img,W//2,560,"Дать любви второй шанс?",w=880,h=360); answers(img); save(img,"S14-second-chance.png")
 def S15():
-    img=bg(); hud_full(img,60,"₽ 3 100",0.4,0.4,0.6); timer(img,W//2,250,0.6,5); child(img,1720,860,80,lit=False)
+    img=bg(); hud_full(img,60,"₽ 3 100",0.4,0.4,0.6,child_lit=False); timer(img,W//2,250,0.6,5)
+    bubble(img,1430,150,"Дети выросли…",w=340,h=150)
     card(img,W//2,560,"Ребёнок вырос. Помочь всё равно?",w=900,h=360); answers(img); save(img,"S15-kids-grown.png")
 def S16():
     img=bg(); badge(img,46,30,21); money(img,270,30,"₽ 1 500",mult="×1"); timer(img,W//2,250,0.6,5); bubble(img,1520,320,"Смело!")
