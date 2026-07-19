@@ -63,4 +63,4 @@
 ## 6. Playtest verdict
 
 `Playtest ok:` — (утро, ночной режим)
-`Landed:` —
+`Landed:` 0ef663b (bookkeeping; авторитетно — handoff)
