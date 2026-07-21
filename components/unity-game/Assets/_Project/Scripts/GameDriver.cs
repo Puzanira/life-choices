@@ -106,6 +106,12 @@ namespace ThanksNoThanks
         private Text _finaleTitle;
         private Text _finaleCause;
         private Text _finaleStory;
+        private Image _finaleStoryPlate;
+
+        // Tutorial modal widgets (S5) — captured for Layer-2 conformance.
+        private Image _tutorialModal;
+        private Image _tutorialButton;
+        private Text _tutorialButtonText;
 
         // BLOCK$ (S10): dim veil over the card + red block-tag banner.
         private GameObject _blockVeil;
@@ -251,6 +257,13 @@ namespace ThanksNoThanks
         public GameObject FinalePanel => _finalePanel;
         public GameObject TutorialOverlay => _tutorialOverlay;
         public bool TutorialShowing => _tutorialShowing;
+        public Image TutorialModal => _tutorialModal;
+        public Image TutorialButton => _tutorialButton;
+        public Text TutorialButtonText => _tutorialButtonText;
+        public Text FinaleTitleText => _finaleTitle;
+        public Text FinaleCauseText => _finaleCause;
+        public Text FinaleStoryText => _finaleStory;
+        public Image FinaleStoryPlate => _finaleStoryPlate;
         public GameObject BlockBanner => _blockBanner;
         public Text CardPriceText => _cardPriceText;
         public Image CardPricePlate => _cardPricePlate;
@@ -278,6 +291,55 @@ namespace ThanksNoThanks
 
         /// <summary>Test hook: run the age-gated HUD visibility for an arbitrary age.</summary>
         public void DebugApplyAgeGates(float age) => ApplyAgeGates(age);
+
+        /// <summary>
+        /// Test hook: force the finale panel visible and render an arbitrary necrolog (title/cause/story)
+        /// into it, without driving a whole life — so a Layer-2 test can stress a worst-case LONG story
+        /// against the story plate. Mirrors the finale branch of <see cref="Refresh"/>.
+        /// </summary>
+        /// <summary>Test/screenshot hook: raise a tutorial modal with the given body over live gameplay.</summary>
+        public void DebugShowTutorial(string text)
+        {
+            bool dummy = false;
+            ShowTutorial(text, ref dummy);
+        }
+
+        public void DebugRenderFinale(NecrologResult n)
+        {
+            _openerPanel.SetActive(false);
+            _gamePanel.SetActive(false);
+            _finalePanel.SetActive(true);
+            RenderFinaleTexts(n);
+        }
+
+        // Set the three finale texts and size the story plate to its content (short story → compact plate).
+        private void RenderFinaleTexts(NecrologResult n)
+        {
+            _finaleTitle.text = n.Title;
+            _finaleCause.text = n.CauseLine;
+            _finaleStory.text = n.ComposeStory();
+            FitStoryPlate();
+        }
+
+        // Size the story plate HEIGHT to its content: a short story gets a compact plate (no stranded text in
+        // a huge navy box), a long story keeps the full clamped height and best-fit wraps inside the pill.
+        private void FitStoryPlate()
+        {
+            const float inset = 60f, minH = 170f, maxH = 360f;
+            var rt = _finaleStoryPlate.rectTransform;
+            var t = _finaleStory;
+            float textW = rt.rect.width - 2f * inset;
+            bool bf = t.resizeTextForBestFit;
+            int fs = t.fontSize;
+            t.resizeTextForBestFit = false;
+            t.fontSize = t.resizeTextMaxSize;   // measure at the largest size the plate would ever use
+            var settings = t.GetGenerationSettings(new Vector2(textW, 0f));
+            float ph = t.cachedTextGeneratorForLayout.GetPreferredHeight(t.text, settings) / t.pixelsPerUnit;
+            t.fontSize = fs;
+            t.resizeTextForBestFit = bf;
+            float h = Mathf.Clamp(ph + 2f * inset, minH, maxH);
+            rt.sizeDelta = new Vector2(rt.sizeDelta.x, h);
+        }
 
         private void Awake()
         {
@@ -768,38 +830,50 @@ namespace ThanksNoThanks
             }
         }
 
+        // The four opener rules (S1) — each on its own cobalt plate, verbatim from the mockup.
+        private static readonly string[] OpenerRules =
+        {
+            "Проживите ЦЕЛУЮ ЖИЗНЬ за пару минут — в прямом эфире!",
+            "На каждый вопрос — рычаг: ДА или СПАСИБО, НЕ НАДО. 5 секунд — дальше решаем за вас!",
+            "С возрастом откроются ручки жизни. Рук две — всё удержать нельзя, и это нормально!",
+            "Правильного ответа нет. Есть только ВАША жизнь.",
+        };
+
         private void BuildOpener(Transform parent)
         {
             _openerPanel = NewGroup("Opener", parent);
 
             var title = NewText("Title", _openerPanel.transform,
                 "«СПАСИБО, НЕ НАДО»", 96, TextAnchor.MiddleCenter, TextLight, _display);
-            Anchor(title.rectTransform, new Vector2(0.5f, 0.83f), new Vector2(1600, 160));
+            AnchorPx(title.rectTransform, 960f, 150f, 1650f, 175f);
             DisplayFx(title);
 
-            // Rules inside a marquee-frame content box (9-slice cobalt panel) for legibility.
-            var box = NewSprite("RulesBox", _openerPanel.transform, Sprite("marquee-frame"));
-            box.type = Image.Type.Sliced;
-            Anchor(box.rectTransform, new Vector2(0.5f, 0.50f), new Vector2(1360, 430));
-            var rules = NewText("Rules", box.transform,
-                "Проживите целую жизнь за пару минут — в прямом эфире!\n\n" +
-                "▸  На каждый вопрос — рычаг: ДА или СПАСИБО, НЕ НАДО.\n" +
-                "▸  На раздумья 5 секунд — дальше решаем за вас!\n" +
-                "▸  С возрастом откроются ручки жизни. Рук две — всё удержать нельзя.",
-                38, TextAnchor.MiddleCenter, TextLight, _body);
-            Inset(rules.rectTransform, 90f);
+            // S1: each rule on its OWN cobalt rounded plate (bar-track 9-slice tinted deep cobalt) —
+            // never bare text on the sunburst. White best-fit text inside each plate's visible pill.
+            float[] cy = { 360f, 484f, 608f, 726f };   // column nudged up → room for the taller CTA below
+            float[] hh = { 116f, 116f, 116f, 92f };
+            for (int i = 0; i < OpenerRules.Length; i++)
+            {
+                var plate = NewSprite("RulePlate" + i, _openerPanel.transform, Sprite("bar-track"));
+                plate.type = Image.Type.Sliced;
+                plate.color = CobaltDeep;
+                AnchorPx(plate.rectTransform, 960f, cy[i], 1360f, hh[i]);
+                var rt = NewText("RuleText" + i, plate.transform, OpenerRules[i], 38,
+                    TextAnchor.MiddleCenter, TextLight, _body);
+                RulePlateTextRect(rt.rectTransform);
+                rt.resizeTextForBestFit = true; rt.resizeTextMinSize = 24; rt.resizeTextMaxSize = 40;
+            }
 
+            // Green «НАЧАТЬ ЖИЗНЬ (Enter)» button (S1) — two lines, text inside the plate's visible pill.
             var start = NewSprite("StartPlate", _openerPanel.transform, Sprite("plate-yes"));
             start.type = Image.Type.Sliced;
-            Anchor(start.rectTransform, new Vector2(0.5f, 0.17f), new Vector2(520, 150));
+            AnchorPx(start.rectTransform, 960f, 900f, 600f, 210f);   // taller pill + comfortable bottom margin
             var startText = NewText("StartText", start.transform,
-                "▸ НАЧАТЬ ЖИЗНЬ — Enter", 40, TextAnchor.MiddleCenter, Ink, _display);
-            Stretch(startText.rectTransform);
-
-            var hint = NewText("Hint", _openerPanel.transform,
-                "←  ДА          →  СПАСИБО, НЕ НАДО          Enter — НАЧАТЬ",
-                28, TextAnchor.MiddleCenter, Muted, _body);
-            Anchor(hint.rectTransform, new Vector2(0.5f, 0.06f), new Vector2(1500, 60));
+                "НАЧАТЬ ЖИЗНЬ\n(Enter)", 40, TextAnchor.MiddleCenter, Ink, _display);
+            Inset(startText.rectTransform, 68f);   // text rect well INSIDE the visible pill (55px 9-slice) → padding all sides
+            startText.resizeTextForBestFit = true; startText.resizeTextMinSize = 26; startText.resizeTextMaxSize = 40;
+            startText.verticalOverflow = VerticalWrapMode.Truncate;  // best-fit now honours HEIGHT → both rows fit the pill
+            // No DisplayFx: dark Ink text on the green pill needs no dark outline (it muddies it to a blob).
         }
 
         private void BuildGamePanel(Transform parent)
@@ -1153,27 +1227,49 @@ namespace ThanksNoThanks
 
             _finaleTitle = NewText("FinaleTitle", _finalePanel.transform,
                 "СПАСИБО ЗА ИГРУ!", 92, TextAnchor.MiddleCenter, Energy, _display);
-            Anchor(_finaleTitle.rectTransform, new Vector2(0.5f, 0.85f), new Vector2(1700, 160));
+            AnchorPx(_finaleTitle.rectTransform, 960f, 185f, 1700f, 175f);
             DisplayFx(_finaleTitle);
 
-            var box = NewSprite("StoryBox", _finalePanel.transform, Sprite("marquee-frame"));
-            box.type = Image.Type.Sliced;
-            Anchor(box.rectTransform, new Vector2(0.5f, 0.46f), new Vector2(1400, 540));
+            // Cause line (S11/S12): yellow, seated on a DARK navy pill. Bare on the multicolour sunburst the
+            // thin yellow fill washed out and read as hollow/outline-only; on a solid dark plate the fill is
+            // high-contrast and solid. bar-track 9-slice tinted Ink; best-fit so a long phrase never clips.
+            var causePlate = NewSprite("CausePlate", _finalePanel.transform, Sprite("bar-track"));
+            causePlate.type = Image.Type.Sliced;
+            causePlate.color = Ink;
+            AnchorPx(causePlate.rectTransform, 960f, 340f, 1300f, 108f);
+            _finaleCause = NewText("FinaleCause", causePlate.transform,
+                "", 44, TextAnchor.MiddleCenter, Bulb, _body);
+            var crt = _finaleCause.rectTransform;
+            crt.anchorMin = Vector2.zero; crt.anchorMax = Vector2.one;
+            crt.offsetMin = new Vector2(56f, 20f); crt.offsetMax = new Vector2(-56f, -20f);   // inside the pill, padded
+            _finaleCause.resizeTextForBestFit = true; _finaleCause.resizeTextMinSize = 26; _finaleCause.resizeTextMaxSize = 46;
+            _finaleCause.verticalOverflow = VerticalWrapMode.Truncate;
+            DisplayFx(_finaleCause);
 
-            _finaleCause = NewText("FinaleCause", box.transform,
-                "", 40, TextAnchor.UpperCenter, Bulb, _body);
-            Anchor(_finaleCause.rectTransform, new Vector2(0.5f, 0.70f), new Vector2(1160, 90));
-
-            _finaleStory = NewText("FinaleStory", box.transform,
-                "", 32, TextAnchor.UpperCenter, TextLight, _body);
-            Anchor(_finaleStory.rectTransform, new Vector2(0.5f, 0.36f), new Vector2(1160, 300));
+            // Glued necrolog story INSIDE a dark navy plate (S11/S12) — never bare on the background.
+            // bar-track 9-slice tinted deep cobalt; best-fit shrinks a long (up to 15-line) story to fit the
+            // plate's visible pill. FitStoryPlate() then sizes the plate HEIGHT to the content so a short
+            // story doesn't float in a huge empty plate (a long story keeps the full clamped height).
+            _finaleStoryPlate = NewSprite("StoryBox", _finalePanel.transform, Sprite("bar-track"));
+            _finaleStoryPlate.type = Image.Type.Sliced;
+            _finaleStoryPlate.color = CobaltDeep;
+            AnchorPx(_finaleStoryPlate.rectTransform, 960f, 620f, 1400f, 360f);
+            _finaleStory = NewText("FinaleStory", _finaleStoryPlate.transform,
+                "", 32, TextAnchor.MiddleCenter, TextLight, _body);
+            Inset(_finaleStory.rectTransform, 60f);
+            _finaleStory.resizeTextForBestFit = true; _finaleStory.resizeTextMinSize = 18; _finaleStory.resizeTextMaxSize = 34;
+            _finaleStory.verticalOverflow = VerticalWrapMode.Truncate;  // best-fit now honours HEIGHT → the worst-case long story shrinks to fit inside the pill instead of spilling past the plate
+            DisplayFx(_finaleStory);
 
             var again = NewSprite("AgainPlate", _finalePanel.transform, Sprite("plate-yes"));
             again.type = Image.Type.Sliced;
-            Anchor(again.rectTransform, new Vector2(0.5f, 0.10f), new Vector2(560, 140));
+            AnchorPx(again.rectTransform, 960f, 936f, 600f, 210f);   // taller pill + comfortable bottom margin
             var againText = NewText("AgainText", again.transform,
-                "▸ ПРОЖИТЬ ЗАНОВО — Enter", 38, TextAnchor.MiddleCenter, Ink, _display);
-            Stretch(againText.rectTransform);
+                "НАЧАТЬ ЗАНОВО\n(Enter)", 40, TextAnchor.MiddleCenter, Ink, _display);
+            Inset(againText.rectTransform, 68f);   // text rect well INSIDE the visible pill (55px 9-slice) → padding all sides
+            againText.resizeTextForBestFit = true; againText.resizeTextMinSize = 26; againText.resizeTextMaxSize = 40;
+            againText.verticalOverflow = VerticalWrapMode.Truncate;  // best-fit now honours HEIGHT → both rows fit the pill
+            // No DisplayFx: dark Ink text on the green pill needs no dark outline (it muddies it to a blob).
         }
 
         // S5 tutorial: full-screen dim + a yellow modal in the Host's tone + «ПОНЯТНО» plate.
@@ -1182,24 +1278,35 @@ namespace ThanksNoThanks
             _tutorialOverlay = NewSolid("TutorialOverlay", parent, new Color(0.02f, 0.03f, 0.10f, 0.78f)).gameObject;
             Stretch(_tutorialOverlay.GetComponent<RectTransform>());
 
-            var modal = NewSprite("Modal", _tutorialOverlay.transform, Sprite("marquee-frame"));
+            // Solid yellow card (bar-track 9-slice is a filled rounded rect — marquee-frame is a HOLLOW frame
+            // whose transparent centre let the dark veil bleed through and killed the dark text's contrast).
+            var modal = NewSprite("Modal", _tutorialOverlay.transform, Sprite("bar-track"));
             modal.type = Image.Type.Sliced;
             modal.color = Bulb;   // жёлтая карточка (тон Ведущего)
-            Anchor(modal.rectTransform, new Vector2(0.5f, 0.52f), new Vector2(1280, 560));
+            Anchor(modal.rectTransform, new Vector2(0.5f, 0.52f), new Vector2(1280, 600));
+            _tutorialModal = modal;
 
-            var head = NewText("TutHead", modal.transform, "ПОДСКАЗКА", 34, TextAnchor.UpperCenter, Ink, _display);
-            Anchor(head.rectTransform, new Vector2(0.5f, 0.86f), new Vector2(1100, 60));
-
+            // Hint body (S5): the title rides as the first line of each hint constant. Fully inside the
+            // modal's visible pill with margins; best-fit shrinks a long hint to fit above the button.
             _tutorialText = NewText("TutBody", modal.transform, MoneyTutorialText, 40, TextAnchor.MiddleCenter, Ink, _body);
-            Anchor(_tutorialText.rectTransform, new Vector2(0.5f, 0.52f), new Vector2(1100, 320));
+            var trt = _tutorialText.rectTransform;
+            trt.anchorMin = new Vector2(0f, 0.34f); trt.anchorMax = new Vector2(1f, 1f);
+            trt.offsetMin = new Vector2(120f, 20f); trt.offsetMax = new Vector2(-120f, -100f);
+            _tutorialText.resizeTextForBestFit = true; _tutorialText.resizeTextMinSize = 26; _tutorialText.resizeTextMaxSize = 44;
 
-            // «Enter» is spelled out on the plate (founder Gate-2): Space is the crank and must never
-            // dismiss a hint, so the dismiss key has to be discoverable right on the button.
-            var plate = NewSprite("GotItPlate", modal.transform, Sprite("plate-yes"));
+            // Blue «ПОНЯТНО — Enter» button (S5) with a clear bottom margin inside the modal (NOT flush to
+            // the edge). «Enter» is spelled out (founder Gate-2): Space is the crank and must never dismiss,
+            // so the dismiss key stays discoverable on the button. bar-track 9-slice tinted cobalt.
+            var plate = NewSprite("GotItPlate", modal.transform, Sprite("bar-track"));
             plate.type = Image.Type.Sliced;
-            Anchor(plate.rectTransform, new Vector2(0.5f, 0.14f), new Vector2(480, 120));
-            var plateTxt = NewText("GotItText", plate.transform, "ПОНЯТНО — Enter ▸", 32, TextAnchor.MiddleCenter, Ink, _display);
-            Stretch(plateTxt.rectTransform);
+            plate.color = Cobalt;
+            Anchor(plate.rectTransform, new Vector2(0.5f, 0.16f), new Vector2(470, 116));
+            _tutorialButton = plate;
+            var plateTxt = NewText("GotItText", plate.transform, "ПОНЯТНО — Enter", 32, TextAnchor.MiddleCenter, Color.white, _display);
+            Inset(plateTxt.rectTransform, 30f);
+            plateTxt.resizeTextForBestFit = true; plateTxt.resizeTextMinSize = 22; plateTxt.resizeTextMaxSize = 34;
+            DisplayFx(plateTxt);
+            _tutorialButtonText = plateTxt;
 
             _tutorialOverlay.SetActive(false);
         }
@@ -1409,10 +1516,7 @@ namespace ThanksNoThanks
             }
             else if (finale && _game.Necrolog != null)
             {
-                var n = _game.Necrolog;
-                _finaleTitle.text = n.Title;
-                _finaleCause.text = n.CauseLine;
-                _finaleStory.text = n.ComposeStory();
+                RenderFinaleTexts(_game.Necrolog);
             }
         }
 
@@ -1722,6 +1826,16 @@ namespace ThanksNoThanks
             rt.anchorMax = Vector2.one;
             rt.offsetMin = new Vector2(30f, 48f);    // left, bottom
             rt.offsetMax = new Vector2(-46f, -26f);  // right, top
+        }
+
+        // Text rect for an opener rule plate (bar-track 9-slice): inset well past the rounded corners so the
+        // white rule text always lands inside the visible cobalt pill on all four sides.
+        private static void RulePlateTextRect(RectTransform rt)
+        {
+            rt.anchorMin = Vector2.zero;
+            rt.anchorMax = Vector2.one;
+            rt.offsetMin = new Vector2(64f, 22f);
+            rt.offsetMax = new Vector2(-64f, -22f);
         }
 
         // Text rect for the ENLARGED blitz plate: inset past the ~55px 9-slice corner so best-fit text lands
