@@ -52,6 +52,7 @@ namespace ThanksNoThanks
         private Image _bg;
 
         // HUD widgets (gated by age)
+        private GameObject _hudRow;    // top-row container (age·деньги·здоровье·энергия·отношения·ребёнок)
         private GameObject _ageBadge;
         private GameObject _moneyPill;
         private GameObject _healthGroup;
@@ -60,6 +61,10 @@ namespace ThanksNoThanks
 
         private Text _ageText;
         private Text _moneyText;
+        private Text _moneyLabel;      // «ДЕНЬГИ ×N» under the pill (dark-blue)
+        private Text _healthLabel;     // «ЗДОРОВЬЕ» under the capsule
+        private Text _energyLabel;     // «ЭНЕРГИЯ»
+        private Text _relLabel;        // «ОТНОШЕНИЯ»
         private Image _healthFill;
         private Image _energyFill;
         private RectTransform _balancerMarker;
@@ -70,7 +75,6 @@ namespace ThanksNoThanks
         // ---- child button (opens on MD02=ДА, not age-gated; flashes on the signal-response window) ----
         private GameObject _childGroup;    // whole widget; shown while Game.ChildOpen, hidden after LT04
         private Image _childButtonImg;     // the «lit» bulb — bright while ChildFlashing, dim otherwise
-        private Image _childScaleFill;     // compact child-scale readout (шкала ребёнка)
 
         // Card
         private RectTransform _cardRoot;
@@ -107,7 +111,10 @@ namespace ThanksNoThanks
         private GameObject _blockBanner;
         // BLOCK$ price sub-line on the card: «СТОИТ N ₽» when affordable, «НУЖНО N ₽» when blocked.
         // Above the veil (drawn after it), so it stays legible in the dimmed/blocked state too.
+        // Sits on a dark rounded plate (_cardPricePlate) so the gold/light text never reads as
+        // «gold on yellow» against the sunburst — the S10 dark block-tag treatment.
         private Text _cardPriceText;
+        private Image _cardPricePlate;
 
         // Tutorial overlay (S5): dimmed bg + yellow modal + «ПОНЯТНО»; freezes the game while up.
         // Reused for every hint: money (18), energy (25), health (30) and the first burnout.
@@ -229,9 +236,14 @@ namespace ThanksNoThanks
         public Image NoPlateImage => _noPlate;
         public GameObject AgeBadge => _ageBadge;
         public GameObject MoneyPill => _moneyPill;
+        public GameObject HudRow => _hudRow;
         public GameObject HealthGroup => _healthGroup;
         public GameObject EnergyGroup => _energyGroup;
         public GameObject BalancerGroup => _balancerGroup;
+        public Text MoneyLabel => _moneyLabel;
+        public Text HealthLabel => _healthLabel;
+        public Text EnergyLabel => _energyLabel;
+        public Text RelLabel => _relLabel;
         public Image TimerRingFill => _timerFill;
         public GameObject OpenerPanel => _openerPanel;
         public GameObject GamePanel => _gamePanel;
@@ -240,6 +252,7 @@ namespace ThanksNoThanks
         public bool TutorialShowing => _tutorialShowing;
         public GameObject BlockBanner => _blockBanner;
         public Text CardPriceText => _cardPriceText;
+        public Image CardPricePlate => _cardPricePlate;
         public GameObject BurnoutPlate => _burnoutPlate;
         public GameObject BreakupPlate => _breakupPlate;
         public GameObject BalancerMarker => _balancerMarker != null ? _balancerMarker.gameObject : null;
@@ -444,16 +457,18 @@ namespace ThanksNoThanks
                 if (_crisisUiActive) RestoreNormalPlates();   // just resumed from a crisis → restore the plates
                 _ageText.text = Mathf.FloorToInt(_game.Age).ToString();
                 _moneyText.text = FormatMoney(_game.Money);   // live: ticks up on crank, drains down
+                _moneyLabel.text = FormatMoneyLabel(_game.IncomeMultiplier);   // ×N (burnout halves live)
                 // Live health/energy bars + balancer move on their own (decay/drain/breath), not just on cards.
                 var s = _game.Scales;
                 _healthFill.fillAmount = Mathf.Clamp01(s.Health / 100f);
                 _energyFill.fillAmount = Mathf.Clamp01(s.Energy / 100f);
                 float rel = Mathf.Clamp01(s.Relationships / 100f);
                 _balancerMarker.anchoredPosition = new Vector2((rel - 0.5f) * _balancerTrackWidth, 0f);
-                // «Красная зона» (>75%): tint the track + marker red so the over-attention risk reads.
-                var relTint = _game.RelationshipRedZone ? TimerRed : Color.white;
-                if (_balancerTrackImg.color != relTint) _balancerTrackImg.color = relTint;
-                if (_balancerMarkerImg.color != relTint) _balancerMarkerImg.color = relTint;
+                // «Красная зона» (>75%): keep the zone bar's own colours (tinting the green HOLD-ZONE red
+                // muddied it to brown) and flag the risk on the MARKER alone.
+                var markerTint = _game.RelationshipRedZone ? TimerRed : Color.white;
+                if (_balancerTrackImg.color != Color.white) _balancerTrackImg.color = Color.white;
+                if (_balancerMarkerImg.color != markerTint) _balancerMarkerImg.color = markerTint;
                 if (_burnoutPlate.activeSelf != _game.Burnout) _burnoutPlate.SetActive(_game.Burnout);
                 ReflectChildButton();               // reveal on MD02=ДА, light the bulb while flashing
                 // Age-gated reveals run every frame (SetActive is a no-op on same value): a widget
@@ -490,6 +505,7 @@ namespace ThanksNoThanks
             _blockVeil.SetActive(false);
             _blockBanner.SetActive(false);
             _cardPriceText.gameObject.SetActive(false);
+            _cardPricePlate.gameObject.SetActive(false);
 
             bool blitz = _game.Phase == CrisisPhase.Blitz;
             if (blitz)
@@ -560,7 +576,6 @@ namespace ThanksNoThanks
             _childButtonImg.rectTransform.localScale = lit
                 ? Vector3.one * (1f + 0.10f * Mathf.Sin(Time.time * 11f))
                 : Vector3.one;
-            _childScaleFill.fillAmount = Mathf.Clamp01(_game.Scales.Child / 100f);
         }
 
         // Transient «РАССТАЛИСЬ» plate: advance its own ~2s clock and mirror visibility (only while
@@ -676,63 +691,86 @@ namespace ThanksNoThanks
         {
             _gamePanel = NewGroup("Game", parent);
 
-            // ---- Age badge (always visible during play) ----
-            _ageBadge = NewSprite("AgeBadge", _gamePanel.transform, Sprite("age-badge")).gameObject;
-            Anchor(_ageBadge.GetComponent<RectTransform>(), new Vector2(0.06f, 0.85f), new Vector2(160, 175));
-            var ageLbl = NewText("AgeLbl", _ageBadge.transform, "ВОЗРАСТ", 18, TextAnchor.MiddleCenter, TextLight, _display);
-            Anchor(ageLbl.rectTransform, new Vector2(0.5f, 0.70f), new Vector2(150, 28));
-            _ageText = NewText("AgeText", _ageBadge.transform, "0", 60, TextAnchor.MiddleCenter, Color.white, _display);
-            Anchor(_ageText.rectTransform, new Vector2(0.5f, 0.38f), new Vector2(150, 92));
+            // ---- HUD row (styleframe-03 / C2 / INDEX anchors, 1920×1080, y from top) ----
+            // A dedicated container so the row can be enumerated (no stray/placeholder Image) and so the
+            // whole row skins/moves as one. All row widgets are pixel-anchored via AnchorPx.
+            _hudRow = NewGroup("HudRow", _gamePanel.transform);
+
+            // Возраст — синий квадрат-стикер ~x58 y30 w200 h224, «ВОЗРАСТ» сверху + крупная цифра.
+            // Nudged right of x46 so neither the sticker nor its caption clip the left screen edge.
+            _ageBadge = NewSprite("AgeBadge", _hudRow.transform, Sprite("age-badge")).gameObject;
+            AnchorPx(_ageBadge.GetComponent<RectTransform>(), 158f, 142f, 200f, 224f);
+            var ageLbl = NewText("AgeLbl", _ageBadge.transform, "ВОЗРАСТ", 18, TextAnchor.MiddleCenter, Color.white, _display);
+            Anchor(ageLbl.rectTransform, new Vector2(0.5f, 0.80f), new Vector2(172, 30));
+            ageLbl.resizeTextForBestFit = true; ageLbl.resizeTextMinSize = 10; ageLbl.resizeTextMaxSize = 18;
+            _ageText = NewText("AgeText", _ageBadge.transform, "0", 78, TextAnchor.MiddleCenter, Color.white, _display);
+            Anchor(_ageText.rectTransform, new Vector2(0.5f, 0.36f), new Vector2(190, 120));
             DisplayFx(_ageText);
 
-            // ---- Money pill (age 18+) ----
-            _moneyPill = NewSprite("MoneyPill", _gamePanel.transform, Sprite("money-pill")).gameObject;
+            // Деньги — СИНЯЯ пилюля (кобальт) x270 y30 w330 h88; «₽ N» белым; подпись «ДЕНЬГИ ×N» ПОД пилюлей.
+            _moneyPill = NewSprite("MoneyPill", _hudRow.transform, Sprite("money-pill")).gameObject;
             var moneyImg = _moneyPill.GetComponent<Image>();
             moneyImg.type = Image.Type.Sliced;
-            Anchor(_moneyPill.GetComponent<RectTransform>(), new Vector2(0.215f, 0.875f), new Vector2(360, 150));
+            moneyImg.color = Cobalt;                          // white sprite → cobalt pill (design gate)
+            AnchorPx(_moneyPill.GetComponent<RectTransform>(), 435f, 74f, 330f, 88f);
+            // «₽ N» crisp white on the cobalt pill (no dark outline/shadow — it dulls the value to gray).
+            _moneyText = NewText("MoneyText", _moneyPill.transform, "₽ 0", 40, TextAnchor.MiddleCenter, Color.white, _body);
+            Inset(_moneyText.rectTransform, 18f);
+            // Caption UNDER the pill: «ДЕНЬГИ ×N» dark-blue, with the coin ◎ following it (INDEX order).
+            // The coin stays a direct child of the pill (P0-sprite test path) but sits in the caption row.
+            _moneyLabel = NewText("MoneyLabel", _hudRow.transform, "ДЕНЬГИ", 24, TextAnchor.MiddleLeft, CobaltDeep, _display);
+            AnchorPx(_moneyLabel.rectTransform, 388f, 150f, 232f, 32f);
             var coin = NewSprite("Coin", _moneyPill.transform, Sprite("icon-coin"));
-            Anchor(coin.rectTransform, new Vector2(0.16f, 0.5f), new Vector2(58, 58));
-            _moneyText = NewText("MoneyText", _moneyPill.transform, "₽ 0", 34, TextAnchor.MiddleLeft, CobaltDeep, _body);
-            Anchor(_moneyText.rectTransform, new Vector2(0.60f, 0.5f), new Vector2(220, 70));
+            AnchorPx(coin.rectTransform, 478f, 150f, 26f, 26f);
 
-            // ---- Health bar (age 30+) ----
-            _healthGroup = BuildBar("HealthGroup", new Vector2(0.375f, 0.885f),
-                "ЗДОРОВЬЕ", "icon-heart", "bar-health-fill", out _healthFill);
+            // Здоровье / Энергия — белые капсулы w290 h72 с иконкой-спрайтом + бар, подпись СНИЗУ.
+            _healthGroup = BuildBar("HealthGroup", 771f, 66f, "ЗДОРОВЬЕ", "icon-heart",
+                "bar-health-fill", out _healthFill, out _healthLabel);
+            _energyGroup = BuildBar("EnergyGroup", 1085f, 66f, "ЭНЕРГИЯ", "icon-lightning",
+                "bar-energy-fill", out _energyFill, out _energyLabel);
 
-            // ---- Energy bar (age 25+) ----
-            _energyGroup = BuildBar("EnergyGroup", new Vector2(0.545f, 0.885f),
-                "ЭНЕРГИЯ", "icon-lightning", "bar-energy-fill", out _energyFill);
+            // Отношения — белая капсула w380 h72 с зона-баром + маркер, подпись снизу.
+            BuildBalancer(1444f, 66f);
 
-            // ---- Relationships balancer (age 20+) ----
-            BuildBalancer(new Vector2(0.775f, 0.875f));
+            // Кнопка-ребёнок — своя зона верх-право (1850,88), НЕ поверх плашек.
+            BuildChildButton(1850f, 88f);
 
-            // ---- Child tamagotchi button (opens on MD02=ДА, not age-gated) ----
-            BuildChildButton(new Vector2(0.5f, 0.315f));
-
-            // ---- Timer ring (top centre) ----
+            // ---- Timer ring — в ЗАЗОРЕ под HUD (центр x960 y250), НЕ поверх энергии/шкал ----
+            // Layered to match the mockup: white outline (back) · cobalt base ring · red arc (=remaining) ·
+            // cobalt centre disc · white number on top.
             var ringGroup = NewGroup("Timer", _gamePanel.transform);
-            Anchor(ringGroup.GetComponent<RectTransform>(), new Vector2(0.5f, 0.875f), new Vector2(150, 150));
+            AnchorPx(ringGroup.GetComponent<RectTransform>(), 960f, 250f, 180f, 180f);
+            var ringOutline = NewSprite("RingOutline", ringGroup.transform, Sprite("timer-ring-track"));
+            Stretch(ringOutline.rectTransform);
+            ringOutline.color = Color.white;                       // white outer outline
             var ringTrack = NewSprite("RingTrack", ringGroup.transform, Sprite("timer-ring-track"));
-            Stretch(ringTrack.rectTransform);
+            Anchor(ringTrack.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(162, 162));
+            ringTrack.color = Cobalt;                              // blue base ring inside the outline
             _timerFill = NewSprite("RingFill", ringGroup.transform, Sprite("timer-ring"));
-            Stretch(_timerFill.rectTransform);
+            Anchor(_timerFill.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(162, 162));
             _timerFill.type = Image.Type.Filled;
             _timerFill.fillMethod = Image.FillMethod.Radial360;
             _timerFill.fillOrigin = (int)Image.Origin360.Top;
             _timerFill.fillClockwise = false;
             _timerFill.fillAmount = 1f;
-            _timerFill.color = TimerRed;
+            _timerFill.color = TimerRed;                           // red arc = remaining time
+            var ringCenter = NewSprite("RingCenter", ringGroup.transform, Sprite("marquee-bulb"));
+            Anchor(ringCenter.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(112, 112));
+            ringCenter.color = Cobalt;                             // cobalt centre disc behind the number
             _timerText = NewText("TimerText", ringGroup.transform, "5", 56, TextAnchor.MiddleCenter, Color.white, _display);
             Stretch(_timerText.rectTransform);
             DisplayFx(_timerText);
 
-            // ---- Card marquee (centre) ----
+            // ---- Card marquee (centre x960, in the gap below the timer ring) ----
             _cardRoot = NewGroup("Card", _gamePanel.transform).GetComponent<RectTransform>();
-            Anchor(_cardRoot, new Vector2(0.5f, 0.53f), new Vector2(940, 600));
+            AnchorPx(_cardRoot, 960f, 560f, 940f, 430f);
             _cardFrame = NewSprite("CardFrame", _cardRoot, Sprite("marquee-frame-bulbs"));
             Stretch(_cardFrame.rectTransform);
             _cardText = NewText("CardText", _cardRoot, "", 64, TextAnchor.MiddleCenter, Color.white, _display);
-            Inset(_cardText.rectTransform, 130f);
+            Inset(_cardText.rectTransform, 120f);
+            _cardText.resizeTextForBestFit = true;   // auto-shrink long questions to fit the marquee
+            _cardText.resizeTextMinSize = 30;
+            _cardText.resizeTextMaxSize = 64;
             DisplayFx(_cardText);
 
             // ---- BLOCK$ (S10): dim veil over the card + red block-tag banner (hidden by default) ----
@@ -748,31 +786,42 @@ namespace ThanksNoThanks
             _blockBanner.SetActive(false);
 
             // ---- BLOCK$ price sub-line (S10): the required amount, on any BLOCK$-priced card ----
-            // Sits at the bottom of the card, added AFTER the veil so it reads in the blocked state too.
-            // «СТОИТ N ₽» (gold) when affordable · «НУЖНО N ₽» (light, next to the banner) when blocked.
+            // A dark rounded plate (bar-track 9-slice, tinted Ink) BEHIND the text, sat just BELOW the
+            // card so it clears the bottom bulb ring — the S10 dark block-tag: light text on dark, never
+            // the forbidden «gold on yellow». Added AFTER the veil so it reads in the blocked state too.
+            // Plate is created first (lower sibling index → drawn behind the text). Both are sized to the
+            // text and shown/hidden together in ApplyPriceLabel.
+            // «СТОИТ N ₽» (gold) when affordable · «НУЖНО N ₽» (light) when blocked.
+            _cardPricePlate = NewSprite("CardPricePlate", _cardRoot, Sprite("bar-track"));
+            _cardPricePlate.type = Image.Type.Sliced;
+            _cardPricePlate.color = Ink;                     // dark navy plate (S10 block-tag)
+            Anchor(_cardPricePlate.rectTransform, new Vector2(0.5f, -0.10f), new Vector2(360, 76));
             _cardPriceText = NewText("CardPrice", _cardRoot, "", 44, TextAnchor.MiddleCenter, Bulb, _display);
-            Anchor(_cardPriceText.rectTransform, new Vector2(0.5f, 0.12f), new Vector2(820, 80));
+            Anchor(_cardPriceText.rectTransform, new Vector2(0.5f, -0.10f), new Vector2(820, 76));
             DisplayFx(_cardPriceText);
+            _cardPricePlate.gameObject.SetActive(false);
             _cardPriceText.gameObject.SetActive(false);
 
             // ---- Answer plates (bottom) ----
             _yesPlate = NewSprite("YesPlate", _gamePanel.transform, Sprite("plate-yes"));
             _yesPlate.type = Image.Type.Sliced;
             _yesRect = _yesPlate.rectTransform;
-            Anchor(_yesRect, new Vector2(0.31f, 0.145f), new Vector2(380, 220));
+            AnchorPx(_yesRect, 610f, 940f, 420f, 190f);
             _yesRect.localRotation = Quaternion.Euler(0, 0, YesTilt);
             var yesText = NewText("YesText", _yesPlate.transform, "ДА", 64, TextAnchor.MiddleCenter, Ink, _display);
-            Stretch(yesText.rectTransform);
+            PlateTextRect(yesText.rectTransform);   // inset onto the visible plate (clears the baked shadow)
+            yesText.resizeTextForBestFit = true; yesText.resizeTextMinSize = 26; yesText.resizeTextMaxSize = 60;
             DisplayFx(yesText);
             _yesPlateText = yesText;
 
             _noPlate = NewSprite("NoPlate", _gamePanel.transform, Sprite("plate-no"));
             _noPlate.type = Image.Type.Sliced;
             _noRect = _noPlate.rectTransform;
-            Anchor(_noRect, new Vector2(0.69f, 0.145f), new Vector2(380, 220));
+            AnchorPx(_noRect, 1310f, 940f, 470f, 190f);
             _noRect.localRotation = Quaternion.Euler(0, 0, NoTilt);
             var noText = NewText("NoText", _noPlate.transform, "СПАСИБО,\nНЕ НАДО", 46, TextAnchor.MiddleCenter, Color.white, _display);
-            Stretch(noText.rectTransform);
+            PlateTextRect(noText.rectTransform);   // inset onto the visible plate (clears the baked shadow)
+            noText.resizeTextForBestFit = true; noText.resizeTextMinSize = 22; noText.resizeTextMaxSize = 40;
             DisplayFx(noText);
             _noPlateText = noText;
 
@@ -827,6 +876,7 @@ namespace ThanksNoThanks
             // ---- Speech bubble (S3): a corner bubble, right of the card so it never covers it ----
             var bubbleImg = NewSprite("HostBubble", _gamePanel.transform, Sprite("bubble"));
             bubbleImg.type = Image.Type.Sliced;   // 9-slice border 70/120/70/70 (import already set)
+            bubbleImg.color = Energy;             // saturated bulb-gold (#f8d24c) per C1/S3 — not pale cream
             _hostBubble = bubbleImg.gameObject;
             Anchor(bubbleImg.rectTransform, new Vector2(0.85f, 0.42f), new Vector2(360, 220));
             _bubbleText = NewText("HostBubbleText", _hostBubble.transform, "", 34,
@@ -854,82 +904,75 @@ namespace ThanksNoThanks
             _bannerRoot.SetActive(false);
         }
 
-        private GameObject BuildBar(string name, Vector2 anchor, string label, string icon,
-            string fillSprite, out Image fill)
+        // White capsule (w290 h72) at INDEX anchor: bar-track = the white capsule; a coloured fill sits
+        // inside (left-inset to clear the icon-sprite badge); the caps label sits BELOW, dark-blue.
+        private GameObject BuildBar(string name, float cx, float cyTop, string label, string icon,
+            string fillSprite, out Image fill, out Text labelText)
         {
-            var group = NewGroup(name, _gamePanel.transform);
-            Anchor(group.GetComponent<RectTransform>(), anchor, new Vector2(300, 110));
-
-            var ico = NewSprite("Icon", group.transform, Sprite(icon));
-            Anchor(ico.rectTransform, new Vector2(0.07f, 0.70f), new Vector2(46, 46));
-            var lbl = NewText("Label", group.transform, label, 22, TextAnchor.MiddleLeft, TextLight, _display);
-            Anchor(lbl.rectTransform, new Vector2(0.58f, 0.78f), new Vector2(230, 34));
+            var group = NewGroup(name, _hudRow.transform);
+            var grt = group.GetComponent<RectTransform>();
+            AnchorPx(grt, cx, cyTop, 290f, 72f);
 
             var track = NewSprite("Track", group.transform, Sprite("bar-track"));
             track.type = Image.Type.Sliced;
-            Anchor(track.rectTransform, new Vector2(0.5f, 0.25f), new Vector2(300, 46));
+            track.color = Color.white;
+            Stretch(track.rectTransform);                    // the white capsule = the whole group
             fill = NewSprite("Fill", track.transform, Sprite(fillSprite));
-            fill.type = Image.Type.Sliced;
             var fr = fill.rectTransform;
             fr.anchorMin = Vector2.zero;
             fr.anchorMax = Vector2.one;
-            fr.offsetMin = Vector2.zero;
-            fr.offsetMax = Vector2.zero;
+            fr.offsetMin = new Vector2(64f, 13f);            // leave room for the icon badge on the left
+            fr.offsetMax = new Vector2(-16f, -13f);
             fill.type = Image.Type.Filled;
             fill.fillMethod = Image.FillMethod.Horizontal;
             fill.fillOrigin = (int)Image.OriginHorizontal.Left;
             fill.fillAmount = 1f;
+
+            var ico = NewSprite("Icon", group.transform, Sprite(icon));
+            Anchor(ico.rectTransform, new Vector2(0.10f, 0.5f), new Vector2(56, 56));
+
+            labelText = NewText("Label", group.transform, label, 24, TextAnchor.MiddleCenter, CobaltDeep, _display);
+            Anchor(labelText.rectTransform, new Vector2(0.5f, -0.36f), new Vector2(290f, 34f));  // BELOW the capsule
             return group;
         }
 
-        private void BuildBalancer(Vector2 anchor)
+        // Relationships (w380 h72): white capsule bg + the red/yellow/green/yellow/red zone bar + up/down
+        // marker at the value; label «ОТНОШЕНИЯ» below.
+        private void BuildBalancer(float cx, float cyTop)
         {
-            _balancerGroup = NewGroup("Balancer", _gamePanel.transform);
-            Anchor(_balancerGroup.GetComponent<RectTransform>(), anchor, new Vector2(340, 120));
+            _balancerGroup = NewGroup("Balancer", _hudRow.transform);
+            AnchorPx(_balancerGroup.GetComponent<RectTransform>(), cx, cyTop, 380f, 72f);
 
-            var lbl = NewText("Label", _balancerGroup.transform, "ОТНОШЕНИЯ", 22, TextAnchor.MiddleCenter, TextLight, _display);
-            Anchor(lbl.rectTransform, new Vector2(0.5f, 0.82f), new Vector2(320, 34));
+            var capsule = NewSprite("Capsule", _balancerGroup.transform, Sprite("bar-track"));
+            capsule.type = Image.Type.Sliced;
+            capsule.color = Color.white;
+            Stretch(capsule.rectTransform);
 
             _balancerTrackWidth = 320f;
             _balancerTrackImg = NewSprite("Track", _balancerGroup.transform, Sprite("balancer-track"));
-            Anchor(_balancerTrackImg.rectTransform, new Vector2(0.5f, 0.34f), new Vector2(_balancerTrackWidth, 46));
+            Anchor(_balancerTrackImg.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(_balancerTrackWidth, 40f));
             _balancerMarkerImg = NewSprite("Marker", _balancerTrackImg.transform, Sprite("balancer-marker"));
             _balancerMarker = _balancerMarkerImg.rectTransform;
-            Anchor(_balancerMarker, new Vector2(0.5f, 0.5f), new Vector2(58, 78));
+            Anchor(_balancerMarker, new Vector2(0.5f, 0.5f), new Vector2(52, 68));
+
+            _relLabel = NewText("Label", _balancerGroup.transform, "ОТНОШЕНИЯ", 24, TextAnchor.MiddleCenter, CobaltDeep, _display);
+            Anchor(_relLabel.rectTransform, new Vector2(0.5f, -0.36f), new Vector2(380f, 34f));
         }
 
-        // Child «cabinet button»: no dedicated sprite exists, so this is a code placeholder built from
-        // marquee-bulb.png (the lit-bulb art) with a heart glyph — dim while idle, bright gold + pulsing
-        // while the flash window is open (driven in Update off Game.ChildFlashing). A compact bar under it
-        // shows the child scale so a лапс (bad-parent drop) reads. Hidden until MD02=ДА, and after LT04.
-        private void BuildChildButton(Vector2 anchor)
+        // Child «cabinet button» (S9): no dedicated sprite exists, so this is a placeholder built from
+        // marquee-bulb.png (the round lit-bulb art) + a heart — dim/cool while idle, bright gold + pulsing
+        // while the flash window is open (driven in Update off Game.ChildFlashing). Just a button, per the
+        // mockup — no label, no scale stripe (a red bar there read as a foreign health/danger artifact).
+        private void BuildChildButton(float cx, float cyTop)
         {
-            _childGroup = NewGroup("Child", _gamePanel.transform);
-            Anchor(_childGroup.GetComponent<RectTransform>(), anchor, new Vector2(220, 210));
-
-            var lbl = NewText("Label", _childGroup.transform, "РЕБЁНОК", 22, TextAnchor.MiddleCenter, TextLight, _display);
-            Anchor(lbl.rectTransform, new Vector2(0.5f, 0.92f), new Vector2(220, 30));
+            _childGroup = NewGroup("Child", _hudRow.transform);
+            AnchorPx(_childGroup.GetComponent<RectTransform>(), cx, cyTop, 96f, 96f);
 
             _childButtonImg = NewSprite("Button", _childGroup.transform, Sprite("marquee-bulb"));
             _childButtonImg.color = CobaltDeep;   // idle (unlit)
-            Anchor(_childButtonImg.rectTransform, new Vector2(0.5f, 0.52f), new Vector2(128, 128));
+            Anchor(_childButtonImg.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(88, 88));
             var heart = NewSprite("Heart", _childButtonImg.transform, Sprite("icon-heart"));
-            Anchor(heart.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(56, 56));
-
-            var hint = NewText("Hint", _childGroup.transform, "Enter", 20, TextAnchor.MiddleCenter, Muted, _display);
-            Anchor(hint.rectTransform, new Vector2(0.5f, 0.14f), new Vector2(220, 26));
-
-            var track = NewSprite("ScaleTrack", _childGroup.transform, Sprite("bar-track"));
-            track.type = Image.Type.Sliced;
-            Anchor(track.rectTransform, new Vector2(0.5f, 0.02f), new Vector2(180, 22));
-            _childScaleFill = NewSprite("ScaleFill", track.transform, Sprite("bar-health-fill"));
-            _childScaleFill.type = Image.Type.Filled;
-            _childScaleFill.fillMethod = Image.FillMethod.Horizontal;
-            _childScaleFill.fillOrigin = (int)Image.OriginHorizontal.Left;
-            var cfr = _childScaleFill.rectTransform;
-            cfr.anchorMin = Vector2.zero; cfr.anchorMax = Vector2.one;
-            cfr.offsetMin = Vector2.zero; cfr.offsetMax = Vector2.zero;
-            _childScaleFill.fillAmount = 1f;
+            Anchor(heart.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(48, 48));
 
             _childGroup.SetActive(false);
         }
@@ -1275,10 +1318,24 @@ namespace ThanksNoThanks
 
         private void ApplyPriceLabel(bool hasPrice, double price, bool blocked)
         {
-            if (!hasPrice) { _cardPriceText.gameObject.SetActive(false); return; }
+            if (!hasPrice)
+            {
+                _cardPriceText.gameObject.SetActive(false);
+                _cardPricePlate.gameObject.SetActive(false);
+                return;
+            }
             int p = Mathf.RoundToInt((float)price);
             _cardPriceText.text = (blocked ? "НУЖНО " : "СТОИТ ") + p + " ₽";
             _cardPriceText.color = blocked ? TextLight : Bulb;
+
+            // Size the text rect to its content, then wrap the dark plate around it (with padding) so the
+            // plate always fully covers the text — never bare gold/light text on the yellow sunburst.
+            float tw = _cardPriceText.preferredWidth;
+            float th = _cardPriceText.preferredHeight;
+            _cardPriceText.rectTransform.sizeDelta = new Vector2(tw, th);
+            _cardPricePlate.rectTransform.sizeDelta = new Vector2(tw + 64f, th + 28f);
+
+            _cardPricePlate.gameObject.SetActive(true);
             _cardPriceText.gameObject.SetActive(true);
         }
 
@@ -1287,6 +1344,7 @@ namespace ThanksNoThanks
             var s = _game.Scales;
             _ageText.text = Mathf.FloorToInt(_game.Age).ToString();
             _moneyText.text = FormatMoney(_game.Money);
+            _moneyLabel.text = FormatMoneyLabel(_game.IncomeMultiplier);
             _healthFill.fillAmount = Mathf.Clamp01(s.Health / 100f);
             _energyFill.fillAmount = Mathf.Clamp01(s.Energy / 100f);
             float rel = Mathf.Clamp01(s.Relationships / 100f);
@@ -1299,6 +1357,7 @@ namespace ThanksNoThanks
             int a = Mathf.FloorToInt(age);
             _ageBadge.SetActive(true);
             _moneyPill.SetActive(a >= MoneyAge);
+            _moneyLabel.gameObject.SetActive(a >= MoneyAge);   // caption tracks the pill (no orphan «ДЕНЬГИ»)
             // Balancer reveals at 20 and hides again after a breakup (partner gone — MD06 reopen deferred).
             _balancerGroup.SetActive(a >= RelationshipsAge && !_game.RelationshipsLost);
             _energyGroup.SetActive(a >= EnergyAge);
@@ -1391,6 +1450,15 @@ namespace ThanksNoThanks
             return "₽ " + FormatThousands(Mathf.FloorToInt((float)value));
         }
 
+        // Money caption under the pill: «ДЕНЬГИ» plus a «×N» factor when the income multiplier is not 1
+        // (startup fork / burnout). N is trimmed (×2, ×1.5, ×0.5) so it stays short under the pill.
+        private static string FormatMoneyLabel(double multiplier)
+        {
+            if (System.Math.Abs(multiplier - 1.0) < 0.01) return "ДЕНЬГИ";
+            string n = multiplier.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
+            return "ДЕНЬГИ ×" + n;
+        }
+
         private Image NewSprite(string name, Transform parent, Sprite sprite)
         {
             var go = new GameObject(name, typeof(RectTransform), typeof(Image));
@@ -1467,6 +1535,17 @@ namespace ThanksNoThanks
             rt.offsetMax = new Vector2(-pad, -pad);
         }
 
+        // Text rect for an answer plate: the plate sprites carry a baked drop-shadow toward the
+        // bottom-right, so the visible red/green sits toward the top-left. Inset asymmetrically (more
+        // bottom+right) so best-fit text lands fully ON the plate, never spilling onto the background.
+        private static void PlateTextRect(RectTransform rt)
+        {
+            rt.anchorMin = Vector2.zero;
+            rt.anchorMax = Vector2.one;
+            rt.offsetMin = new Vector2(30f, 48f);    // left, bottom
+            rt.offsetMax = new Vector2(-46f, -26f);  // right, top
+        }
+
         // Anchor a rect at a normalized point of its parent with a fixed pixel size.
         private static void Anchor(RectTransform rt, Vector2 anchor, Vector2 size)
         {
@@ -1475,6 +1554,19 @@ namespace ThanksNoThanks
             rt.pivot = new Vector2(0.5f, 0.5f);
             rt.anchoredPosition = Vector2.zero;
             rt.sizeDelta = size;
+        }
+
+        // Pixel-anchor a rect at a point given in mockup/INDEX coordinates (1920×1080, x from LEFT, y from
+        // TOP, at the element CENTRE). Only valid for a child of a full-canvas (stretched) parent —
+        // _hudRow / _gamePanel — where an anchor fraction maps straight to a canvas position.
+        private static void AnchorPx(RectTransform rt, float cx, float cyTop, float w, float h)
+        {
+            var a = new Vector2(cx / 1920f, 1f - cyTop / 1080f);
+            rt.anchorMin = a;
+            rt.anchorMax = a;
+            rt.pivot = new Vector2(0.5f, 0.5f);
+            rt.anchoredPosition = Vector2.zero;
+            rt.sizeDelta = new Vector2(w, h);
         }
     }
 }

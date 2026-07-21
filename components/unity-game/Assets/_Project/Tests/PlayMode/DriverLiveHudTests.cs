@@ -124,6 +124,46 @@ namespace ThanksNoThanks.Tests.PlayMode
         }
 
         [UnityTest]
+        public IEnumerator PriceLine_SitsOnDarkPlate_BehindAndCoveringTheText()
+        {
+            // Contrast invariant (S10): the price sub-line must never be bare gold/light text on the
+            // yellow sunburst. Assert a dark plate exists, is drawn BEHIND the text, and its rect fully
+            // COVERS the text rect — so a regression back to bare-text-on-background fails here.
+            var driver = Boot(out var go, out var fake);
+            yield return null;
+            driver.DebugReplaceGame(BlockDeck());
+            fake.Confirm();                              // → StartLife, starter drawn
+            fake.No();                                   // starter resolved → FILL drawn
+            fake.No();                                   // → MD03 drawn (Money 0 < 60 → blocked, price shown)
+            yield return null;
+
+            Assert.IsTrue(driver.CardPriceText.gameObject.activeSelf, "price text is shown");
+            Assert.IsNotNull(driver.CardPricePlate, "a plate sits behind the price sub-line");
+            Assert.IsTrue(driver.CardPricePlate.gameObject.activeSelf, "the plate is shown with the text");
+
+            // Plate colour is dark (the S10 block-tag): every channel well below mid-grey.
+            var c = driver.CardPricePlate.color;
+            Assert.Less(Mathf.Max(c.r, Mathf.Max(c.g, c.b)), 0.3f, "the plate is dark, not light/gold");
+
+            // Plate is drawn BEHIND the text (lower sibling index → earlier in the draw order).
+            Assert.Less(driver.CardPricePlate.transform.GetSiblingIndex(),
+                        driver.CardPriceText.transform.GetSiblingIndex(),
+                        "the plate renders behind the text");
+
+            // Plate rect fully covers the text rect (world-space corners: [0]=bottom-left, [2]=top-right).
+            var pc = new Vector3[4]; var tc = new Vector3[4];
+            driver.CardPricePlate.rectTransform.GetWorldCorners(pc);
+            driver.CardPriceText.rectTransform.GetWorldCorners(tc);
+            Assert.LessOrEqual(pc[0].x, tc[0].x, "plate covers the text on the left");
+            Assert.LessOrEqual(pc[0].y, tc[0].y, "plate covers the text on the bottom");
+            Assert.GreaterOrEqual(pc[2].x, tc[2].x, "plate covers the text on the right");
+            Assert.GreaterOrEqual(pc[2].y, tc[2].y, "plate covers the text on the top");
+
+            Object.Destroy(go);
+            yield return null;
+        }
+
+        [UnityTest]
         public IEnumerator EnergyHint_Shows_AndPauses_When_EnergyOpensAt25()
         {
             var driver = Boot(out var go, out var fake);
