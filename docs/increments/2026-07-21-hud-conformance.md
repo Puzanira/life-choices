@@ -88,4 +88,4 @@ C2-hud-row.png + S3-adult.png. Числа — целевые (допуск ±н�
 ## 6. Playtest verdict
 
 `Playtest ok:` —
-`Landed:` —
+`Landed:` 90e9f49 (bookkeeping; авторитетно — handoff)
