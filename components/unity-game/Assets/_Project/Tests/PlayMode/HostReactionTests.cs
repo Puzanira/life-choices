@@ -8,10 +8,10 @@ using UnityEngine.TestTools;
 namespace ThanksNoThanks.Tests.PlayMode
 {
     /// <summary>
-    /// The host reactions through the REAL driver: the rubric banner (S4) fires on a TIMELINE milestone
-    /// but not on a normal card, auto-advances on its own ~1.5s clock without soft-locking or pausing the
-    /// game (so the following tutorial pathway stays free), the speech bubble (S3) shows a named line on
-    /// a resolved answer and survives the same-frame card advance, and a restart clears both.
+    /// The host reactions through the REAL driver: the rubric banner (S4/S6) fires on a TIMELINE milestone
+    /// but not on a normal card, plays as a brief BLOCKING beat (game paused + card hidden — never both up),
+    /// auto-advances on its own ~1.5s clock without soft-locking, the speech bubble (S3) shows a named line
+    /// on a resolved answer and survives the same-frame card advance, and a restart clears both.
     /// </summary>
     public class HostReactionTests
     {
@@ -39,7 +39,7 @@ namespace ThanksNoThanks.Tests.PlayMode
         });
 
         [UnityTest]
-        public IEnumerator Banner_FiresOnTimeline_NotNormal_AndDoesNotPause()
+        public IEnumerator Banner_FiresOnTimeline_NotNormal_AndPausesAsBeat_CardHidden()
         {
             var driver = Boot(out var go, out var fake);
             yield return null;
@@ -50,6 +50,7 @@ namespace ThanksNoThanks.Tests.PlayMode
             Assert.AreEqual("N0", driver.Game.CurrentCard.Id);
             Assert.IsFalse(driver.HostBannerVisible, "no banner on a normal card");
             Assert.IsFalse(driver.HostBanner.activeSelf, "banner GO hidden on a normal card");
+            Assert.IsTrue(driver.CardRect.gameObject.activeSelf, "card is shown on a normal (non-banner) card");
 
             fake.No();                            // resolve N0 → milestone YA03 becomes current
             yield return null;
@@ -58,7 +59,10 @@ namespace ThanksNoThanks.Tests.PlayMode
             Assert.IsTrue(driver.HostBannerVisible, "banner fires on the TIMELINE milestone");
             Assert.IsTrue(driver.HostBanner.activeSelf, "banner GO visible");
             Assert.AreEqual("ПЕРВАЯ ЛЮБОВЬ!", driver.HostBannerText.text, "correct rubric caption");
-            Assert.IsFalse(driver.Game.Paused, "banner does NOT pause the game (tutorial pathway stays free)");
+            // Blocking beat (S4/S6): the banner pauses the game and the card is HIDDEN — NEVER both up.
+            Assert.IsTrue(driver.Game.Paused, "the rubric banner is a blocking beat — it pauses the game");
+            Assert.IsFalse(driver.CardRect.gameObject.activeSelf,
+                "the card is hidden while the banner beat is up (banner never overlaps the card)");
 
             Object.Destroy(go);
             yield return null;
@@ -126,9 +130,14 @@ namespace ThanksNoThanks.Tests.PlayMode
             Assert.IsTrue(driver.HostBubbleVisible, "bubble up before restart");
             Assert.IsTrue(driver.HostBannerVisible, "banner up before restart");
 
-            // Exhaust the deck to the finale, then restart to a fresh life.
+            // Exhaust the deck to the finale, then restart to a fresh life. A milestone banner is a blocking
+            // beat now (swallows input) — pump its ~1.5s clock synchronously so the loop passes through it.
             int guard = 0;
-            while (driver.Game.State == GameState.Playing && guard++ < 50) fake.No();
+            while (driver.Game.State == GameState.Playing && guard++ < 50)
+            {
+                if (driver.HostBannerVisible) { driver.DebugPumpHost(GameDriver.BannerSeconds + 0.1f); continue; }
+                fake.No();
+            }
             Assert.AreEqual(GameState.Finale, driver.Game.State, "reached the finale");
             fake.Confirm();                       // finale → opener
             fake.Confirm();                       // opener → fresh life (fresh-life reset runs)

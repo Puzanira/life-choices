@@ -27,7 +27,11 @@ namespace ThanksNoThanks.Tests.PlayMode
 
             int guard = 0;
             while (driver.Game.State == GameState.Playing && guard++ < 300)
+            {
+                // Milestone/crisis banners are blocking beats (swallow input) — pump the ~1.5s clock through.
+                if (driver.HostBannerVisible) { driver.DebugPumpHost(GameDriver.BannerSeconds + 0.1f); continue; }
                 fake.No();                                 // answer СПАСИБО НЕ НАДО to every card
+            }
 
             Assert.AreEqual(GameState.Finale, driver.Game.State, "run reached an ending");
             Assert.IsNotNull(driver.Game.Necrolog);

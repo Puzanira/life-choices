@@ -32,6 +32,9 @@ namespace ThanksNoThanks.Tests.PlayMode
             int guard = 0;
             while (!driver.TutorialShowing && driver.Game.State == GameState.Playing && guard++ < 4000)
             {
+                // A TIMELINE milestone (I03, YA01…) plays a blocking banner beat that swallows input — pump
+                // its ~1.5s clock synchronously so the run passes through it (banner beat → card → tutorial).
+                if (driver.HostBannerVisible) { driver.DebugPumpHost(GameDriver.BannerSeconds + 0.1f); continue; }
                 fake.Fire(GameInput.MoneyTick);           // crank attempt (no-op before 18; capped after)
                 driver.Game.Tick(0.25f);
                 if (!driver.TutorialShowing && driver.Game.CurrentCard != null
@@ -174,10 +177,14 @@ namespace ThanksNoThanks.Tests.PlayMode
             fake.Confirm();                                // Enter is the sole start key
             Assert.AreEqual(GameState.Playing, driver.Game.State, "Enter started the life");
 
-            // Life 1: all-НЕТ without ticking (age stays put → no tutorial) straight to the finale.
+            // Life 1: all-НЕТ without ticking (age stays put → no tutorial) straight to the finale. Milestone
+            // banners (I03…) are blocking beats now — pump the ~1.5s clock so the all-НЕТ sweep passes through.
             int guard = 0;
             while (driver.Game.State == GameState.Playing && guard++ < 300)
+            {
+                if (driver.HostBannerVisible) { driver.DebugPumpHost(GameDriver.BannerSeconds + 0.1f); continue; }
                 fake.No();
+            }
             Assert.AreEqual(GameState.Finale, driver.Game.State, "reached the finale");
 
             // The core founder bug: holding/mashing Space through the necrolog must NOT restart —

@@ -79,9 +79,13 @@ namespace ThanksNoThanks.Tests.PlayMode
             }
             Assert.AreEqual(CrisisPhase.Blitz, g.Phase, "reached the crisis blitz");
 
+            // The «КРИЗИС… БЛИЦ!» rubric is a blocking beat — clear it before pressing the blitz buttons.
+            driver.DebugPumpHost(GameDriver.BannerSeconds + 0.1f);
             for (int i = 0; i < 5; i++) fake.Yes();         // clear the blitz cleanly → crisis tail rolls
             Assert.IsTrue(g.InDepression, "the crisis tail entered depression");
 
+            // Depression opens with its own muted «ТЁМНАЯ ПОЛОСА…» beat — clear it before driving pulses.
+            driver.DebugPumpHost(GameDriver.BannerSeconds + 0.1f);
             yield return null;                              // let the driver's Update reflect it
             Assert.IsTrue(driver.DepressionOverlay.activeSelf, "the B&W overlay is shown while depressed");
             float fullGrayAlpha = driver.DepressionVeil.color.a;

@@ -174,6 +174,7 @@ namespace ThanksNoThanks.Tests.PlayMode
             int guard = 0;
             while (guard++ < 12000 && driver.Game.State == GameState.Playing && !sawEnergyHint)
             {
+                if (driver.HostBannerVisible) { driver.DebugPumpHost(GameDriver.BannerSeconds + 0.1f); continue; }
                 if (driver.TutorialShowing)
                 {
                     if (driver.TutorialText.text.Contains("УСТАЛОСТЬ"))
@@ -221,6 +222,7 @@ namespace ThanksNoThanks.Tests.PlayMode
             int guard = 0;
             while (guard++ < 20000 && driver.Game.State == GameState.Playing && !atHealth)
             {
+                if (driver.HostBannerVisible) { driver.DebugPumpHost(GameDriver.BannerSeconds + 0.1f); continue; }
                 if (driver.TutorialShowing)
                 {
                     if (driver.TutorialText.text.Contains("ТАЯТЬ")) { atHealth = true; break; }

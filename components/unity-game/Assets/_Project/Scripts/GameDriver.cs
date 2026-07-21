@@ -98,6 +98,7 @@ namespace ThanksNoThanks
         private bool _crisisUiActive;         // true while the plates/timer are in crisis mode (for restore)
 
         // Timer ring
+        private GameObject _timerGroup;   // whole ring widget; hidden during a rubric banner beat
         private Image _timerFill;
         private Text _timerText;
 
@@ -374,6 +375,10 @@ namespace ThanksNoThanks
             // further Confirm passes (harmless during Playing). Cleared next frame in Update.
             if (_dismissedThisFrame && input != GameInput.Confirm) return;
 
+            // A rubric banner beat is up (S4/S6 — the card is hidden): swallow ALL input so a masher can't
+            // answer the hidden card or skip the announce unread. It auto-advances on its own ~1.5s clock.
+            if (_bannerTimer.Visible && _game.State == GameState.Playing) return;
+
             if (_tutorialShowing)
             {
                 // FOUNDER DECISION (Gate-2 playtest): hints dismiss on Enter ONLY. She holds/mashes
@@ -448,7 +453,12 @@ namespace ThanksNoThanks
             _crankCap.Advance(Time.deltaTime);   // deterministic clock for the income cap
             _breath.Advance(Time.deltaTime);     // deterministic clock for the breathing rhythm
             _game.Tick(Time.deltaTime);
-            if (_game.State == GameState.Playing && _game.InCrisis)
+            if (_game.State == GameState.Playing && _bannerTimer.Visible)
+            {
+                // Rubric banner beat (S4/S6): the card, plates and timer are hidden (ReflectBannerBeat) and
+                // the game is paused — render nothing gameplay here so the banner never overlaps a card.
+            }
+            else if (_game.State == GameState.Playing && _game.InCrisis)
             {
                 RenderCrisis();   // S6 blitz / S13 impulse — reuses the plates + timer ring, freezes normal HUD
             }
@@ -486,7 +496,8 @@ namespace ThanksNoThanks
                     ? Vector3.one * (1f + 0.08f * Mathf.Sin(Time.time * 12f))
                     : Vector3.one;
             }
-            ReflectHostReveals(_game.State == GameState.Playing);
+            ReflectHostReveals(_game.State == GameState.Playing);   // advances the banner-beat clock + pause
+            ReflectBannerBeat();                                    // hide the card/plates while the beat is up
             ReflectBreakupPlate(_game.State == GameState.Playing);
             UpdateBrightness();
             ReflectDepression();   // B&W wash + grain + pulse while Game.InDepression (above the show veil)
@@ -500,6 +511,15 @@ namespace ThanksNoThanks
             _crisisUiActive = true;
             var c = _game.CurrentCard;
             _cardText.text = c != null ? c.Question : "";
+
+            // S6 minimal HUD: only the age badge + the crisis counter show during the crisis — hide the
+            // money pill / bars / balancer / child (re-revealed by ApplyAgeGates the moment play resumes).
+            _moneyPill.SetActive(false);
+            _moneyLabel.gameObject.SetActive(false);
+            _healthGroup.SetActive(false);
+            _energyGroup.SetActive(false);
+            _balancerGroup.SetActive(false);
+            if (_childGroup != null) _childGroup.SetActive(false);
 
             // BLOCK$ visuals never apply during a crisis.
             _blockVeil.SetActive(false);
@@ -516,13 +536,24 @@ namespace ThanksNoThanks
                 _noPlateText.text = normalLeft ? "О НЕТ" : "ВСЁ\nНОРМАЛЬНО";
                 _yesPlate.color = Color.white;
                 _noPlate.color = Color.white;
-                _crisisInfoText.text = $"МЫСЛЬ {_game.BlitzThoughtNumber}/5     ПРОВАЛОВ: {_game.BlitzFails}";
+                // S6: both blitz plates are LARGE and EQUAL so the 2-line «ВСЁ НОРМАЛЬНО» sits fully inside
+                // the colored pill with margin. The 9-slice plate sprite keeps a fixed ~55px corner inset,
+                // so the normal 420×190 plate only exposes a ~79px-tall pill — far too short for two lines at
+                // a readable size (the label spilled off the pill top/sides). Enlarge the rect AND the text
+                // rect (which must clear the corner inset) so best-fit resolves a big font that still fits.
+                UseCrisisBlitzPlates();
+                // S6 counter: two lines on a dark badge — «МЫСЛЬ N/5» light, «ПРОВАЛОВ: K» in muted red.
+                _crisisInfoText.text = $"МЫСЛЬ {_game.BlitzThoughtNumber}/5\n<color=#e8686a>ПРОВАЛОВ: {_game.BlitzFails}</color>";
             }
             else
             {
-                // Impulse: normal levers work (← = поддаться/ДА, → = «СПАСИБО, НЕ НАДО»). Highlight the → decline.
-                _yesPlateText.text = "ПОДДАТЬСЯ";
+                // Impulse (S13): ← = поддаться (ДА), → = «СПАСИБО, НЕ НАДО». Highlight the → decline (обратный акцент).
+                // Impulse keeps the normal-sized plates (per S13 / accepted 03 shot).
+                UseNormalPlates();
+                _yesPlateText.text = "ДА";
                 _noPlateText.text = "СПАСИБО,\nНЕ НАДО";
+                _yesPlateText.resizeTextMaxSize = 60;   // single-line «ДА» reads big
+                _noPlateText.resizeTextMaxSize = 40;
                 _yesPlate.color = Color.white;
                 _noPlate.color = Bulb;   // gold-highlight the safe active decline
                 _crisisInfoText.text = $"ИМПУЛЬС {_game.ImpulseCardNumber}/3";
@@ -543,12 +574,96 @@ namespace ThanksNoThanks
         private void RestoreNormalPlates()
         {
             _crisisUiActive = false;
+            UseNormalPlates();   // restore rect size, text rect + best-fit ceilings the crisis enlarged
             _yesPlateText.text = "ДА";
             _noPlateText.text = "СПАСИБО,\nНЕ НАДО";
             _yesPlate.color = Color.white;
             _noPlate.color = Color.white;
             if (_crisisInfo != null) _crisisInfo.SetActive(false);
             if (_impulseWarning != null) _impulseWarning.SetActive(false);
+        }
+
+        // ---- Answer-plate geometry ------------------------------------------------------------------
+        // The plate sprite is a 460×270 9-slice with an 82px border; its colored pill (the flat green/red
+        // fill) sits ~55px in from every rect edge REGARDLESS of the rect size (9-slice corners are fixed).
+        // So a plate rect of W×H shows a pill of only ~(W-110)×(H-110). The normal 190-tall plate therefore
+        // exposes a pill barely ~80px tall — fine for «ДА» / a small 2-line decline, but the blitz
+        // «ВСЁ НОРМАЛЬНО» needs a genuinely large pill or best-fit resolves a font whose two lines spill off
+        // the pill top/sides. The blitz uses an enlarged, equal pair; everything else uses the normal sizes.
+        private static readonly Vector2 NormalYesPlateSize = new Vector2(420f, 190f);
+        private static readonly Vector2 NormalNoPlateSize = new Vector2(470f, 190f);
+        private static readonly Vector2 CrisisBlitzPlateSize = new Vector2(520f, 250f);
+
+        // Enlarge both blitz plates equally (S6) and push the text rect inside the (now taller) colored pill.
+        private void UseCrisisBlitzPlates()
+        {
+            _yesRect.sizeDelta = CrisisBlitzPlateSize;
+            _noRect.sizeDelta = CrisisBlitzPlateSize;
+            CrisisPlateTextRect(_yesPlateText.rectTransform);
+            CrisisPlateTextRect(_noPlateText.rectTransform);
+            _yesPlateText.resizeTextMinSize = 28; _yesPlateText.resizeTextMaxSize = 48;
+            _noPlateText.resizeTextMinSize = 28; _noPlateText.resizeTextMaxSize = 48;
+        }
+
+        // Normal answer plates (childhood/adult play + the S13 impulse): the sizes/insets built in BuildUi.
+        private void UseNormalPlates()
+        {
+            _yesRect.sizeDelta = NormalYesPlateSize;
+            _noRect.sizeDelta = NormalNoPlateSize;
+            PlateTextRect(_yesPlateText.rectTransform);
+            PlateTextRect(_noPlateText.rectTransform);
+            _yesPlateText.resizeTextMinSize = 26; _yesPlateText.resizeTextMaxSize = 60;
+            _noPlateText.resizeTextMinSize = 22; _noPlateText.resizeTextMaxSize = 40;
+        }
+
+        // The game is paused while EITHER a tutorial overlay OR a rubric banner beat is up. Both share the
+        // single Game.Paused freeze (age, drains, cost-of-living, card timer, crisis timer). Kept in sync
+        // from one place so a banner beat and a tutorial can never leave the pause flag stale.
+        private void SyncPause()
+        {
+            if (_game == null) return;
+            _game.Paused = _tutorialShowing || _bannerTimer.Visible;
+        }
+
+        // While a rubric banner beat is up (S4/S6), the card marquee, the two answer plates and the timer
+        // ring are HIDDEN so the banner is its own beat and can never overlap a card (the founder bug).
+        // Restored the instant the beat clears. Idempotent — safe to call every frame.
+        private void ReflectBannerBeat()
+        {
+            if (_cardRoot == null) return;
+            bool beat = _game != null && _game.State == GameState.Playing && _bannerTimer.Visible;
+            bool show = !beat;
+            if (_cardRoot.gameObject.activeSelf != show) _cardRoot.gameObject.SetActive(show);
+            if (_yesPlate.gameObject.activeSelf != show) _yesPlate.gameObject.SetActive(show);
+            if (_noPlate.gameObject.activeSelf != show) _noPlate.gameObject.SetActive(show);
+            if (_timerGroup != null && _timerGroup.activeSelf != show) _timerGroup.SetActive(show);
+            // S4: the banner is a clean beat — the whole HUD row is hidden too (re-shown, age-gated, after).
+            if (_hudRow != null && _hudRow.activeSelf != show) _hudRow.SetActive(show);
+            if (beat)
+            {
+                if (_crisisInfo != null && _crisisInfo.activeSelf) _crisisInfo.SetActive(false);
+                if (_impulseWarning != null && _impulseWarning.activeSelf) _impulseWarning.SetActive(false);
+            }
+        }
+
+        /// <summary>
+        /// Test seam: advance the driver-side host reveal clocks (speech bubble + the blocking rubric banner
+        /// beat) by an injected <paramref name="dt"/> and reconcile pause + visibility exactly as Update
+        /// would — so a synchronous Game.Tick-driven test can pass THROUGH a banner beat deterministically
+        /// without pumping real frames. Production drives these off Time.deltaTime in Update.
+        /// </summary>
+        public void DebugPumpHost(float dt)
+        {
+            if (_game == null) return;
+            _bubbleTimer.Advance(dt);
+            _bannerTimer.Advance(dt);
+            SyncPause();
+            bool playing = _game.State == GameState.Playing;
+            bool bub = playing && _bubbleTimer.Visible;
+            if (_hostBubble != null && _hostBubble.activeSelf != bub) _hostBubble.SetActive(bub);
+            bool ban = playing && _bannerTimer.Visible;
+            if (_bannerRoot.activeSelf != ban) _bannerRoot.SetActive(ban);
+            ReflectBannerBeat();
         }
 
         // Crisis entered (CR00): announce «КРИЗИС СРЕДНЕГО ВОЗРАСТА! БЛИЦ!» on the rubric banner.
@@ -739,6 +854,7 @@ namespace ThanksNoThanks
             // Layered to match the mockup: white outline (back) · cobalt base ring · red arc (=remaining) ·
             // cobalt centre disc · white number on top.
             var ringGroup = NewGroup("Timer", _gamePanel.transform);
+            _timerGroup = ringGroup;
             AnchorPx(ringGroup.GetComponent<RectTransform>(), 960f, 250f, 180f, 180f);
             var ringOutline = NewSprite("RingOutline", ringGroup.transform, Sprite("timer-ring-track"));
             Stretch(ringOutline.rectTransform);
@@ -852,22 +968,66 @@ namespace ThanksNoThanks
         // two buttons and the fast timer REUSE the existing answer plates + timer ring (relabelled in-place).
         private void BuildCrisisHud()
         {
-            _crisisInfo = NewSolid("CrisisInfo", _gamePanel.transform, CobaltDeep).gameObject;
-            Anchor(_crisisInfo.GetComponent<RectTransform>(), new Vector2(0.5f, 0.965f), new Vector2(720, 64));
+            // ---- Counter badge (S6): top-right DARK rounded badge — «МЫСЛЬ N/5» + «ПРОВАЛОВ: K» ----
+            // bar-track 9-slice tinted Ink gives the rounded dark plate; text stays fully inside via Inset.
+            var infoImg = NewSprite("CrisisInfo", _gamePanel.transform, Sprite("bar-track"));
+            infoImg.type = Image.Type.Sliced;
+            infoImg.color = Ink;                    // dark navy badge — readable over the sunburst
+            _crisisInfo = infoImg.gameObject;
+            AnchorPx(infoImg.rectTransform, 1690f, 100f, 380f, 112f);
             _crisisInfoText = NewText("CrisisInfoText", _crisisInfo.transform,
-                "", 34, TextAnchor.MiddleCenter, TextLight, _display);
-            Stretch(_crisisInfoText.rectTransform);
+                "", 32, TextAnchor.MiddleCenter, TextLight, _display);
+            Inset(_crisisInfoText.rectTransform, 18f);
             DisplayFx(_crisisInfoText);
             _crisisInfo.SetActive(false);
 
-            _impulseWarning = NewSolid("ImpulseWarning", _gamePanel.transform, TimerRed).gameObject;
-            Anchor(_impulseWarning.GetComponent<RectTransform>(), new Vector2(0.5f, 0.32f), new Vector2(900, 160));
+            // ---- Impulse warning (S13): dark pill «молчание = ДА» with a DRAWN mute icon (never a glyph) ----
+            var warnImg = NewSprite("ImpulseWarning", _gamePanel.transform, Sprite("bar-track"));
+            warnImg.type = Image.Type.Sliced;
+            warnImg.color = Ink;
+            _impulseWarning = warnImg.gameObject;
+            AnchorPx(warnImg.rectTransform, 940f, 700f, 380f, 84f);
+            var mute = NewSprite("MuteIcon", _impulseWarning.transform, MakeMuteSprite());
+            Anchor(mute.rectTransform, new Vector2(0.14f, 0.5f), new Vector2(52, 52));
             var warn = NewText("ImpulseWarnText", _impulseWarning.transform,
-                HostContent.ImpulseInvertWarning + "\n" + HostContent.ImpulseDeclinePrompt,
-                46, TextAnchor.MiddleCenter, Color.white, _display);
-            Stretch(warn.rectTransform);
+                "молчание = ДА", 34, TextAnchor.MiddleCenter, Color.white, _display);
+            var wrt = warn.rectTransform;
+            wrt.anchorMin = Vector2.zero; wrt.anchorMax = Vector2.one;
+            wrt.offsetMin = new Vector2(78f, 8f);   // clear the mute icon on the left
+            wrt.offsetMax = new Vector2(-18f, -8f);
             DisplayFx(warn);
             _impulseWarning.SetActive(false);
+        }
+
+        // A small DRAWN «mute» icon (crossed speaker) baked to a runtime texture — a real sprite, never a
+        // font glyph/tofu (S13 «молчание = ДА»). Deterministic; a white speaker body+cone with a red slash.
+        private static UnityEngine.Sprite MakeMuteSprite()
+        {
+            const int n = 64;
+            var tex = new Texture2D(n, n, TextureFormat.RGBA32, false)
+                { filterMode = FilterMode.Bilinear, wrapMode = TextureWrapMode.Clamp };
+            var px = new Color32[n * n];
+            var clear = new Color32(0, 0, 0, 0);
+            var white = new Color32(245, 248, 255, 255);
+            var red = new Color32(232, 68, 58, 255);
+            for (int i = 0; i < px.Length; i++) px[i] = clear;
+            void Set(int x, int y, Color32 c) { if (x >= 0 && x < n && y >= 0 && y < n) px[y * n + x] = c; }
+            // speaker body box
+            for (int x = 12; x <= 26; x++)
+                for (int y = 24; y <= 40; y++) Set(x, y, white);
+            // speaker cone (widens toward the mouth)
+            for (int x = 26; x <= 42; x++)
+            {
+                float hh = 6f + (x - 26) / 16f * 16f;
+                int y0 = Mathf.RoundToInt(32 - hh), y1 = Mathf.RoundToInt(32 + hh);
+                for (int y = y0; y <= y1; y++) Set(x, y, white);
+            }
+            // mute slash (red) — a thick 45° diagonal across the whole icon
+            for (int x = 8; x <= 54; x++)
+                for (int t = -3; t <= 3; t++) { Set(x, x + t, red); Set(x + 1, x + t, red); }
+            tex.SetPixels32(px);
+            tex.Apply();
+            return UnityEngine.Sprite.Create(tex, new Rect(0, 0, n, n), new Vector2(0.5f, 0.5f), 100f);
         }
 
         // Host speech bubble (S3, yellow bubble.png 9-slice) + rubric banner (S4). Both start hidden.
@@ -899,7 +1059,17 @@ namespace ThanksNoThanks
             Anchor(starR.rectTransform, new Vector2(0.95f, 0.5f), new Vector2(80, 80));
             _bannerText = NewText("BannerText", _bannerBand.transform, "", 82,
                 TextAnchor.MiddleCenter, Ink, _display);
-            Inset(_bannerText.rectTransform, 150f);   // clear the flourishes at both ends
+            // Asymmetric inset: clear the end flourishes horizontally (150) but only a slim top/bottom pad
+            // (24) — a uniform 150 inset on the 240-tall band collapses the text rect to a negative height,
+            // which is why the band rendered EMPTY (the founder «пустой баннер» bug). Best-fit so a long
+            // rubric («КРИЗИС СРЕДНЕГО ВОЗРАСТА! БЛИЦ!») wraps/shrinks fully inside the band.
+            var banRt = _bannerText.rectTransform;
+            banRt.anchorMin = Vector2.zero; banRt.anchorMax = Vector2.one;
+            banRt.offsetMin = new Vector2(150f, 24f);
+            banRt.offsetMax = new Vector2(-150f, -24f);
+            _bannerText.resizeTextForBestFit = true;
+            _bannerText.resizeTextMinSize = 28;
+            _bannerText.resizeTextMaxSize = 82;
             DisplayFx(_bannerText);
             _bannerRoot.SetActive(false);
         }
@@ -1167,7 +1337,7 @@ namespace ThanksNoThanks
             _tutorialText.text = text;
             _tutorialOverlay.transform.SetAsLastSibling();
             _tutorialOverlay.SetActive(true);
-            _game.Paused = true;
+            SyncPause();
         }
 
         private void DismissTutorial()
@@ -1175,7 +1345,7 @@ namespace ThanksNoThanks
             if (!_tutorialShowing) return;
             _tutorialShowing = false;
             _tutorialOverlay.SetActive(false);
-            _game.Paused = false;
+            SyncPause();
             // Root cause of the «one card late» founder bug: the 18/25/30 crossings happen MID-CARD
             // (inside Game.Tick), but the age-gated HUD reveal only ran on card-advance/state-change.
             // Refresh it NOW so the just-opened widget (money pill / energy / health bar) is visible
@@ -1229,6 +1399,7 @@ namespace ThanksNoThanks
                 _bannerRoot.SetActive(false);
             }
             if (!playing && _tutorialShowing) DismissTutorial();
+            if (!playing) { _bannerTimer.Hide(); _bannerRoot.SetActive(false); SyncPause(); }
             _wasPlaying = playing;
 
             if (playing)
@@ -1259,6 +1430,7 @@ namespace ThanksNoThanks
             // deliberately NOT touched here — it survives this same-frame advance to live out its ~2s.
             if (c != null && c.IsTimeline) ShowBanner(c);
             else _bannerTimer.Hide();
+            SyncPause();   // reconcile the beat pause NOW (a non-timeline card ends any prior beat)
             UpdateHudValues();
             ApplyAgeGates(_game.Age);
             if (c != null && isActiveAndEnabled)
@@ -1282,14 +1454,19 @@ namespace ThanksNoThanks
         private void ShowBanner(Card c)
             => ShowBannerText(HostContent.BannerFor(c.Id), muted: c.Id == HostContent.MutedBannerId);
 
-        // Show an arbitrary rubric-band caption (used by TIMELINE cards and the crisis CR00 banner).
+        // Show an arbitrary rubric-band caption as a brief BLOCKING beat (used by TIMELINE milestone cards
+        // and the crisis CR00 banner). The text is set BEFORE the reveal (never an empty band), the game is
+        // paused and the card/plates/timer are hidden this same frame, and it auto-advances on the ~1.5s
+        // banner clock (ReflectHostReveals) — card appears only once the beat clears (S4/S6). Never both up.
         private void ShowBannerText(string text, bool muted)
         {
             _bannerBand.color = muted ? CobaltDeep : Bulb;
             _bannerText.color = muted ? Muted : Ink;
             _bannerText.text = text;
             _bannerTimer.Show(text);
-            _bannerRoot.transform.SetAsLastSibling();   // draw over the card
+            _bannerRoot.transform.SetAsLastSibling();   // draw above the (now hidden) card
+            SyncPause();                                 // freeze the game for the beat
+            ReflectBannerBeat();                         // hide the card/plates/timer immediately
         }
 
         // Advance both host clocks (real-time) and mirror their visibility onto the widgets. Only visible
@@ -1297,7 +1474,8 @@ namespace ThanksNoThanks
         private void ReflectHostReveals(bool playing)
         {
             _bubbleTimer.Advance(Time.deltaTime);
-            _bannerTimer.Advance(Time.deltaTime);
+            _bannerTimer.Advance(Time.deltaTime);   // when this auto-hides, the banner beat ends
+            SyncPause();                            // Game.Paused tracks the beat (+ any tutorial)
 
             bool bub = playing && _bubbleTimer.Visible;
             if (_hostBubble.activeSelf != bub) _hostBubble.SetActive(bub);
@@ -1544,6 +1722,16 @@ namespace ThanksNoThanks
             rt.anchorMax = Vector2.one;
             rt.offsetMin = new Vector2(30f, 48f);    // left, bottom
             rt.offsetMax = new Vector2(-46f, -26f);  // right, top
+        }
+
+        // Text rect for the ENLARGED blitz plate: inset past the ~55px 9-slice corner so best-fit text lands
+        // inside the colored pill (with margin) rather than on the navy frame / off the pill entirely.
+        private static void CrisisPlateTextRect(RectTransform rt)
+        {
+            rt.anchorMin = Vector2.zero;
+            rt.anchorMax = Vector2.one;
+            rt.offsetMin = new Vector2(74f, 74f);    // left, bottom (> 55px pill inset + margin)
+            rt.offsetMax = new Vector2(-74f, -66f);  // right, top
         }
 
         // Anchor a rect at a normalized point of its parent with a fixed pixel size.
