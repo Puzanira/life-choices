@@ -227,5 +227,71 @@ namespace ThanksNoThanks.Tests.PlayMode
             Object.Destroy(go);
             yield return null;
         }
+
+        // Assert the actual GENERATED glyph mesh (best-fit honoured) of `t` sits inside `plate`'s rect shrunk
+        // by `pill` on all four sides — reads the drawn verts, so a vertical spill past the marquee fails even
+        // while a rect-corner check stays green. (Local copy of the ScreensConformanceTests helper.)
+        private static void AssertGeneratedInPill(Text t, Graphic plate, float pill, string what)
+        {
+            var settings = t.GetGenerationSettings(t.rectTransform.rect.size);
+            var tg = t.cachedTextGenerator;
+            tg.Populate(t.text, settings);
+            Assert.Greater(tg.characterCountVisible, 0, what + " renders glyphs (not empty/tofu-collapsed)");
+
+            float upp = 1f / t.pixelsPerUnit;
+            float lMinX = float.MaxValue, lMaxX = float.MinValue, lMinY = float.MaxValue, lMaxY = float.MinValue;
+            var verts = tg.verts;
+            for (int i = 0; i < verts.Count; i++)
+            {
+                var p = verts[i].position;
+                float x = p.x * upp, y = p.y * upp;
+                if (x < lMinX) lMinX = x; if (x > lMaxX) lMaxX = x;
+                if (y < lMinY) lMinY = y; if (y > lMaxY) lMaxY = y;
+            }
+
+            var tr = t.rectTransform;
+            var plateRt = plate.rectTransform;
+            var corners = new[]
+            {
+                new Vector3(lMinX, lMinY, 0f), new Vector3(lMinX, lMaxY, 0f),
+                new Vector3(lMaxX, lMinY, 0f), new Vector3(lMaxX, lMaxY, 0f),
+            };
+            float minX = float.MaxValue, maxX = float.MinValue, minY = float.MaxValue, maxY = float.MinValue;
+            foreach (var c in corners)
+            {
+                var pl = plateRt.InverseTransformPoint(tr.TransformPoint(c));
+                if (pl.x < minX) minX = pl.x; if (pl.x > maxX) maxX = pl.x;
+                if (pl.y < minY) minY = pl.y; if (pl.y > maxY) maxY = pl.y;
+            }
+            var pr = plateRt.rect;
+            const float tol = 1f;
+            Assert.GreaterOrEqual(minX, pr.xMin + pill - tol, what + " drawn glyphs within the marquee (left)");
+            Assert.LessOrEqual(maxX, pr.xMax - pill + tol, what + " drawn glyphs within the marquee (right)");
+            Assert.GreaterOrEqual(minY, pr.yMin + pill - tol, what + " drawn glyphs within the marquee (bottom)");
+            Assert.LessOrEqual(maxY, pr.yMax - pill + tol, what + " drawn glyphs within the marquee (top)");
+        }
+
+        // The deck's LONGEST question (67 chars) must best-fit ENTIRELY inside the card marquee — before the
+        // S15 fix it rendered too big and spilled above the top bulbs / below the bottom edge (best-fit only
+        // honoured width until _cardText.verticalOverflow was set to Truncate).
+        [UnityTest]
+        public IEnumerator CardMarquee_LongestQuestion_FitsInsideTheCard()
+        {
+            var driver = BootToAdult(out var go);
+            yield return ToAdult(driver);
+
+            var cardText = driver.CardRect.Find("CardText").GetComponent<Text>();
+            // The two longest real deck questions are 67/66 chars; use the longest verbatim.
+            cardText.text = "Ваш ребёнок вырос и больше не нуждается в помощи. Помочь всё равно?";
+            yield return null;                               // best-fit + layout settle
+            yield return null;
+
+            // The text rect is inset 120 from the card root; assert the drawn glyphs stay inside that interior
+            // (well within the bulb border) — pill = 120 against the card frame.
+            AssertGeneratedInPill(cardText, driver.CardFrameImage, 120f, "longest card question");
+
+            Object.Destroy(go);
+            yield return null;
+        }
     }
 }

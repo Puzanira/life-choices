@@ -1023,6 +1023,10 @@ namespace ThanksNoThanks
             _cardText.resizeTextForBestFit = true;   // auto-shrink long questions to fit the marquee
             _cardText.resizeTextMinSize = 30;
             _cardText.resizeTextMaxSize = 64;
+            // Truncate (not the NewText default Overflow) so best-fit honours HEIGHT too: a long question (the
+            // deck's longest is 67 chars) otherwise rendered too big and spilled above the top bulbs / below the
+            // bottom edge of the marquee. With Truncate it shrinks to fit inside the card (design-gate S15 fix).
+            _cardText.verticalOverflow = VerticalWrapMode.Truncate;
             DisplayFx(_cardText);
 
             // ---- BLOCK$ (S10): dim veil over the card + red block-tag banner (hidden by default) ----
