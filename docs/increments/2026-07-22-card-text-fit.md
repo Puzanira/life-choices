@@ -69,4 +69,4 @@
 ## 6. Playtest verdict
 
 `Playtest ok:` — (в составе общей пачки)
-`Landed:` —
+`Landed:` c638d83 (bookkeeping-хеш в отдельном коммите — handoff авторитетно)
