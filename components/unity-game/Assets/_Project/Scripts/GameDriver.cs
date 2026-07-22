@@ -27,6 +27,8 @@ namespace ThanksNoThanks
         private static readonly Color Muted = new(0.62f, 0.69f, 0.91f);        // #9fb0e8
         private static readonly Color TimerRed = new(0.910f, 0.267f, 0.227f);  // #e8443a
         private static readonly Color TimerHot = new(1f, 0.32f, 0.18f);        // low-time shift
+        private static readonly Color PlateMute = new(0.62f, 0.62f, 0.64f);    // S10: muted answer plates while BLOCK$-blocked
+        private static readonly Color CardBlockDim = new(0.52f, 0.54f, 0.60f); // S10: tint the card frame when unaffordable (dims to muted cobalt)
 
         // ---- age gates (canon opening ages, S5 tutorial) : purely visual reveal ----
         public const int MoneyAge = 18;
@@ -113,8 +115,8 @@ namespace ThanksNoThanks
         private Image _tutorialButton;
         private Text _tutorialButtonText;
 
-        // BLOCK$ (S10): dim veil over the card + red block-tag banner.
-        private GameObject _blockVeil;
+        // BLOCK$ (S10): the card is dimmed by tinting its OWN frame sprite (exact rounded silhouette — a
+        // separate veil rect showed straight edges cutting across the sunburst), plus a red block-tag banner.
         private GameObject _blockBanner;
         // BLOCK$ price sub-line on the card: «СТОИТ N ₽» when affordable, «НУЖНО N ₽» when blocked.
         // Above the veil (drawn after it), so it stays legible in the dimmed/blocked state too.
@@ -161,7 +163,6 @@ namespace ThanksNoThanks
         private Image _depressionVeil;     // near-opaque gray wash — alpha = DepressionGray/5 · max
         private Image _depressionGrain;    // faint static noise (runtime-seeded texture)
         private Image _depressionPulse;    // faint centre dot, visible only while DepressionPulsing
-        private Image[] _depPips;          // 5-step colour-progress readout
         private int _depMutterCount;       // muttering index (one muted host line per catch)
         // Depression colour tokens.
         private static readonly Color GrayWash = new(0.50f, 0.50f, 0.53f);   // the B&W wash tint
@@ -310,6 +311,62 @@ namespace ThanksNoThanks
             _gamePanel.SetActive(false);
             _finalePanel.SetActive(true);
             RenderFinaleTexts(n);
+        }
+
+        // ---- Design-gate Layer-3 screenshot hooks: render a state overlay in a representative pose over the
+        // live game panel and FREEZE the driver (disable Update) so the capture is stable. Visual-only — the
+        // pure Game is never touched; these only flip the driver's own overlay Images on for a screenshot. ----
+        public void DebugPreviewBurnout()
+        {
+            _openerPanel.SetActive(false); _finalePanel.SetActive(false); _gamePanel.SetActive(true);
+            _burnoutPlate.SetActive(true);
+            enabled = false;
+        }
+
+        public void DebugPreviewDepression()
+        {
+            _openerPanel.SetActive(false); _finalePanel.SetActive(false); _gamePanel.SetActive(true);
+            ApplyAgeGates(60f);                         // reveal the minimal live HUD behind the wash
+            _cardText.text = "Встать сегодня с кровати?";
+            _depressionGroup.SetActive(true);
+            _depressionVeil.color = new Color(GrayWash.r, GrayWash.g, GrayWash.b, 0.92f);   // match live ReflectDepression (S8 fix: heavier wash suppresses the sunburst)
+            _depressionGrain.color = new Color(1f, 1f, 1f, 0.06f);
+            _depressionPulse.gameObject.SetActive(true);
+            _depressionPulse.color = new Color(0.9f, 0.9f, 0.95f, 0.30f);
+            enabled = false;
+        }
+
+        public void DebugPreviewChildFlash()
+        {
+            _openerPanel.SetActive(false); _finalePanel.SetActive(false); _gamePanel.SetActive(true);
+            ApplyAgeGates(40f);
+            _cardText.text = "Обычная жизнь идёт…";
+            _childGroup.SetActive(true);
+            _childButtonImg.color = Bulb;                                  // lit gold
+            _childButtonImg.rectTransform.localScale = Vector3.one * 1.10f; // max flash pulse
+            _bubbleText.text = "Скорее!"; _hostBubble.SetActive(true);
+            enabled = false;
+        }
+
+        // S10 dim: tint the card's own marquee sprite (fill + bulbs + border) toward muted cobalt so the
+        // darkening follows the card's exact rounded silhouette — no overlay rectangle spilling onto the rays.
+        // The red banner + price plate are separate _cardRoot children and stay bright above the dimmed card.
+        private void SetCardBlockedDim(bool blocked)
+        {
+            var tint = blocked ? CardBlockDim : Color.white;
+            if (_cardFrame.color != tint) _cardFrame.color = tint;
+        }
+
+        public void DebugPreviewBlocked()
+        {
+            _openerPanel.SetActive(false); _finalePanel.SetActive(false); _gamePanel.SetActive(true);
+            ApplyAgeGates(58f);
+            _cardText.text = "Пора подлечиться!";
+            SetCardBlockedDim(true);
+            _blockBanner.SetActive(true);
+            ApplyPriceLabel(true, 100, blocked: true);
+            _yesPlate.color = PlateMute; _noPlate.color = PlateMute;
+            enabled = false;
         }
 
         // Set the three finale texts and size the story plate to its content (short story → compact plate).
@@ -542,6 +599,11 @@ namespace ThanksNoThanks
                 if (_balancerTrackImg.color != Color.white) _balancerTrackImg.color = Color.white;
                 if (_balancerMarkerImg.color != markerTint) _balancerMarkerImg.color = markerTint;
                 if (_burnoutPlate.activeSelf != _game.Burnout) _burnoutPlate.SetActive(_game.Burnout);
+                // S10: while the current card is BLOCK$-blocked, mute the two answer plates (the card veil
+                // dims the marquee, this dims the plates) so the whole board reads «недоступно».
+                var plateTint = _game.CurrentCardBlocked ? PlateMute : Color.white;
+                if (_yesPlate.color != plateTint) _yesPlate.color = plateTint;
+                if (_noPlate.color != plateTint) _noPlate.color = plateTint;
                 ReflectChildButton();               // reveal on MD02=ДА, light the bulb while flashing
                 // Age-gated reveals run every frame (SetActive is a no-op on same value): a widget
                 // opening MID-CARD (18/25/30 crossings) appears the moment its age is crossed instead
@@ -584,7 +646,7 @@ namespace ThanksNoThanks
             if (_childGroup != null) _childGroup.SetActive(false);
 
             // BLOCK$ visuals never apply during a crisis.
-            _blockVeil.SetActive(false);
+            SetCardBlockedDim(false);
             _blockBanner.SetActive(false);
             _cardPriceText.gameObject.SetActive(false);
             _cardPricePlate.gameObject.SetActive(false);
@@ -964,15 +1026,22 @@ namespace ThanksNoThanks
             DisplayFx(_cardText);
 
             // ---- BLOCK$ (S10): dim veil over the card + red block-tag banner (hidden by default) ----
-            _blockVeil = NewSolid("BlockVeil", _cardRoot, new Color(0.02f, 0.03f, 0.10f, 0.62f)).gameObject;
-            Stretch(_blockVeil.GetComponent<RectTransform>());
-            _blockBanner = NewSolid("BlockBanner", _cardRoot, TimerRed).gameObject;
-            Anchor(_blockBanner.GetComponent<RectTransform>(), new Vector2(0.5f, 0.5f), new Vector2(820, 150));
+            // No separate dim veil: the card is dimmed by tinting _cardFrame directly (SetCardBlockedDim) so
+            // the darkening follows the marquee's exact rounded silhouette — a rounded-rect overlay still showed
+            // straight edges cutting across the sunburst rays (design-gate S10 fix).
+            // Rounded red banner (bar-track 9-slice tinted red, navy-outlined white text) low on the card so
+            // the dimmed «Пора подлечиться!» question still reads above it (S10). One sentence-case line.
+            var blockBannerImg = NewSprite("BlockBanner", _cardRoot, Sprite("bar-track"));
+            blockBannerImg.type = Image.Type.Sliced;
+            blockBannerImg.color = new Color(0.90f, 0.18f, 0.14f);   // punchy saturated red (S10 banner)
+            _blockBanner = blockBannerImg.gameObject;
+            Anchor(blockBannerImg.rectTransform, new Vector2(0.5f, 0.22f), new Vector2(900, 132));
             var blockTxt = NewText("BlockText", _blockBanner.transform,
-                "КАК ЖАЛЬ, У ВАС НЕТ\nДЕНЕГ НА ЭТО!", 48, TextAnchor.MiddleCenter, Color.white, _display);
-            Stretch(blockTxt.rectTransform);
+                "Как жаль, у вас нет денег на это!", 40, TextAnchor.MiddleCenter, Color.white, _display);
+            blockTxt.horizontalOverflow = HorizontalWrapMode.Overflow;   // single line, best-fit shrinks to width
+            Inset(blockTxt.rectTransform, 40f);
+            blockTxt.resizeTextForBestFit = true; blockTxt.resizeTextMinSize = 20; blockTxt.resizeTextMaxSize = 44;
             DisplayFx(blockTxt);
-            _blockVeil.SetActive(false);
             _blockBanner.SetActive(false);
 
             // ---- BLOCK$ price sub-line (S10): the required amount, on any BLOCK$-priced card ----
@@ -985,9 +1054,9 @@ namespace ThanksNoThanks
             _cardPricePlate = NewSprite("CardPricePlate", _cardRoot, Sprite("bar-track"));
             _cardPricePlate.type = Image.Type.Sliced;
             _cardPricePlate.color = Ink;                     // dark navy plate (S10 block-tag)
-            Anchor(_cardPricePlate.rectTransform, new Vector2(0.5f, -0.10f), new Vector2(360, 76));
-            _cardPriceText = NewText("CardPrice", _cardRoot, "", 44, TextAnchor.MiddleCenter, Bulb, _display);
-            Anchor(_cardPriceText.rectTransform, new Vector2(0.5f, -0.10f), new Vector2(820, 76));
+            Anchor(_cardPricePlate.rectTransform, new Vector2(0.5f, -0.10f), new Vector2(360, 88));
+            _cardPriceText = NewText("CardPrice", _cardRoot, "", 40, TextAnchor.MiddleCenter, Bulb, _body);
+            Anchor(_cardPriceText.rectTransform, new Vector2(0.5f, -0.10f), new Vector2(820, 88));
             DisplayFx(_cardPriceText);
             _cardPricePlate.gameObject.SetActive(false);
             _cardPriceText.gameObject.SetActive(false);
@@ -1015,13 +1084,26 @@ namespace ThanksNoThanks
             DisplayFx(noText);
             _noPlateText = noText;
 
-            // ---- Burnout state plate (S7): dim-cobalt banner, shown only while Game.Burnout is on ----
-            _burnoutPlate = NewSolid("BurnoutPlate", _gamePanel.transform, CobaltDeep).gameObject;
-            Anchor(_burnoutPlate.GetComponent<RectTransform>(), new Vector2(0.5f, 0.70f), new Vector2(560, 96));
+            // ---- Burnout state (S7): full-screen dim-cobalt sunburst takeover, shown while Game.Burnout ----
+            // An OPAQUE deep-cobalt backing hides the show; a cobalt-tinted sunburst sprite over it paints the
+            // muted two-tone cobalt rays of the S7 mockup. Big yellow «ВЫГОРАНИЕ!» (red kant) centred + a
+            // white subtitle below, both fully on-screen.
+            var burnBack = NewSolid("BurnoutPlate", _gamePanel.transform, CobaltDeep);
+            Stretch(burnBack.rectTransform);
+            _burnoutPlate = burnBack.gameObject;
+            var burnRays = NewSprite("BurnoutRays", _burnoutPlate.transform, Sprite("sunburst-bg"));
+            Stretch(burnRays.rectTransform);
+            burnRays.color = new Color(Cobalt.r, Cobalt.g, Cobalt.b, 0.45f);   // lighter-cobalt rays over deep cobalt
             var burnoutTxt = NewText("BurnoutText", _burnoutPlate.transform,
-                "ВЫГОРАНИЕ", 44, TextAnchor.MiddleCenter, Muted, _display);
-            Stretch(burnoutTxt.rectTransform);
-            DisplayFx(burnoutTxt);
+                "ВЫГОРАНИЕ!", 150, TextAnchor.MiddleCenter, Energy, _display);
+            Anchor(burnoutTxt.rectTransform, new Vector2(0.5f, 0.52f), new Vector2(1560, 260));
+            burnoutTxt.resizeTextForBestFit = true; burnoutTxt.resizeTextMinSize = 60; burnoutTxt.resizeTextMaxSize = 130;
+            BurnoutTitleFx(burnoutTxt);
+            var burnoutSub = NewText("BurnoutSubtitle", _burnoutPlate.transform,
+                "крутите деньги — идёт туго • подышите рычагом", 40, TextAnchor.MiddleCenter, Color.white, _display);
+            Anchor(burnoutSub.rectTransform, new Vector2(0.5f, 0.34f), new Vector2(1500, 96));
+            burnoutSub.resizeTextForBestFit = true; burnoutSub.resizeTextMinSize = 24; burnoutSub.resizeTextMaxSize = 44;
+            DisplayFx(burnoutSub);
             _burnoutPlate.SetActive(false);
 
             // ---- Breakup notice: transient red «РАССТАЛИСЬ» plate (shown ~2s on a breakup) ----
@@ -1327,36 +1409,35 @@ namespace ThanksNoThanks
             Stretch(_depressionGrain.rectTransform);
             _depressionGrain.color = new Color(1f, 1f, 1f, 0.06f);
 
-            // «Собраться» label + hint (muted).
-            var label = NewText("DepLabel", _depressionGroup.transform,
-                "СОБРАТЬСЯ", 64, TextAnchor.MiddleCenter, new Color(0.85f, 0.85f, 0.88f), _display);
-            Anchor(label.rectTransform, new Vector2(0.5f, 0.72f), new Vector2(1200, 120));
-            var hint = NewText("DepHint", _depressionGroup.transform,
-                "жмите Enter точно по тусклому пульсу — медленно и метко", 30, TextAnchor.MiddleCenter,
-                new Color(0.7f, 0.7f, 0.74f), _body);
-            Anchor(hint.rectTransform, new Vector2(0.5f, 0.64f), new Vector2(1200, 60));
+            // «СОБРАТЬСЯ» button (S8): a near-white rounded pill low-centre with dark text (monochrome, so it
+            // reads on the gray wash). bar-track 9-slice = the filled rounded plate.
+            var gatherPlate = NewSprite("DepGatherPlate", _depressionGroup.transform, Sprite("bar-track"));
+            gatherPlate.type = Image.Type.Sliced;
+            gatherPlate.color = new Color(0.93f, 0.93f, 0.95f);
+            AnchorPx(gatherPlate.rectTransform, 960f, 968f, 420f, 116f);
+            var label = NewText("DepLabel", gatherPlate.transform,
+                "СОБРАТЬСЯ", 60, TextAnchor.MiddleCenter, new Color(0.10f, 0.10f, 0.12f), _display);
+            Inset(label.rectTransform, 40f);
+            label.resizeTextForBestFit = true; label.resizeTextMinSize = 30; label.resizeTextMaxSize = 60;
 
-            // Dim centre pulse — a faint soft dot, revealed only while the hit-window is open.
+            // «нажми в такт пульсу» hint (S8): on a DARK ink plate ABOVE the button so it is clearly READABLE
+            // (founder complaint — gray-on-gray was invisible). Light text on a near-opaque dark plate.
+            var hintPlate = NewSprite("DepHintPlate", _depressionGroup.transform, Sprite("bar-track"));
+            hintPlate.type = Image.Type.Sliced;
+            hintPlate.color = new Color(0.08f, 0.08f, 0.10f, 0.96f);
+            AnchorPx(hintPlate.rectTransform, 960f, 874f, 500f, 92f);
+            var hint = NewText("DepHint", hintPlate.transform,
+                "нажми в такт пульсу", 30, TextAnchor.MiddleCenter, new Color(0.96f, 0.96f, 0.98f), _display);
+            Inset(hint.rectTransform, 28f);
+            hint.resizeTextForBestFit = true; hint.resizeTextMinSize = 20; hint.resizeTextMaxSize = 30;
+
+            // Dim centre pulse — a faint soft dot below the card, revealed only while the hit-window is open.
             _depressionPulse = NewSprite("DepressionPulse", _depressionGroup.transform, Sprite("star-white"));
             _depressionPulse.color = new Color(0.9f, 0.9f, 0.95f, 0.28f);
-            Anchor(_depressionPulse.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(150, 150));
+            Anchor(_depressionPulse.rectTransform, new Vector2(0.5f, 0.40f), new Vector2(150, 150));
             _depressionPulse.gameObject.SetActive(false);
 
-            // 5-step colour-progress pips (a step fills gold per catch).
-            _depPips = new Image[Game.DepressionGraySteps];
-            const float pipW = 70f, gap = 26f;
-            float total = _depPips.Length * pipW + (_depPips.Length - 1) * gap;
-            for (int i = 0; i < _depPips.Length; i++)
-            {
-                var pip = NewSolid("DepPip" + i, _depressionGroup.transform, new Color(1f, 1f, 1f, 0.15f));
-                float x = -total / 2f + pipW / 2f + i * (pipW + gap);
-                var rt = pip.rectTransform;
-                rt.anchorMin = rt.anchorMax = new Vector2(0.5f, 0.34f);
-                rt.pivot = new Vector2(0.5f, 0.5f);
-                rt.anchoredPosition = new Vector2(x, 0f);
-                rt.sizeDelta = new Vector2(pipW, 22f);
-                _depPips[i] = pip;
-            }
+            // No colour-progress pips (S8 mockup has none) — the wash lightening alone reads the recovery.
 
             _depressionGroup.SetActive(false);
         }
@@ -1365,8 +1446,10 @@ namespace ThanksNoThanks
         // flickers between builds; stretched full-screen and drawn very faint.
         private static UnityEngine.Sprite MakeGrainSprite()
         {
-            const int n = 128;
-            var tex = new Texture2D(n, n, TextureFormat.RGBA32, false) { filterMode = FilterMode.Point, wrapMode = TextureWrapMode.Repeat };
+            const int n = 256;
+            // Bilinear (not Point) + a finer tile so the full-screen stretch reads as soft film-grain, NOT the
+            // big blocky squares a 128px point-sampled noise produced at 4K (design-gate S8 fix).
+            var tex = new Texture2D(n, n, TextureFormat.RGBA32, false) { filterMode = FilterMode.Bilinear, wrapMode = TextureWrapMode.Repeat };
             var rng = new System.Random(20260719);
             var px = new Color32[n * n];
             for (int i = 0; i < px.Length; i++)
@@ -1403,7 +1486,9 @@ namespace ThanksNoThanks
 
             float grayT = Mathf.Clamp01(_game.DepressionGray / (float)Game.DepressionGraySteps);
             var vc = _depressionVeil.color;
-            _depressionVeil.color = new Color(vc.r, vc.g, vc.b, grayT * 0.85f);   // 5 gray → 0.85, 0 → clear
+            // Heavier wash (0.92) so the colourful sunburst rays behind are strongly suppressed and the board
+            // reads as a monochrome «тёмная полоса», not muted-but-still-coloured bands (design-gate S8 fix).
+            _depressionVeil.color = new Color(vc.r, vc.g, vc.b, grayT * 0.92f);   // 5 gray → 0.92, 0 → clear
             _depressionGrain.color = new Color(1f, 1f, 1f, 0.06f * grayT);
 
             bool pulsing = _game.DepressionPulsing;
@@ -1414,10 +1499,6 @@ namespace ThanksNoThanks
                 _depressionPulse.color = new Color(0.9f, 0.9f, 0.95f, a);
                 _depressionPulse.rectTransform.localScale = Vector3.one * (1f + 0.10f * Mathf.Sin(Time.time * 4f));
             }
-
-            int restored = Game.DepressionGraySteps - _game.DepressionGray;   // filled steps of colour
-            for (int i = 0; i < _depPips.Length; i++)
-                _depPips[i].color = i < restored ? Bulb : new Color(1f, 1f, 1f, 0.15f);
         }
 
         private void OnMoneyOpened()  { if (!_moneyTutorialSeen)  ShowTutorial(MoneyTutorialText,  ref _moneyTutorialSeen); }
@@ -1526,7 +1607,7 @@ namespace ThanksNoThanks
             var c = _game.CurrentCard;
             _cardText.text = c != null ? c.Question : "";
             bool blocked = _game.CurrentCardBlocked;
-            _blockVeil.SetActive(blocked);        // S10: dim the card + red banner when unaffordable
+            SetCardBlockedDim(blocked);           // S10: dim the card (frame tint) + red banner when unaffordable
             _blockBanner.SetActive(blocked);
             RefreshPriceLabel();                  // S10: show the required amount on any BLOCK$ card
             // Rubric banner (S4): announce on a TIMELINE milestone; clear it on any non-milestone card
@@ -1607,7 +1688,7 @@ namespace ThanksNoThanks
                 return;
             }
             int p = Mathf.RoundToInt((float)price);
-            _cardPriceText.text = (blocked ? "НУЖНО " : "СТОИТ ") + p + " ₽";
+            _cardPriceText.text = (blocked ? "цена " : "СТОИТ ") + p + " ₽";
             _cardPriceText.color = blocked ? TextLight : Bulb;
 
             // Size the text rect to its content, then wrap the dark plate around it (with padding) so the
@@ -1799,6 +1880,17 @@ namespace ThanksNoThanks
             var sh = g.gameObject.AddComponent<Shadow>();
             sh.effectColor = new Color(0f, 0f, 0f, 0.32f);
             sh.effectDistance = new Vector2(0f, -6f);
+        }
+
+        // Burnout title (S7): yellow letters with a RED kant (outline) + a soft drop shadow (mockup).
+        private static void BurnoutTitleFx(Graphic g)
+        {
+            var o = g.gameObject.AddComponent<Outline>();
+            o.effectColor = new Color(0.847f, 0.157f, 0.078f, 1f);   // red outline
+            o.effectDistance = new Vector2(5f, -5f);
+            var sh = g.gameObject.AddComponent<Shadow>();
+            sh.effectColor = new Color(0f, 0f, 0f, 0.35f);
+            sh.effectDistance = new Vector2(0f, -8f);
         }
 
         private static void Stretch(RectTransform rt)

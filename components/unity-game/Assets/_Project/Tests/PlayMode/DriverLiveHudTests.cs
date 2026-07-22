@@ -65,10 +65,10 @@ namespace ThanksNoThanks.Tests.PlayMode
         }
 
         [UnityTest]
-        public IEnumerator PriceLine_Blocked_RealCard_ShowsНУЖНО_WithBanner()
+        public IEnumerator PriceLine_Blocked_RealCard_Showsцена_WithBanner()
         {
             // Broke path: a REAL BLOCK$ card (MD03, 60₽) is drawn while money < price → the on-card price
-            // line reads «НУЖНО 60 ₽» and the S10 block banner is up. Asserts the actual Text, via the
+            // line reads «цена 60 ₽» (S10 mockup wording) and the S10 block banner is up. Asserts the Text via the
             // live flow (StartLife → Advance → CardChanged → OnCardChanged), not a debug setter.
             var driver = Boot(out var go, out var fake);
             yield return null;                           // Awake + Start (CSV game wired)
@@ -81,7 +81,7 @@ namespace ThanksNoThanks.Tests.PlayMode
             Assert.IsTrue(driver.Game.CurrentCardBlocked, "drawn while broke → blocked");
             Assert.IsTrue(driver.CardPriceText.gameObject.activeSelf, "price line shown on a blocked BLOCK$ card");
             StringAssert.Contains("60", driver.CardPriceText.text, "shows the required amount");
-            StringAssert.Contains("НУЖНО", driver.CardPriceText.text, "blocked wording");
+            StringAssert.Contains("цена", driver.CardPriceText.text, "blocked wording (S10: «цена N ₽»)");
             Assert.IsTrue(driver.BlockBanner.activeSelf, "S10 block banner is up alongside the price");
 
             Object.Destroy(go);
