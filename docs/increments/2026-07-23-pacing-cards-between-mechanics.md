@@ -78,5 +78,5 @@ Founder review — плейтест по готовому.
 
 ## 6. Playtest verdict
 
-`Playtest ok:` —
-`Landed:` —
+`Playtest ok:` — (ждём плейтест основательницы)
+`Landed:` 5f68660 (bookkeeping-хеш в отдельном коммите — handoff авторитетно)
