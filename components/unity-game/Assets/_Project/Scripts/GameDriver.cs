@@ -323,7 +323,7 @@ namespace ThanksNoThanks
             enabled = false;
         }
 
-        public void DebugPreviewDepression()
+        public void DebugPreviewDepression(bool lit = false)
         {
             _openerPanel.SetActive(false); _finalePanel.SetActive(false); _gamePanel.SetActive(true);
             ApplyAgeGates(60f);                         // reveal the minimal live HUD behind the wash
@@ -332,7 +332,17 @@ namespace ThanksNoThanks
             _depressionVeil.color = new Color(GrayWash.r, GrayWash.g, GrayWash.b, 0.92f);   // match live ReflectDepression (S8 fix: heavier wash suppresses the sunburst)
             _depressionGrain.color = new Color(1f, 1f, 1f, 0.06f);
             _depressionPulse.gameObject.SetActive(true);
-            _depressionPulse.color = new Color(0.9f, 0.9f, 0.95f, 0.30f);
+            // Freeze the big indicator in its lit («жми!») or resting (dim-but-visible) pose for a stable capture.
+            if (lit)
+            {
+                _depressionPulse.color = Color.white;
+                _depressionPulse.rectTransform.localScale = Vector3.one * 1.28f;
+            }
+            else
+            {
+                _depressionPulse.color = new Color(0.90f, 0.90f, 0.97f, 0.34f);
+                _depressionPulse.rectTransform.localScale = Vector3.one * 0.86f;
+            }
             enabled = false;
         }
 
@@ -1198,14 +1208,26 @@ namespace ThanksNoThanks
             bubbleImg.type = Image.Type.Sliced;   // 9-slice border 70/120/70/70 (import already set)
             bubbleImg.color = Energy;             // saturated bulb-gold (#f8d24c) per C1/S3 — not pale cream
             _hostBubble = bubbleImg.gameObject;
-            Anchor(bubbleImg.rectTransform, new Vector2(0.85f, 0.42f), new Vector2(360, 220));
+            // Taller (was 360×220 → 380×240) so a long host line has vertical room; width stays ~380 so the
+            // left edge (≈1442px) still clears the card's right edge (≈1430px) and never covers it.
+            Anchor(bubbleImg.rectTransform, new Vector2(0.85f, 0.42f), new Vector2(384, 330));
             _bubbleText = NewText("HostBubbleText", _hostBubble.transform, "", 34,
                 TextAnchor.MiddleCenter, Ink, _display);
-            // Inset asymmetrically: leave the bottom «tail» (120px border) clear of text.
+            // The «bubble» sprite is 9-slice border 70/120/70/70 — the FLAT gold fill starts ~70px inside the
+            // rect (rounded corners + outline live in that border), and the bottom 120px is the tail. So the
+            // text rect must inset PAST the border on every side, or glyphs spill onto the corners/outline
+            // (S3 playtest fix — the earlier 36/36/30 inset let the em-dash float outside the bubble).
             var brt = _bubbleText.rectTransform;
             brt.anchorMin = Vector2.zero; brt.anchorMax = Vector2.one;
-            brt.offsetMin = new Vector2(34, 66);   // left, bottom (above the tail)
-            brt.offsetMax = new Vector2(-34, -28);  // right, top
+            brt.offsetMin = new Vector2(76, 128);   // left, bottom (clear of the tail's 120px border)
+            brt.offsetMax = new Vector2(-76, -76);   // right, top (clear of the 70px border + rounded corners)
+            // Best-fit honouring HEIGHT (Truncate, not the NewText default Overflow) so the loudest host
+            // exclamations (deck lines up to ~50 chars) SHRINK to sit fully inside the flat gold fill.
+            _bubbleText.resizeTextForBestFit = true;
+            _bubbleText.resizeTextMinSize = 15;
+            _bubbleText.resizeTextMaxSize = 34;
+            _bubbleText.horizontalOverflow = HorizontalWrapMode.Wrap;
+            _bubbleText.verticalOverflow = VerticalWrapMode.Truncate;
             _hostBubble.SetActive(false);
 
             // ---- Rubric banner (S4): a bold gold band over the card's upper area, static flourish ----
@@ -1435,10 +1457,14 @@ namespace ThanksNoThanks
             Inset(hint.rectTransform, 28f);
             hint.resizeTextForBestFit = true; hint.resizeTextMinSize = 20; hint.resizeTextMaxSize = 30;
 
-            // Dim centre pulse — a faint soft dot below the card, revealed only while the hit-window is open.
+            // BIG breathing pulse indicator (S8 playtest rework): a large star that is ALWAYS visible during
+            // depression and BLINKS on the steady beat — bright + scaled-up flash while the hit-window is open
+            // («жми!»), dim-but-visible resting between (never fully gone), so the player sees the rhythm and taps
+            // in time. Driven every frame in ReflectDepression. High contrast on the gray wash. (Was a faint 150px
+            // dot shown ONLY on the ~0.6s window — «вообще не видно, как дышать».)
             _depressionPulse = NewSprite("DepressionPulse", _depressionGroup.transform, Sprite("star-white"));
-            _depressionPulse.color = new Color(0.9f, 0.9f, 0.95f, 0.28f);
-            Anchor(_depressionPulse.rectTransform, new Vector2(0.5f, 0.40f), new Vector2(150, 150));
+            _depressionPulse.color = new Color(0.92f, 0.92f, 0.98f, 0.32f);
+            Anchor(_depressionPulse.rectTransform, new Vector2(0.5f, 0.44f), new Vector2(280, 280));
             _depressionPulse.gameObject.SetActive(false);
 
             // No colour-progress pips (S8 mockup has none) — the wash lightening alone reads the recovery.
@@ -1495,13 +1521,22 @@ namespace ThanksNoThanks
             _depressionVeil.color = new Color(vc.r, vc.g, vc.b, grayT * 0.92f);   // 5 gray → 0.92, 0 → clear
             _depressionGrain.color = new Color(1f, 1f, 1f, 0.06f * grayT);
 
+            // The big star is ALWAYS visible while depressed (never fully gone) and BLINKS on the beat: a bright,
+            // scaled-up FLASH while the hit-window is open («жми!»), and a dim-but-clearly-visible resting breath
+            // between beats — so the steady tempo reads as an obvious «tap on each blink» affordance (S8 rework).
             bool pulsing = _game.DepressionPulsing;
-            if (_depressionPulse.gameObject.activeSelf != pulsing) _depressionPulse.gameObject.SetActive(pulsing);
+            if (!_depressionPulse.gameObject.activeSelf) _depressionPulse.gameObject.SetActive(true);
             if (pulsing)
             {
-                float a = 0.22f + 0.14f * Mathf.Sin(Time.time * 4f);   // slow faint throb
-                _depressionPulse.color = new Color(0.9f, 0.9f, 0.95f, a);
-                _depressionPulse.rectTransform.localScale = Vector3.one * (1f + 0.10f * Mathf.Sin(Time.time * 4f));
+                float a = 0.90f + 0.10f * Mathf.Sin(Time.time * 12f);           // near-full bright flash
+                _depressionPulse.color = new Color(1f, 1f, 1f, Mathf.Clamp01(a));
+                _depressionPulse.rectTransform.localScale = Vector3.one * 1.28f; // scaled UP on «жми!»
+            }
+            else
+            {
+                float a = 0.32f + 0.08f * Mathf.Sin(Time.time * 3f);            // dim but visible resting breath
+                _depressionPulse.color = new Color(0.90f, 0.90f, 0.97f, a);
+                _depressionPulse.rectTransform.localScale = Vector3.one * (0.86f + 0.03f * Mathf.Sin(Time.time * 3f));
             }
         }
 

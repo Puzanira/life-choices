@@ -116,5 +116,65 @@ namespace ThanksNoThanks.Tests.PlayMode
             Object.Destroy(go);
             yield return null;
         }
+
+        // Reach depression through the real driver (age → blitz → clean tail → depression), clearing the
+        // banner beats. Leaves the game AT REST (no pulse lit yet). Mirrors the boot in the test above.
+        private IEnumerator ReachDepressionAtRest(GameDriver driver, Game g, PlayFakeInputSource fake)
+        {
+            driver.DebugReplaceGame(g);
+            fake.Confirm();
+            g.HandleInput(GameInput.AnswerNo);
+            int guard = 0;
+            while (guard++ < 12000 && g.Phase == CrisisPhase.None && g.State == GameState.Playing)
+            {
+                if (driver.TutorialShowing) { fake.Confirm(); yield return null; continue; }
+                g.Tick(0.2f);
+            }
+            Assert.AreEqual(CrisisPhase.Blitz, g.Phase, "reached the crisis blitz");
+            driver.DebugPumpHost(GameDriver.BannerSeconds + 0.1f);
+            for (int i = 0; i < 5; i++) fake.Yes();
+            Assert.IsTrue(g.InDepression, "the crisis tail entered depression");
+            driver.DebugPumpHost(GameDriver.BannerSeconds + 0.1f);   // clear the «ТЁМНАЯ ПОЛОСА…» beat
+            yield return null;                                       // one Update → ReflectDepression, resting
+        }
+
+        // FIX 2 (S8 rework): the depression indicator is a BIG star that is ALWAYS visible during depression and
+        // BLINKS on the steady beat — dim-but-visible at rest, bright + scaled-up while the hit-window is open.
+        [UnityTest]
+        public IEnumerator DepressionIndicator_AlwaysVisibleAndLarge_FlashesBiggerOnBeat()
+        {
+            var driver = Boot(out var go, out var fake);
+            yield return null;
+
+            var g = DepressionGame(Csv());
+            yield return ReachDepressionAtRest(driver, g, fake);
+
+            Assert.IsTrue(g.InDepression, "in depression");
+            Assert.IsFalse(g.DepressionPulsing, "resting between beats (no pulse lit yet)");
+
+            var ind = driver.DepressionPulseIndicator;
+            // ALWAYS visible — even at rest, the indicator is on (was hidden between the rare old flashes).
+            Assert.IsTrue(ind.gameObject.activeInHierarchy, "indicator is visible at rest (always on while depressed)");
+            // BIG: drawn size (rect × scale) is well above a floor.
+            float restDrawn = ind.rectTransform.rect.width * ind.rectTransform.localScale.x;
+            Assert.Greater(restDrawn, 220f, "indicator is BIG at rest (≥220px drawn)");
+            // VISIBLE: alpha above a floor (never fully gone).
+            float restAlpha = ind.color.a;
+            Assert.Greater(restAlpha, 0.18f, "indicator is dim-but-visible at rest (alpha floor)");
+
+            // Open the beat → the indicator FLASHES brighter and scales UP («жми!»).
+            g.Tick(2.5f);
+            yield return null;
+            Assert.IsTrue(g.DepressionPulsing, "the beat is lit");
+            float litDrawn = ind.rectTransform.rect.width * ind.rectTransform.localScale.x;
+            float litAlpha = ind.color.a;
+            Assert.Greater(litAlpha, restAlpha, "the indicator flashes BRIGHTER on the beat");
+            Assert.Greater(litDrawn, restDrawn, "the indicator scales UP on the beat");
+            Assert.Greater(litAlpha, 0.7f, "the lit flash is high-contrast/bright");
+            Assert.Greater(litDrawn, 300f, "the lit flash is genuinely large (≥300px drawn)");
+
+            Object.Destroy(go);
+            yield return null;
+        }
     }
 }

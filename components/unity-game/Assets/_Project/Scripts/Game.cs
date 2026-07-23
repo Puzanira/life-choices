@@ -126,9 +126,12 @@ namespace ThanksNoThanks
         // Here the pulse is SLOW and SPARSE — wait and catch, don't mash. All values are dt/seed-injected.
         public const double DepressionChance = 0.5;        // per-life probability the crisis tail → depression
         public const int DepressionGraySteps = 5;          // 5 gray steps: 5 = full B&W, 0 = full colour (exit)
-        public const float DepressionPulseIntervalMin = 2.5f; // dim pulse appears rarely — lower bound (~2.5s)
-        public const float DepressionPulseIntervalMax = 3f;   // …upper bound (~3s), seeded/injectable roll
-        public const float DepressionPulseWindow = 0.6f;   // hit-window while the dim pulse is lit (~0.6s)
+        // STEADY metronome (S8 playtest fix): the pulse is a predictable beat, not a random rare flash, so the
+        // player can «дышать в такт». Equal min=max → a fixed ~1.5s tempo (was a random 2.5–3s wait, which read
+        // as «пульс совсем не виден»). The window is widened to ~0.75s for fairness. All values are dt/seed-injected.
+        public const float DepressionPulseIntervalMin = 1.5f; // steady beat — lower bound (~1.5s)
+        public const float DepressionPulseIntervalMax = 1.5f; // …equal upper bound → a fixed, predictable tempo
+        public const float DepressionPulseWindow = 0.75f;  // hit-window while the pulse is lit (~0.75s, widened for fairness)
         // Anti-mash lockout: any press that ISN'T a clean catch arms this; while it's up a press inside the
         // window is discarded (still a miss). A masher re-arms it every press, so a rapid/continuous press
         // can never coincide with an unlocked window — mashing can't win (canon «не долбить, а ловить»).

@@ -1,9 +1,11 @@
 using System.Collections;
 using System.Collections.Generic;
+using System.Linq;
 using NUnit.Framework;
 using ThanksNoThanks;
 using UnityEngine;
 using UnityEngine.TestTools;
+using UnityEngine.UI;
 
 namespace ThanksNoThanks.Tests.PlayMode
 {
@@ -147,6 +149,78 @@ namespace ThanksNoThanks.Tests.PlayMode
             Assert.IsFalse(driver.HostBannerVisible, "banner cleared on restart");
             Assert.IsFalse(driver.HostBubble.activeSelf, "bubble GO hidden on restart");
             Assert.IsFalse(driver.HostBanner.activeSelf, "banner GO hidden on restart");
+
+            Object.Destroy(go);
+            yield return null;
+        }
+
+        // ---- S3 bubble overflow (playtest fix): the LONGEST host exclamation must sit fully INSIDE the yellow
+        // bubble, with the bottom «tail» kept clear. Best-fit + Truncate shrink the line to the text rect; the
+        // text rect is inset inside the bubble body above the tail. Reads the REAL drawn glyph mesh (best-fit
+        // honoured), same generated-glyph pattern as AssertGeneratedInPill — so a fixed-size Overflow regression
+        // (glyphs spilling past the text rect) fails RED.
+        private static void AssertGlyphsFitTextRect(Text t, string what)
+        {
+            var settings = t.GetGenerationSettings(t.rectTransform.rect.size);
+            var tg = t.cachedTextGenerator;
+            tg.Populate(t.text, settings);
+            Assert.Greater(tg.characterCountVisible, 0, what + " renders glyphs (not empty/tofu-collapsed)");
+
+            float upp = 1f / t.pixelsPerUnit;
+            var rect = t.rectTransform.rect;
+            const float tol = 1f;
+            var verts = tg.verts;
+            for (int i = 0; i < verts.Count; i++)
+            {
+                var p = verts[i].position;
+                float x = p.x * upp, y = p.y * upp;
+                Assert.GreaterOrEqual(x, rect.xMin - tol, what + " drawn glyphs inside the bubble text area (left)");
+                Assert.LessOrEqual(x, rect.xMax + tol, what + " drawn glyphs inside the bubble text area (right)");
+                Assert.GreaterOrEqual(y, rect.yMin - tol, what + " drawn glyphs inside the bubble text area (bottom, above the tail)");
+                Assert.LessOrEqual(y, rect.yMax + tol, what + " drawn glyphs inside the bubble text area (top)");
+            }
+        }
+
+        [UnityTest]
+        public IEnumerator Bubble_LongestHostLine_FitsInsideBubble_TailClear()
+        {
+            var driver = Boot(out var go, out _);
+            yield return null;                                  // Start builds the HUD (bubble + text)
+
+            // The actual longest host line in the shipping deck (≤50 chars, e.g. «Уже умеет заказать кофе…»).
+            var csv = Resources.Load<TextAsset>("scenes");
+            Assert.IsNotNull(csv, "Resources/scenes present");
+            string longest = CardLoader.ParseAll(csv.text)
+                .SelectMany(c => new[] { c.HostYes, c.HostNo })
+                .Where(s => !string.IsNullOrEmpty(s))
+                .OrderByDescending(s => s.Length)
+                .First();
+            Assert.GreaterOrEqual(longest.Length, 46, "picked a genuinely long host exclamation");
+
+            var bubbleText = driver.HostBubbleText;
+            var bubbleRt = driver.HostBubble.GetComponent<RectTransform>();
+            driver.HostBubble.SetActive(true);
+            bubbleText.text = longest;
+            yield return null;                                  // let the layout settle before reading the mesh
+
+            // The drawn glyphs of the longest line fit the bubble's text area (best-fit shrinks it to fit HEIGHT
+            // too via Truncate) — nothing spills outside the yellow bubble.
+            AssertGlyphsFitTextRect(bubbleText, "longest host line «" + longest + "»");
+
+            // …and the text RECT itself sits inside the bubble's FLAT gold fill. The «bubble» sprite is 9-slice
+            // border 70/120/70/70, so the fill starts 70px in on left/right/top and 120px up from the bottom
+            // (the tail + rounded corners live in that border). Glyphs ⊆ text rect ⊆ fill ⇒ nothing spills onto
+            // the outline/corners/tail (the earlier fix passed the rect check yet the em-dash floated outside,
+            // because the rect stuck out past the fill — this guards that).
+            var tc = new Vector3[4];
+            bubbleText.rectTransform.GetWorldCorners(tc);   // 0=BL,1=TL,2=TR,3=BR
+            var br = bubbleRt.rect;
+            float L = bubbleRt.InverseTransformPoint(tc[0]).x, R = bubbleRt.InverseTransformPoint(tc[3]).x;
+            float B = bubbleRt.InverseTransformPoint(tc[0]).y, T = bubbleRt.InverseTransformPoint(tc[1]).y;
+            Assert.GreaterOrEqual(L, br.xMin + 70f, "text left inside the bubble fill (past the 70px border/corner)");
+            Assert.LessOrEqual(R, br.xMax - 70f, "text right inside the bubble fill (em-dash can't float outside)");
+            Assert.LessOrEqual(T, br.yMax - 70f, "text top inside the fill (clears the rounded top corners)");
+            Assert.GreaterOrEqual(B, br.yMin + 120f, "text bottom clears the tail (120px border)");
 
             Object.Destroy(go);
             yield return null;

@@ -7,8 +7,8 @@ using UnityEngine;
 namespace ThanksNoThanks.Tests
 {
     /// <summary>
-    /// Depression «тёмная полоса» (CR09): the RANDOM_TRIGGER tail after the crisis, the slow-pulse
-    /// «собраться» mini-game (~2.5–3s interval, ~0.6s window) that is DELIBERATELY the OPPOSITE of the
+    /// Depression «тёмная полоса» (CR09): the RANDOM_TRIGGER tail after the crisis, the steady-pulse
+    /// «собраться» mini-game (~1.5s metronome interval, ~0.75s window) that is DELIBERATELY the OPPOSITE of the
     /// energy breathing, the ±color-step progress, the anti-mash rule (mashing never wins), the 5-catch
     /// exit, the scales-pause, the NO-death contract, that CONFIRM is the catch (not a restart), and the
     /// restart reset. Time / the pulse interval / the entry roll are injected — nothing races the wall clock.
@@ -177,10 +177,10 @@ namespace ThanksNoThanks.Tests
             g.Tick(0.11f);
             Assert.IsTrue(g.DepressionPulsing, "the dim pulse opens after ~2.5s");
 
-            g.Tick(0.5f);
-            Assert.IsTrue(g.DepressionPulsing, "the ~0.6s window is still open at 0.5s");
-            g.Tick(0.11f);
-            Assert.IsFalse(g.DepressionPulsing, "the window closes after ~0.6s");
+            g.Tick(0.7f);
+            Assert.IsTrue(g.DepressionPulsing, "the ~0.75s window is still open at 0.7s");
+            g.Tick(0.1f);
+            Assert.IsFalse(g.DepressionPulsing, "the window closes after ~0.75s");
         }
 
         // ---- hit in window → +1 color step ----
@@ -222,7 +222,7 @@ namespace ThanksNoThanks.Tests
 
             g.Tick(2.5f);                                  // next pulse opens
             Assert.IsTrue(g.DepressionPulsing);
-            g.Tick(0.7f);                                  // let it close UNPRESSED (canon «не нажал в окне»)
+            g.Tick(0.8f);                                  // let it close UNPRESSED (canon «не нажал в окне»)
             Assert.IsFalse(g.DepressionPulsing);
             Assert.AreEqual(gray + 1, g.DepressionGray, "a pulse missed by inaction slips colour back a step");
         }
