@@ -77,6 +77,7 @@ namespace ThanksNoThanks
         // ---- child button (opens on MD02=ДА, not age-gated; flashes on the signal-response window) ----
         private GameObject _childGroup;    // whole widget; shown while Game.ChildOpen, hidden after LT04
         private Image _childButtonImg;     // the «lit» bulb — bright while ChildFlashing, dim otherwise
+        private Image _childGlow;          // bright pulsing halo behind the button — only while ChildFlashing (visibility fix)
 
         // Card
         private RectTransform _cardRoot;
@@ -822,9 +823,20 @@ namespace ThanksNoThanks
             bool lit = _game.ChildFlashing;
             var tint = lit ? Bulb : CobaltDeep;
             if (_childButtonImg.color != tint) _childButtonImg.color = tint;
+            // Unmissable flash: the button flares gold and jumps ~1.3× (was a barely-there 1.1× tint pulse),
+            // and the halo behind it flares bright and breathes. At rest the halo is fully transparent and the
+            // button sits at its idle size — so the «жми Enter по вспышке» beat is impossible to miss.
             _childButtonImg.rectTransform.localScale = lit
-                ? Vector3.one * (1f + 0.10f * Mathf.Sin(Time.time * 11f))
+                ? Vector3.one * (1.28f + 0.10f * Mathf.Sin(Time.time * 11f))
                 : Vector3.one;
+            if (_childGlow != null)
+            {
+                float a = lit ? 0.55f + 0.30f * Mathf.Sin(Time.time * 11f) : 0f;
+                _childGlow.color = new Color(Bulb.r, Bulb.g, Bulb.b, a);
+                _childGlow.rectTransform.localScale = lit
+                    ? Vector3.one * (1.05f + 0.18f * Mathf.Sin(Time.time * 11f))
+                    : Vector3.one;
+            }
         }
 
         // Transient «РАССТАЛИСЬ» plate: advance its own ~2s clock and mirror visibility (only while
@@ -1320,6 +1332,13 @@ namespace ThanksNoThanks
             _childGroup = NewGroup("Child", _hudRow.transform);
             AnchorPx(_childGroup.GetComponent<RectTransform>(), cx, cyTop, 96f, 96f);
 
+            // Bright halo BEHIND the button (created first → lower sibling → drawn behind). Invisible at rest,
+            // it flares gold and pulses while ChildFlashing so the «жми Enter по вспышке» window is unmissable
+            // (founder playtest: the subtle gold-tint pulse read as «ничего не связано с ребёнком»).
+            _childGlow = NewSprite("ChildGlow", _childGroup.transform, Sprite("star-white"));
+            _childGlow.color = new Color(Bulb.r, Bulb.g, Bulb.b, 0f);
+            Anchor(_childGlow.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(190, 190));
+
             _childButtonImg = NewSprite("Button", _childGroup.transform, Sprite("marquee-bulb"));
             _childButtonImg.color = CobaltDeep;   // idle (unlit)
             Anchor(_childButtonImg.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(88, 88));
@@ -1652,7 +1671,11 @@ namespace ThanksNoThanks
             // Rubric banner (S4): announce on a TIMELINE milestone; clear it on any non-milestone card
             // (so it never lingers onto the card after the milestone). The bubble is answer-driven and
             // deliberately NOT touched here — it survives this same-frame advance to live out its ~2s.
-            if (c != null && c.IsTimeline) ShowBanner(c);
+            // MD02 «РЕБЁНОК! Завести?» is the one timeline card whose banner («ПОПОЛНЕНИЕ!» — a newborn
+            // arrived) must NOT fire on DRAW: it would announce the baby BEFORE you answer «завести?»
+            // (founder playtest: «пополнение вышло раньше, чем случилось»). Its announce comes AFTER ДА via
+            // the OpenChild hint (OnChildOpened). Every other timeline card still announces on draw.
+            if (c != null && c.IsTimeline && c.Id != "MD02") ShowBanner(c);
             else _bannerTimer.Hide();
             SyncPause();   // reconcile the beat pause NOW (a non-timeline card ends any prior beat)
             UpdateHudValues();
