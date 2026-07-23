@@ -206,9 +206,9 @@ namespace ThanksNoThanks
         // substrings to identify the energy/health hints; a collision would misidentify this one.
         private const string RelationshipsTutorialText =
             "ПЕРВАЯ ЛЮБОВЬ!\n\n" +
-            "Появился БАЛАНСИР ОТНОШЕНИЙ — и он всё время сползает вниз.\n" +
-            "Держите маркер в зоне: ↑ тянет вверх, ↓ вниз.\n\n" +
-            "Упустите надолго — расстанетесь. Переусердствуете — ссоры.";
+            "Появился БАЛАНСИР ОТНОШЕНИЙ — маркер всё время сползает ВНИЗ.\n" +
+            "ДЕРЖИТЕ ↑, чтобы удержать его в зелёной зоне (↓ — опустить).\n\n" +
+            "Упадёт в КРАСНУЮ надолго — расстанетесь. Задушите вверху — ссоры.";
 
         private const string EnergyTutorialText =
             "ПЕРВАЯ УСТАЛОСТЬ!\n\n" +

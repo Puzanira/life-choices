@@ -153,9 +153,10 @@ namespace ThanksNoThanks.Tests
         }
 
         [Test]
-        public void AxisMagnitude_IsAboutOnePointFivePerSecond()
+        public void AxisMagnitude_IsAboutFourPerSecond()
         {
-            // Isolate the axis: (Δwith ↑) − (Δwithout) over the same window ≈ +1.5%/s × window.
+            // Isolate the axis: (Δwith ↑) − (Δwithout) over the same window ≈ +4%/s × window (bumped from 1.5
+            // so «держу ↑» visibly moves the marker — founder playtest 2026-07-23).
             int WithoutAxis()
             {
                 var g = NewGame(() => false, Plain("A", 21), Plain("L", 90));
@@ -172,8 +173,8 @@ namespace ThanksNoThanks.Tests
                 for (int i = 0; i < 8; i++) { Up(g); g.Tick(0.5f); }
                 return g.Scales.Relationships - r0;   // ≈ +3.6
             }
-            int axisOnly = WithUp() - WithoutAxis();   // ≈ 6 over 4s
-            Assert.That(axisOnly, Is.InRange(5, 7), "the ↑ pull alone is ≈1.5%/s (≈6% over 4s)");
+            int axisOnly = WithUp() - WithoutAxis();   // ≈ 16 over 4s (4%/s)
+            Assert.That(axisOnly, Is.InRange(14, 18), "the ↑ pull alone is ≈4%/s (≈16% over 4s)");
         }
 
         [Test]
@@ -196,19 +197,19 @@ namespace ThanksNoThanks.Tests
             Assert.AreEqual(r0, g.Scales.Relationships, "↑ inert while paused");
         }
 
-        // ================================================================ breakup (<40 cumulative → reset)
+        // ================================================================ breakup (RED zone <15 cumulative → reset)
 
         [Test]
         public void Breakup_AfterCumulativeBelowZone_ResetsPartner_NoDeath()
         {
-            var deck = new List<Card> { Starter(), SetRelNo("HIT", 21, 35) };
+            var deck = new List<Card> { Starter(), SetRelNo("HIT", 21, 12) };
             deck.AddRange(AdultFiller());        // plenty of neutral cards so the run doesn't end first
             var g = new Game(deck, coin: () => false);
             g.StartLife(); No(g);
             g.Tick(2f);                          // age → 21, balancer open
             Assert.IsTrue(g.RelationshipsOpen);
-            No(g);                               // HIT → relationships set to 35 (below the 40 floor)
-            Assert.AreEqual(35, g.Scales.Relationships);
+            No(g);                               // HIT → relationships set to 12 (in the red zone, below 15)
+            Assert.AreEqual(12, g.Scales.Relationships);
 
             bool broke = false;
             g.RelationshipBrokeUp += () => broke = true;
@@ -227,11 +228,11 @@ namespace ThanksNoThanks.Tests
         [Test]
         public void Breakup_Timing_IsAboutTenSeconds()
         {
-            var deck = new List<Card> { Starter(), SetRelNo("HIT", 21, 39) };
+            var deck = new List<Card> { Starter(), SetRelNo("HIT", 21, 14) };
             deck.AddRange(AdultFiller());
             var g = new Game(deck, coin: () => false);
             g.StartLife(); No(g);
-            g.Tick(2f); No(g);                   // open + relationships 39 (just below 40)
+            g.Tick(2f); No(g);                   // open + relationships 14 (just inside the red zone, below 15)
             float below = 0f;
             int guard = 0;
             while (!g.RelationshipsLost && g.State == GameState.Playing && guard++ < 3000)
@@ -241,6 +242,23 @@ namespace ThanksNoThanks.Tests
             }
             Assert.IsTrue(g.RelationshipsLost, "broke up");
             Assert.That(below, Is.InRange(9f, 12f), "breakup around the ~10s cumulative threshold");
+        }
+
+        [Test]
+        public void YellowBuffer_BelowZoneFloorButAboveRedFloor_DoesNotBreakUp()
+        {
+            // Founder fix (2026-07-23): the yellow band [RelBreakupFloor..RelZoneMin] is a WARNING buffer —
+            // sitting there must NOT arm the breakup timer. Breakup counts only in the RED zone (<15).
+            var deck = new List<Card> { Starter(), SetRelNo("HIT", 21, 30) };
+            deck.AddRange(AdultFiller());
+            var g = new Game(deck, coin: () => false);
+            g.StartLife(); No(g);
+            g.Tick(2f); No(g);                   // open + relationships 30 (yellow: below 40, above 15)
+            for (int i = 0; i < 60 && g.Scales.Relationships >= Game.RelBreakupFloor; i++)
+            {
+                g.Tick(0.1f);
+                Assert.IsFalse(g.RelationshipsLost, "no breakup while the marker is in the yellow buffer");
+            }
         }
 
         [Test]

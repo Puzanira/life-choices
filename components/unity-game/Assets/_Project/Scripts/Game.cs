@@ -86,11 +86,17 @@ namespace ThanksNoThanks
         // The fourth live scale: a balancer to hold inside a zone while cranking/breathing/answering.
         // Opens at 20 (YA03 «первая любовь»), starts at 55% (Scales.Reset), target zone 40–75%.
         public const int RelationshipsOpenAge = 20;        // балансир открывается в 20 (YA03, OPEN:Отн)
-        public const int RelZoneMin = 40;                  // ниже — риск разрыва
+        public const int RelZoneMin = 40;                  // ниже зелёной зоны (жёлтый) — начинает дрейфовать/рисковать
         public const int RelZoneMax = 75;                  // выше — «красная зона» (задушил вниманием)
+        // Разрыв копится ТОЛЬКО в КРАСНОЙ зоне (глубоко внизу), не в жёлтой. Основательница (плейтест
+        // 2026-07-23): «расставались уже в жёлтой, а должны — в конце красной». Жёлтая [15..40] = буфер-
+        // предупреждение (таймер разрыва не идёт); красная (<15) = таймер разрыва. Значение тюнимое.
+        public const int RelBreakupFloor = 15;
         public const double RelDriftPerSec = 0.6;          // дрейф вниз ≈0.6%/сек, пока балансир открыт
         public const double RelDriftMarriedPerSec = 0.3;   // в браке (MD01=ДА) мягче — вдвое медленнее
-        public const double RelBalancerPerSec = 1.5;       // RELATION_AXIS ↑/↓ тянет маркер ≈1.5%/сек
+        public const double RelBalancerPerSec = 4.0;       // RELATION_AXIS ↑/↓ тянет маркер ≈4%/сек — было 1.5
+                                                          // (нетто с дрейфом ~+3.4%/с), чтобы «держу ↑» ЯВНО
+                                                          // двигало маркер; было слишком вяло/незаметно (плейтест)
         public const double RelOverloadPenaltyPerSec = 0.3;// >75% — доп. штраф вниз (риск ссоры)
         public const float RelBreakupSeconds = 10f;        // суммарно ~10 сек ниже зоны → разрыв
         public const int RelBreakupValue = 20;             // после разрыва шкала падает сюда (одиноко)
@@ -1316,9 +1322,11 @@ namespace ThanksNoThanks
                 Scales.Relationships = Math.Max(0, Math.Min(100, Scales.Relationships + whole));
             }
 
-            // Breakup: canon «ниже 40% суммарно ~10 сек» — CUMULATIVE below-zone time (not a continuous
-            // streak), so brief repeated dips add up over the life. Never reset except on breakup/restart.
-            if (Scales.Relationships < RelZoneMin)
+            // Breakup: CUMULATIVE time spent in the RED zone (< RelBreakupFloor), ~10s total → разрыв. The
+            // yellow band [RelBreakupFloor..RelZoneMin] is a warning buffer: drifting there does NOT arm the
+            // timer, so you have room to pull back before it's fatal (founder playtest: «разрыв должен быть в
+            // конце красной, а не в жёлтой»). Cumulative, so brief repeated red dips still add up over a life.
+            if (Scales.Relationships < RelBreakupFloor)
             {
                 _relBelowZoneSeconds += dt;
                 if (_relBelowZoneSeconds >= RelBreakupSeconds)

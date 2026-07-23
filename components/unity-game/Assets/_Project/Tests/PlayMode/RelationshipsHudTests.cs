@@ -88,10 +88,12 @@ namespace ThanksNoThanks.Tests.PlayMode
             var driver = Boot(out var go, out var fake);
             yield return null;
 
-            // A deterministic deck: a card that drops relationships below the zone at 20, then neutral
-            // filler so the run keeps going while the below-zone timer accrues to a breakup.
-            var deck = new List<Card> { Starter(), SetRelNo("HIT", 21, 35) };
-            for (int a = 22; a <= 84; a += 3) deck.Add(Plain("F" + a, a));
+            // A deterministic deck: a card that drops relationships into the RED zone (below 15) at 20, then
+            // neutral filler so the run keeps going while the red-zone timer accrues to a breakup.
+            var deck = new List<Card> { Starter(), SetRelNo("HIT", 21, 12) };
+            // Keep the run YOUNG (age-22 filler, below energy@25/health@30) so no scale-death interrupts the
+            // ~10s red-zone breakup accrual — this isolates «breakup hides the balancer», the point of the test.
+            for (int i = 0; i < 60; i++) deck.Add(Plain("F" + i, 22));
             var g = new Game(deck, coin: () => false);
             driver.DebugReplaceGame(g);
             fake.Confirm();                                // opener → playing on the injected game
