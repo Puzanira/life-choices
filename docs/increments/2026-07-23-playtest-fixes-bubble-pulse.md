@@ -62,4 +62,4 @@
 ## 6. Playtest verdict
 
 `Playtest ok:` — (ждём плейтест основательницы)
-`Landed:` —
+`Landed:` aac127c (bookkeeping-хеш в отдельном коммите — handoff авторитетно)
