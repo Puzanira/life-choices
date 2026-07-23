@@ -62,15 +62,34 @@ namespace ThanksNoThanks
         public const int YoungMaxAge = 29;
         public const int MidMaxAge = 54;
 
-        public const int MinDeck = 25;
-        public const int MaxDeck = 30;
+        // Tight young sub-windows — the gaps BETWEEN consecutive mechanic reveals (деньги@18 → отношения@20
+        // → энергия@25 → здоровье@30). Cards whose «Когда» window fits entirely inside one of these gaps are
+        // drawn as their own healthy target so ≥8 ordinary cards separate every reveal (founder pacing fix,
+        // 2026-07-23). Broad «N+»/«любой» scatter cards (Window.Max == LifeMax) are NOT captured here — they
+        // stay in the general young/mid/old pools and continue to scatter across the whole life.
+        public const int YoungEarlyMaxAge = 19;   // youngEarly: Max ≤ 19  → the 18–19 gap (money→relationships)
+        public const int YoungMidMinAge = 20;     // youngMid:   Min ≥ 20 && Max ≤ 24 → the 20–24 gap (rel→energy)
+        public const int YoungMidMaxAge = 24;
+        public const int YoungLateMinAge = 25;    // youngLate:  Min ≥ 25 && Max ≤ 29 → the 25–29 gap (energy→health)
+        public const int YoungLateMaxAge = 29;
+
+        // Deck-size clamp. Raised from 25–30 (2026-07-23): the three young sub-window targets add ~26 cards to
+        // the young stretch, so the whole life needs a bigger envelope. MaxDeck is chosen so a full run carries
+        // every sub-window target WITHOUT the ClampSize trim ever eating them (worst-case total ≈62 < 66).
+        public const int MinDeck = 40;
+        public const int MaxDeck = 66;
         public const double RandomInclusionChance = 0.5; // per RANDOM_TRIGGER card, each run
 
         // Per-phase non-milestone sample sizes (childhood is a range; the rest are fixed targets).
         public const int ChildhoodMin = 6;
         public const int ChildhoodMax = 8;
-        public const int YoungTarget = 3;
-        public const int MidTarget = 3;
+        // Each tight young sub-window draws up to this many (take all if fewer). Pool per window: youngEarly
+        // 18–19 = 10 (FA), youngMid 20–24 = 10 (FB), youngLate 25–29 = 11 (FC01–08,FC13–15).
+        // 10 fills the 18–19 and 20–24 gaps to ~10 and the 25–29 gap to its full 8, so the min inter-reveal
+        // gap is ≥8 ordinary cards (the pacing contract).
+        public const int YoungSubWindowTarget = 10;
+        public const int YoungTarget = 3;   // general broad-young pool («N+»/«любой» cards active in youth)
+        public const int MidTarget = 5;     // bumped from 3: 30–54 also spaces MD01–07 milestones
         public const int OldTarget = 4;
 
         // Hard-excluded — these IDs must never be drawn (enforced by a test). LT08 is NO LONGER here
@@ -215,12 +234,47 @@ namespace ThanksNoThanks
             // 5) Non-milestone pool → phase buckets → sampled to fill the run.
             var pool = byId.Values.Where(c => !handled.Contains(c.Id)).ToList();
             var childhood = pool.Where(c => Window(c).Max <= ChildhoodMaxAge).ToList();
-            var young = pool.Where(c => { var w = Window(c); return w.Max > ChildhoodMaxAge && w.Min <= YoungMaxAge; }).ToList();
-            var mid = pool.Where(c => { var w = Window(c); return w.Min > YoungMaxAge && w.Min <= MidMaxAge; }).ToList();
+
+            // 5a) Tight young sub-windows — cards that fit ENTIRELY inside a single reveal-gap. Broad «N+»
+            //     scatter cards (Window.Max == LifeMax) never match (they need a finite Max), so they fall
+            //     through to the general young/mid pools below and keep scattering across the whole life.
+            var youngEarly = pool.Where(c =>
+            {
+                var w = Window(c);
+                return w.Max > ChildhoodMaxAge && w.Max <= YoungEarlyMaxAge;               // 18–19 gap
+            }).ToList();
+            var youngMid = pool.Where(c =>
+            {
+                var w = Window(c);
+                return w.Min >= YoungMidMinAge && w.Max <= YoungMidMaxAge;                 // 20–24 gap
+            }).ToList();
+            var youngLate = pool.Where(c =>
+            {
+                var w = Window(c);
+                return w.Min >= YoungLateMinAge && w.Max <= YoungLateMaxAge;               // 25–29 gap
+            }).ToList();
+
+            // The sub-window cards are pulled OUT of the general young/mid pools so they aren't double-drawn.
+            var subWindowSet = new HashSet<Card>(youngEarly);
+            subWindowSet.UnionWith(youngMid);
+            subWindowSet.UnionWith(youngLate);
+
+            var young = pool.Where(c => !subWindowSet.Contains(c))
+                            .Where(c => { var w = Window(c); return w.Max > ChildhoodMaxAge && w.Min <= YoungMaxAge; }).ToList();
+            var mid = pool.Where(c => !subWindowSet.Contains(c))
+                          .Where(c => { var w = Window(c); return w.Min > YoungMaxAge && w.Min <= MidMaxAge; }).ToList();
             var old = pool.Where(c => Window(c).Min > MidMaxAge).ToList();
+
+            // Sub-window normals are drawn first and kept in their own list so ClampSize can NEVER trim them —
+            // trimming a sub-window card would shrink an inter-reveal gap below the ≥8 pacing goal.
+            var protectedNormals = new List<Card>();
+            protectedNormals.AddRange(TakeRandom(youngEarly, YoungSubWindowTarget, rng));
+            protectedNormals.AddRange(TakeRandom(youngMid, YoungSubWindowTarget, rng));
+            protectedNormals.AddRange(TakeRandom(youngLate, YoungSubWindowTarget, rng));
 
             var normals = new List<Card>();
             normals.AddRange(TakeRandom(childhood, rng.Next(ChildhoodMin, ChildhoodMax + 1), rng));
+            normals.AddRange(protectedNormals);
             normals.AddRange(TakeRandom(young, YoungTarget, rng));
             normals.AddRange(TakeRandom(mid, MidTarget, rng));
             normals.AddRange(TakeRandom(old, OldTarget, rng));
@@ -232,8 +286,8 @@ namespace ThanksNoThanks
             deck.AddRange(normals);
 
             // 6) Clamp to [MinDeck, MaxDeck]. Trim lowest-priority normals (ROND first); never a
-            //    milestone or a gated card. Pad from leftover normals if somehow short.
-            ClampSize(deck, normals, leftover, rng);
+            //    milestone, a gated card, or a protected young sub-window card. Pad from leftover if short.
+            ClampSize(deck, normals, leftover, protectedNormals, rng);
 
             // 7) Age order; stable on ties by source order (I02@0 and I03@1 stay first).
             deck.Sort((a, b) => a.Age != b.Age ? a.Age.CompareTo(b.Age) : a.Order.CompareTo(b.Order));
@@ -248,15 +302,19 @@ namespace ThanksNoThanks
             return new DeckPlan { Deck = deck, Reserve = reserve, Lt08 = lt08, Crisis = crisis, Depression = depression };
         }
 
-        private static void ClampSize(List<Card> deck, List<Card> normals, List<Card> leftover, Random rng)
+        private static void ClampSize(List<Card> deck, List<Card> normals, List<Card> leftover,
+                                      List<Card> protectedNormals, Random rng)
         {
-            while (deck.Count > MaxDeck && normals.Count > 0)
+            // Trimmable = every drawn normal EXCEPT the protected young sub-window cards (which must survive
+            // so the inter-reveal gaps hold ≥8). With MaxDeck=62 the trim loop should rarely run at all.
+            bool Trimmable(Card c) => !protectedNormals.Contains(c);
+            while (deck.Count > MaxDeck && normals.Any(Trimmable))
             {
                 // Drop adult flavour/kek (ROND) first, then any ROND, then any normal — this keeps
-                // the childhood spread and the weighty adult choices intact.
-                var victim = normals.FirstOrDefault(c => c.IsRond && c.Age > ChildhoodMaxAge)
-                             ?? normals.FirstOrDefault(c => c.IsRond)
-                             ?? normals[0];
+                // the childhood spread and the weighty adult choices intact. Protected cards are off-limits.
+                var victim = normals.FirstOrDefault(c => Trimmable(c) && c.IsRond && c.Age > ChildhoodMaxAge)
+                             ?? normals.FirstOrDefault(c => Trimmable(c) && c.IsRond)
+                             ?? normals.First(Trimmable);
                 normals.Remove(victim);
                 deck.Remove(victim);
             }
