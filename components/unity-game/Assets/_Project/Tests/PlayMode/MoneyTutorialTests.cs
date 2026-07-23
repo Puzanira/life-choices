@@ -89,7 +89,11 @@ namespace ThanksNoThanks.Tests.PlayMode
             driver.Game.Tick(0.25f);
             Assert.AreEqual(timer0 - 0.25f, driver.Game.CardTimer, 1e-3f,
                 "card timer resumed from the frozen value (not zeroed, not restarted)");
-            Assert.Greater(driver.Game.Age, age0, "age resumed");
+            // Age is EVENT-based (holds at the current card's age — no creep past it, 2026-07-23 fix), so at
+            // money-open (Age == the card's age 18) it does NOT climb further here. The freeze-LIFT is already
+            // proven above by the unpaused state + the resumed card timer. (The old Assert.Greater(Age, age0)
+            // encoded the age-creep bug — age racing past the card ages — which broke real-play pacing.)
+            Assert.AreEqual(age0, driver.Game.Age, 1e-3f, "age holds at the current card's age (event-age, no creep)");
 
             Object.Destroy(go);
             yield return null;

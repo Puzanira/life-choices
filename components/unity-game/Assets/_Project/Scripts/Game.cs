@@ -572,8 +572,13 @@ namespace ThanksNoThanks
                 float target = CurrentCard.Age;
                 if (Age < target)
                     Age = Math.Min(target, Age + AgeCatchUpPerSecond * dt);
-                else
-                    Age += AgeSlowTickPerSecond * dt;
+                // Once caught up to the current card's age, HOLD there — do NOT creep past it. The old
+                // creep (AgeSlowTickPerSecond ≈0.4/s → ~2 years for every 5s lingered on a card) raced the
+                // displayed age far ahead of the card ages, so mechanics opened back-to-back during
+                // childhood and «первая любовь» (card age 20) showed at ~33. Age is now purely event-based
+                // (= the current card's age): reveals (money@18/rel@20/energy@25/health@30) fire only when a
+                // card of that age is actually drawn, so the 10-cards-between-mechanics pacing holds in real
+                // time (founder playtest 2026-07-23).
 
                 if (CheckMoneyOpen()) return;      // open money (18) → tutorial pause may freeze this frame
                 if (CheckRelationshipsOpen()) return; // open relationships balancer (20) → hint + pause
