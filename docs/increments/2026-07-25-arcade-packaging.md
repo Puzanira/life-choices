@@ -18,3 +18,5 @@ Program: ARCADE_CABINET_SPEC этап ②; контракт ARCADE_INTEGRATION_C
 1. package.json + game.json валидны; 2. ввод только ArcadeInput (скан);
 3. suite зелёный headless; 4. MenuButton-выход чистый; 5. скриншот игры
 (batch, 0 мадженты) — проверяет Maintainer; 6. гейт 2 утром через хаб.
+
+`Landed:` dde7f28 (bookkeeping — отдельный коммит; Гейт 2 — плейтест основательницы через хаб).
