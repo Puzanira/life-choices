@@ -2,7 +2,7 @@
     "name": "ThanksNoThanks.Runtime",
     "rootNamespace": "ThanksNoThanks",
     "references": [
-        "Unity.InputSystem",
+        "AiGameStudio.ArcadeControls",
         "UnityEngine.UI"
     ],
     "includePlatforms": [],

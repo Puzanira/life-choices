@@ -1,0 +1,13 @@
+{
+  "name": "com.aigamestudio.game-life-choices",
+  "version": "0.1.0",
+  "displayName": "Life Choices — Спасибо, не надо",
+  "description": "TV-show life simulator card game for the AI Game Studio arcade cabinet. Reads input only through the shared arcade-controls layer (ArcadeInput).",
+  "unity": "6000.5",
+  "author": {
+    "name": "AI Game Studio"
+  },
+  "dependencies": {
+    "com.aigamestudio.arcade-controls": "0.1.0"
+  }
+}

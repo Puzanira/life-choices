@@ -1,0 +1,8 @@
+{
+  "id": "com.aigamestudio.game-life-choices",
+  "name": "Спасибо, не надо",
+  "displayName": "Спасибо, не надо (Life Choices)",
+  "version": "0.1.0",
+  "entry": "Assets/_Project/Scenes/ThanksNoThanks.unity",
+  "controls": ["GreenButton", "RedButton", "MenuButton", "Crank", "BangButton", "HeightA", "Joystick"]
+}

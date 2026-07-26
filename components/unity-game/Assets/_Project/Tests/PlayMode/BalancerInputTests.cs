@@ -58,7 +58,7 @@ namespace ThanksNoThanks.Tests.PlayMode
             int rel0 = driver.Game.Scales.Relationships;
 
             // HOLD ↑ for ~4s through the driver's REAL input path: source raises RelationUp EVERY frame the
-            // key is down, exactly as KeyboardInputSource does for a held arrow.
+            // axis is held, exactly as ArcadeInputSource re-emits for a held Joystick.y (RelationUp/Down).
             for (int i = 0; i < 40; i++) { fake.Fire(GameInput.RelationUp); driver.Game.Tick(0.1f); }
 
             Assert.Greater(driver.Game.Scales.Relationships, rel0,

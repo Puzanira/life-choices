@@ -7,7 +7,8 @@ namespace ThanksNoThanks
 {
     /// <summary>
     /// MonoBehaviour driver for «Спасибо, не надо». Owns the pure <see cref="Game"/>, wires an
-    /// <see cref="IInputSource"/> (keyboard by default; a fake can be injected for tests), and
+    /// <see cref="IInputSource"/> (an <see cref="ArcadeInputSource"/> reading the shared arcade-controls
+    /// layer by default; a fake can be injected for tests), and
     /// self-builds the TV-show HUD (16:9, 1920×1080) in Awake from the team's P0 sprite set so the
     /// scene needs no fragile hand-wired references. Visual-only layer: gameplay lives in <see cref="Game"/>.
     ///
@@ -36,7 +37,7 @@ namespace ThanksNoThanks
         public const int EnergyAge = 25;
         public const int HealthAge = 30;
 
-        /// <summary>Optional input injection (tests). Defaults to a KeyboardInputSource in Start.</summary>
+        /// <summary>Optional input injection (tests). Defaults to an ArcadeInputSource in Start.</summary>
         public IInputSource Input;
 
         private Game _game;
@@ -380,6 +381,30 @@ namespace ThanksNoThanks
             enabled = false;
         }
 
+        // Screenshot hook (arcade-packaging increment): pose a clean, representative mid-life frame — a card
+        // plus the revealed HUD scales (age, money, health/energy bars, relationship balancer, timer, answer
+        // plates) — and FREEZE the driver so a batch capture is stable. Visual-only; the pure Game is untouched.
+        public void DebugPreviewArcadeShot()
+        {
+            _openerPanel.SetActive(false); _finalePanel.SetActive(false); _gamePanel.SetActive(true);
+            ApplyAgeGates(35f);                       // reveal money + health + energy + relationships widgets
+            RestoreNormalPlates();
+            _ageText.text = "35";
+            _moneyText.text = FormatMoney(1240);
+            _moneyLabel.text = FormatMoneyLabel(1);
+            _cardText.text = "Взять ипотеку на 25 лет?";
+            _healthFill.fillAmount = 0.72f;
+            _energyFill.fillAmount = 0.58f;
+            if (_balancerMarker != null)
+                _balancerMarker.anchoredPosition = new Vector2(0.12f * _balancerTrackWidth, 0f);
+            _yesPlate.color = Color.white; _noPlate.color = Color.white;
+            _yesPlateText.text = "ДА"; _noPlateText.text = "СПАСИБО,\nНЕ НАДО";
+            _timerText.text = "4";
+            _timerFill.color = TimerRed;
+            _timerFill.fillAmount = 0.62f;
+            enabled = false;
+        }
+
         // Set the three finale texts and size the story plate to its content (short story → compact plate).
         private void RenderFinaleTexts(NecrologResult n)
         {
@@ -422,7 +447,7 @@ namespace ThanksNoThanks
 
         private void Start()
         {
-            Input ??= gameObject.AddComponent<KeyboardInputSource>();
+            Input ??= gameObject.AddComponent<ArcadeInputSource>();
             Input.Received += OnInput;
             Input.Received += OnInputFx;
             SubscribeGame();
@@ -500,6 +525,10 @@ namespace ThanksNoThanks
         /// </summary>
         private void OnInput(GameInput input)
         {
+            // MenuButton (arcade §5): end the run cleanly from ANY screen/beat — highest priority so a quit
+            // is never swallowed by a banner beat or a hint. No Application.Quit, no leftover state.
+            if (input == GameInput.Exit) { QuitToFreshLife(); return; }
+
             // A hint just closed THIS frame (Confirm dismiss): swallow every later same-frame event so a
             // chorded Enter+Space/E can't leak a crank/pulse onto the frame the overlay closed. Only a
             // further Confirm passes (harmless during Playing). Cleared next frame in Update.
@@ -508,6 +537,19 @@ namespace ThanksNoThanks
             // A rubric banner beat is up (S4/S6 — the card is hidden): swallow ALL input so a masher can't
             // answer the hidden card or skip the announce unread. It auto-advances on its own ~1.5s clock.
             if (_bannerTimer.Visible && _game.State == GameState.Playing) return;
+
+            // The arcade cabinet has no dedicated CONFIRM control (founder Gate-2 mapping). On non-gameplay
+            // screens the two answer buttons act as confirm: GREEN (ДА) proceeds — start a life on the opener,
+            // dismiss a hint — and RED (НЕТ) restarts from the finale. During Playing they stay ДА/НЕТ, so the
+            // card logic is untouched. Keyboard-dev drives Green=«2», Red=«1» via the packaged mapping.
+            if (input == GameInput.AnswerYes && (_game.State == GameState.Opener || _tutorialShowing))
+                input = GameInput.Confirm;
+            else if (input == GameInput.AnswerNo && _game.State == GameState.Finale)
+                input = GameInput.Confirm;
+            else if (input == GameInput.AnswerYes && _game.State == GameState.Playing && _game.InDepression)
+                input = GameInput.Confirm;   // depression pulse-catch: the cabinet has no Confirm control
+                                             // during Playing, so GREEN (ДА) is the catch — otherwise the
+                                             // depression mini-game would be unwinnable on the cabinet.
 
             if (_tutorialShowing)
             {
@@ -560,6 +602,32 @@ namespace ThanksNoThanks
             }
 
             _game.HandleInput(input);
+        }
+
+        /// <summary>
+        /// MenuButton clean-exit (arcade contract §5). Ends the current run: stop our own coroutines/timers,
+        /// drop any open hint/banner pause, and return the pure <see cref="Game"/> to a fresh opener life.
+        /// No <c>Application.Quit</c>, no static or DontDestroyOnLoad state — so the launcher reloading the
+        /// entry scene is always a clean new life (SceneBootTests boots straight into the opener).
+        /// </summary>
+        private void QuitToFreshLife()
+        {
+            StopAllCoroutines();
+            _moneyPulse = null;
+            _cardAnim = null;
+            if (_tutorialShowing)
+            {
+                _tutorialShowing = false;
+                if (_tutorialOverlay != null) _tutorialOverlay.SetActive(false);
+            }
+            _bubbleTimer.Hide();
+            _bannerTimer.Hide();
+            _breakupTimer.Hide();
+            if (_game != null)
+            {
+                _game.Paused = false;
+                _game.AbortToOpener();   // full reset to a fresh opener life (fires StateChanged → Refresh)
+            }
         }
 
         private void LoadGame()

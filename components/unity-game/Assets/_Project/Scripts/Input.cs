@@ -55,7 +55,15 @@ namespace ThanksNoThanks
         /// discrete keydown — <see cref="Game"/> honours it only inside the open flash window (else it
         /// arms the anti-pre-spam lockout). Keeps <see cref="Game"/> semantic-only (no keys/ports).
         /// </summary>
-        ChildPress
+        ChildPress,
+
+        /// <summary>
+        /// EXIT — the cabinet MenuButton. Arcade contract §5: the game must end the current run cleanly
+        /// (stop coroutines/timers, drop back to a fresh opener life) without <c>Application.Quit</c> and
+        /// without leaving static / DontDestroyOnLoad state. Handled entirely by the driver; the pure
+        /// <see cref="Game"/> never receives this value (the driver resets Game via a clean opener return).
+        /// </summary>
+        Exit
     }
 
     /// <summary>

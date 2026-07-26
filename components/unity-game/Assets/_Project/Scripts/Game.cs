@@ -897,6 +897,13 @@ namespace ThanksNoThanks
             StateChanged?.Invoke();
         }
 
+        /// <summary>
+        /// Arcade contract §5 clean-exit hook (MenuButton / <see cref="GameInput.Exit"/>): abandon the
+        /// current run from ANY state and return to a fresh opener life. Same full reset as a
+        /// finale→opener restart — no card logic changed, just made callable mid-run.
+        /// </summary>
+        public void AbortToOpener() => ToOpener();
+
         private void ToOpener()
         {
             Scales.Reset();
