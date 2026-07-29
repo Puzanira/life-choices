@@ -63,7 +63,7 @@ namespace ThanksNoThanks.Tests
         {
             var g = new Game(DepressionPlan(csv), coin: () => false)
             {
-                BlitzNormalOnLeftRoll = () => true,       // «ВСЁ НОРМАЛЬНО» always LEFT → ← is always correct
+                BlitzNormalOnYesRoll = () => true,       // «ВСЁ НОРМАЛЬНО» always on the ДА lever → AnswerYes is always correct
                 DepressionTriggerRoll = () => depressionRoll,
                 DepressionPulseInterval = () => 2.5f,     // pin every pulse to the low bound
             };

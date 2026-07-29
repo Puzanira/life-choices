@@ -8,9 +8,9 @@ namespace ThanksNoThanks.Tests
 {
     /// <summary>
     /// Midlife crisis (CR00–CR08): the one-shot 45–50 trigger, the 5×2s blitz with a seeded
-    /// «ВСЁ НОРМАЛЬНО» side, the fail counter, the ≥2-fail impulse gate, INVERT semantics
-    /// (silence = ДА, → = НЕТ), impulse-card consequences, the scales-pause, and the restart reset.
-    /// Time and the blitz side are injected (dt / a roll seam) so nothing races the wall clock.
+    /// «ВСЁ НОРМАЛЬНО» lever, the fail counter, the ≥2-fail impulse gate, INVERT semantics
+    /// (silence = ДА, рычаг НЕТ = отказ), impulse-card consequences, the scales-pause, and the restart reset.
+    /// Time and the blitz lever are injected (dt / a roll seam) so nothing races the wall clock.
     /// </summary>
     public class GameCrisisTests
     {
@@ -48,9 +48,9 @@ namespace ThanksNoThanks.Tests
         }
 
         // Start a life and run the age timer up to (but not into) the crisis, returning the live game.
-        private static Game StartAndReach(string csv, System.Func<bool> blitzLeft = null)
+        private static Game StartAndReach(string csv, System.Func<bool> normalOnYes = null)
         {
-            var g = new Game(CrisisPlan(csv), coin: () => false) { BlitzNormalOnLeftRoll = blitzLeft };
+            var g = new Game(CrisisPlan(csv), coin: () => false) { BlitzNormalOnYesRoll = normalOnYes };
             g.StartLife();
             g.HandleInput(GameInput.AnswerNo);   // resolve I03 → age timer running, FILL drawn
             return g;
@@ -89,7 +89,7 @@ namespace ThanksNoThanks.Tests
         [Test]
         public void Crisis_IsOneShot_DoesNotFireTwice()
         {
-            var g = StartAndReach(Csv(), blitzLeft: () => true);
+            var g = StartAndReach(Csv(), normalOnYes: () => true);
             TickToCrisis(g);
             Assert.AreEqual(CrisisPhase.Blitz, g.Phase);
 
@@ -110,7 +110,7 @@ namespace ThanksNoThanks.Tests
         [Test]
         public void Blitz_FiveThoughts_TwoSecondsEach()
         {
-            var g = StartAndReach(Csv(), blitzLeft: () => true);
+            var g = StartAndReach(Csv(), normalOnYes: () => true);
             TickToCrisis(g);
 
             for (int n = 1; n <= 5; n++)
@@ -119,7 +119,7 @@ namespace ThanksNoThanks.Tests
                 Assert.AreEqual(n, g.BlitzThoughtNumber, "thought number advances 1..5");
                 Assert.AreEqual("CR0" + n, g.CurrentCard.Id, "the CR0N thought is up");
                 Assert.That(g.CrisisTimer, Is.EqualTo(Game.BlitzSeconds).Within(0.001f), "2s per thought");
-                g.HandleInput(GameInput.AnswerYes);   // correct (normal on left)
+                g.HandleInput(GameInput.AnswerYes);   // correct (normal on the ДА lever)
             }
             Assert.AreEqual(CrisisPhase.None, g.Phase, "blitz over after 5 thoughts");
             Assert.AreEqual("FILL", g.CurrentCard.Id, "the suspended normal card resumed");
@@ -128,7 +128,7 @@ namespace ThanksNoThanks.Tests
         [Test]
         public void Blitz_Timeout_CountsAsFail_AndAdvances()
         {
-            var g = StartAndReach(Csv(), blitzLeft: () => true);
+            var g = StartAndReach(Csv(), normalOnYes: () => true);
             TickToCrisis(g);
             Assert.AreEqual(1, g.BlitzThoughtNumber);
             Assert.AreEqual(0, g.BlitzFails);
@@ -141,33 +141,33 @@ namespace ThanksNoThanks.Tests
         [Test]
         public void Blitz_NormalSide_Randomizes_BothSidesOccur()
         {
-            // Injected alternating side → verify Game reports the seam's side and that both sides occur.
-            bool left = true;
-            var g = StartAndReach(Csv(), blitzLeft: () => { left = !left; return left; });
+            // Injected alternating lever → verify Game reports the seam's lever and that both occur.
+            bool onYes = true;
+            var g = StartAndReach(Csv(), normalOnYes: () => { onYes = !onYes; return onYes; });
             TickToCrisis(g);
 
-            var sides = new List<bool>();
+            var levers = new List<bool>();
             for (int n = 0; n < 5; n++)
             {
-                sides.Add(g.BlitzNormalOnLeft);
-                // press the CURRENT normal side so it's always correct regardless of the roll
-                g.HandleInput(g.BlitzNormalOnLeft ? GameInput.AnswerYes : GameInput.AnswerNo);
+                levers.Add(g.BlitzNormalOnYes);
+                // press the CURRENT normal lever so it's always correct regardless of the roll
+                g.HandleInput(g.BlitzNormalOnYes ? GameInput.AnswerYes : GameInput.AnswerNo);
             }
-            Assert.Contains(true, sides, "«ВСЁ НОРМАЛЬНО» lands on the LEFT for some thoughts");
-            Assert.Contains(false, sides, "…and on the RIGHT for others");
-            Assert.AreEqual(0, g.BlitzFails, "pressing the reported normal side is always correct");
+            Assert.Contains(true, levers, "«ВСЁ НОРМАЛЬНО» lands on the ДА lever for some thoughts");
+            Assert.Contains(false, levers, "…and on the НЕТ lever for others");
+            Assert.AreEqual(0, g.BlitzFails, "pressing the reported normal lever is always correct");
         }
 
         [Test]
         public void Blitz_CorrectPress_NoFail_WrongPress_Fail()
         {
-            var g = StartAndReach(Csv(), blitzLeft: () => true);  // «ВСЁ НОРМАЛЬНО» always on the LEFT (←)
+            var g = StartAndReach(Csv(), normalOnYes: () => true);  // «ВСЁ НОРМАЛЬНО» always on the ДА lever
             TickToCrisis(g);
 
-            g.HandleInput(GameInput.AnswerYes);   // ← = normal side → correct
+            g.HandleInput(GameInput.AnswerYes);   // рычаг ДА = normal lever → correct
             Assert.AreEqual(0, g.BlitzFails, "correct press: no fail");
 
-            g.HandleInput(GameInput.AnswerNo);    // → = «О НЕТ» side → fail
+            g.HandleInput(GameInput.AnswerNo);    // рычаг НЕТ = «О НЕТ» → fail
             Assert.AreEqual(1, g.BlitzFails, "wrong press («О НЕТ»): +1 fail");
         }
 
@@ -176,7 +176,7 @@ namespace ThanksNoThanks.Tests
         [Test]
         public void Impulse_Skipped_When_FailsUnderTwo()
         {
-            var g = StartAndReach(Csv(), blitzLeft: () => true);
+            var g = StartAndReach(Csv(), normalOnYes: () => true);
             TickToCrisis(g);
 
             g.HandleInput(GameInput.AnswerNo);    // 1 fail
@@ -190,7 +190,7 @@ namespace ThanksNoThanks.Tests
         [Test]
         public void Impulse_Entered_When_FailsAtLeastTwo()
         {
-            var g = StartAndReach(Csv(), blitzLeft: () => true);
+            var g = StartAndReach(Csv(), normalOnYes: () => true);
             TickToCrisis(g);
 
             g.HandleInput(GameInput.AnswerNo);    // fail 1
@@ -205,7 +205,7 @@ namespace ThanksNoThanks.Tests
         // Reach the impulse round on CR06 (2 fails), for the INVERT / consequence tests.
         private static Game ReachImpulse(string csv)
         {
-            var g = StartAndReach(csv, blitzLeft: () => true);
+            var g = StartAndReach(csv, normalOnYes: () => true);
             TickToCrisis(g);
             g.HandleInput(GameInput.AnswerNo);
             g.HandleInput(GameInput.AnswerNo);
@@ -215,7 +215,7 @@ namespace ThanksNoThanks.Tests
             return g;
         }
 
-        // ---- INVERT: silence = ДА, → = НЕТ ----
+        // ---- INVERT: silence = ДА, рычаг НЕТ = отказ ----
 
         [Test]
         public void Impulse_Invert_Timeout_IsYes_AppliesConsequence()
@@ -229,12 +229,12 @@ namespace ThanksNoThanks.Tests
         }
 
         [Test]
-        public void Impulse_Invert_RightArrow_IsNo_DeclinesWithoutConsequence()
+        public void Impulse_Invert_NoLever_Declines_WithoutConsequence()
         {
             var g = ReachImpulse(Csv());
             int rel0 = g.Scales.Relationships;
 
-            g.HandleInput(GameInput.AnswerNo);    // → «СПАСИБО, НЕ НАДО» = decline
+            g.HandleInput(GameInput.AnswerNo);    // рычаг НЕТ = «СПАСИБО, НЕ НАДО» = decline
             Assert.AreEqual(rel0, g.Scales.Relationships, "declining CR06 applies no ДА-Δ (Отн unchanged)");
             Assert.AreEqual("CR07", g.CurrentCard.Id, "advanced to the next impulse card");
         }
@@ -248,7 +248,7 @@ namespace ThanksNoThanks.Tests
 
             int energy0 = g.Scales.Energy;
             double money0 = g.Money;
-            g.HandleInput(GameInput.AnswerYes);   // accept CR07 (← = поддаться)
+            g.HandleInput(GameInput.AnswerYes);   // accept CR07 (рычаг ДА = поддаться)
             Assert.AreEqual(energy0 + 2, g.Scales.Energy, "CR07 accept applies Эн +2");
             Assert.AreEqual(money0 - 2, g.Money, 0.001, "CR07 accept applies Дн −2");
         }
@@ -271,7 +271,7 @@ namespace ThanksNoThanks.Tests
         [Test]
         public void LiveScales_ArePaused_DuringBlitz()
         {
-            var g = StartAndReach(Csv(), blitzLeft: () => true);
+            var g = StartAndReach(Csv(), normalOnYes: () => true);
             TickToCrisis(g);
             Assert.IsTrue(g.EnergyOpen, "energy is live by 45 (drains in ordinary play)");
 
@@ -290,7 +290,7 @@ namespace ThanksNoThanks.Tests
         {
             // Even the worst blitz (every thought times out → 5 fails → impulse) plus declining every
             // impulse card leaves the run alive: the crisis itself never ends the life.
-            var g = StartAndReach(Csv(), blitzLeft: () => true);
+            var g = StartAndReach(Csv(), normalOnYes: () => true);
             TickToCrisis(g);
             for (int i = 0; i < 5; i++) g.Tick(Game.BlitzSeconds + 0.01f);  // 5 timeouts → 5 fails
             Assert.AreEqual(CrisisPhase.Impulse, g.Phase, "5 fails opened the impulse round");
@@ -306,7 +306,7 @@ namespace ThanksNoThanks.Tests
         [Test]
         public void Restart_ResetsCrisis_SoItCanFireAgain()
         {
-            var g = StartAndReach(Csv(), blitzLeft: () => true);
+            var g = StartAndReach(Csv(), normalOnYes: () => true);
             TickToCrisis(g);
             for (int i = 0; i < 5; i++) g.HandleInput(GameInput.AnswerYes);   // clear blitz
             // Finish this life.

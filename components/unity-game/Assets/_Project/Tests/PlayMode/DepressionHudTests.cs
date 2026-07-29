@@ -53,7 +53,7 @@ namespace ThanksNoThanks.Tests.PlayMode
             };
             return new Game(() => plan, coin: () => false)
             {
-                BlitzNormalOnLeftRoll = () => true,
+                BlitzNormalOnYesRoll = () => true,
                 DepressionTriggerRoll = () => true,
                 DepressionPulseInterval = () => 2.5f,
             };

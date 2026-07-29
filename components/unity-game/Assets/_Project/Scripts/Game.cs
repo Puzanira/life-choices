@@ -235,7 +235,7 @@ namespace ThanksNoThanks
         private CrisisPhase _phase = CrisisPhase.None;
         private int _blitzIndex;                // 0..4 current thought
         private int _blitzFails;                // промахи/«О НЕТ»/таймауты — ≥2 opens the impulse round
-        private bool _blitzNormalOnLeft;        // «ВСЁ НОРМАЛЬНО» side for the CURRENT thought (seeded)
+        private bool _blitzNormalOnYes;        // «ВСЁ НОРМАЛЬНО» lever for the CURRENT thought (seeded)
         private int _impulseIndex;              // 0..2 into CR06..CR08
         private float _crisisTimer;             // countdown for the current thought / impulse card
         private readonly Random _blitzRng = new();
@@ -243,9 +243,11 @@ namespace ThanksNoThanks
         private float _suspendedTimer;          // its remaining card timer, restored on resume
         private bool _suspendedBlocked;         // its BLOCK$ state, restored on resume
 
-        /// <summary>Test/tuning seam: supplies whether «ВСЁ НОРМАЛЬНО» is on the LEFT for the next thought.
-        /// null → a coin from the internal RNG. Injected so a test can pin the side sequence (both sides).</summary>
-        public Func<bool> BlitzNormalOnLeftRoll;
+        /// <summary>Test/tuning seam: supplies whether «ВСЁ НОРМАЛЬНО» sits on the ДА/yes LEVER for the next
+        /// thought. null → a coin from the internal RNG. Injected so a test can pin the sequence (both sides).
+        /// NB: this names the LEVER, never a screen side — which physical/on-screen side each lever drives is
+        /// the driver's business (since meeting-revisions §9 the ДА plate renders on the RIGHT).</summary>
+        public Func<bool> BlitzNormalOnYesRoll;
 
         /// <summary>Current crisis phase (None while in ordinary play). Read by the driver to render S6/S13.</summary>
         public CrisisPhase Phase => _phase;
@@ -255,8 +257,9 @@ namespace ThanksNoThanks
         public int BlitzFails => _blitzFails;
         /// <summary>Current blitz thought number, 1..5 (for the S6 «мысль N/5» readout). 0 outside blitz.</summary>
         public int BlitzThoughtNumber => _phase == CrisisPhase.Blitz ? _blitzIndex + 1 : 0;
-        /// <summary>Which side «ВСЁ НОРМАЛЬНО» is on for the current thought: true = LEFT (←), false = RIGHT (→).</summary>
-        public bool BlitzNormalOnLeft => _blitzNormalOnLeft;
+        /// <summary>Which LEVER «ВСЁ НОРМАЛЬНО» is on for the current thought: true = ДА/yes, false = НЕТ/no.
+        /// Not a screen side — the driver decides which plate each lever drives (§9: ДА = right plate).</summary>
+        public bool BlitzNormalOnYes => _blitzNormalOnYes;
         /// <summary>The current impulse card number, 1..3 (S13 readout). 0 outside the impulse round.</summary>
         public int ImpulseCardNumber => _phase == CrisisPhase.Impulse ? _impulseIndex + 1 : 0;
         /// <summary>Remaining time on the current crisis thought/impulse (mirrors <see cref="CardTimer"/>).</summary>
@@ -478,17 +481,17 @@ namespace ThanksNoThanks
                         if (input == GameInput.Confirm) DepressionPress();
                         break;
                     }
-                    // Crisis intercepts the two answer levers (←/→); crank/breath/axis/child are inert
+                    // Crisis intercepts the two answer levers (ДА/НЕТ); crank/breath/axis/child are inert
                     // during the crisis (hands are on the blitz buttons — canon, scales paused too).
                     if (_phase == CrisisPhase.Blitz)
                     {
-                        if (input == GameInput.AnswerYes) BlitzPress(pressedLeft: true);   // ← = левая кнопка
-                        else if (input == GameInput.AnswerNo) BlitzPress(pressedLeft: false); // → = правая
+                        if (input == GameInput.AnswerYes) BlitzPress(pressedYes: true);       // рычаг ДА
+                        else if (input == GameInput.AnswerNo) BlitzPress(pressedYes: false);  // рычаг НЕТ
                         break;
                     }
                     if (_phase == CrisisPhase.Impulse)
                     {
-                        // INVERT: → = «СПАСИБО, НЕ НАДО» (отказ/НЕТ); ← = поддаться (ДА). Молчание = ДА (в Tick).
+                        // INVERT: рычаг НЕТ = «СПАСИБО, НЕ НАДО» (отказ); рычаг ДА = поддаться. Молчание = ДА (в Tick).
                         if (input == GameInput.AnswerNo) ResolveImpulse(false);
                         else if (input == GameInput.AnswerYes) ResolveImpulse(true);
                         break;
@@ -936,7 +939,7 @@ namespace ThanksNoThanks
             _crisisDone = false;
             _blitzIndex = 0;
             _blitzFails = 0;
-            _blitzNormalOnLeft = false;
+            _blitzNormalOnYes = false;
             _impulseIndex = 0;
             _crisisTimer = 0f;
             _suspendedCard = null;
@@ -978,20 +981,21 @@ namespace ThanksNoThanks
         {
             CurrentCard = _blitzThoughts[_blitzIndex];
             CurrentCardBlocked = false;
-            _blitzNormalOnLeft = BlitzNormalOnLeftRoll != null
-                ? BlitzNormalOnLeftRoll()
+            _blitzNormalOnYes = BlitzNormalOnYesRoll != null
+                ? BlitzNormalOnYesRoll()
                 : _blitzRng.Next(2) == 0;
             _crisisTimer = BlitzSeconds;
             CardTimer = BlitzSeconds;             // mirror for the driver's timer ring
             CrisisBlitzAdvanced?.Invoke();        // driver: host-nag bubble + relabel the two buttons
         }
 
-        // A blitz button press. Correct = pressing the «ВСЁ НОРМАЛЬНО» side in time; pressing «О НЕТ» (the
-        // other side) is a fail. ← maps to the LEFT button, → to the RIGHT.
-        private void BlitzPress(bool pressedLeft)
+        // A blitz button press. Correct = pressing the lever that currently carries «ВСЁ НОРМАЛЬНО» in time;
+        // pressing «О НЕТ» (the other lever) is a fail. pressedYes = the ДА lever (GameInput.AnswerYes) —
+        // NOT a screen side: the driver paints the ДА lever's plate on the right since §9.
+        private void BlitzPress(bool pressedYes)
         {
-            bool pressedNormal = pressedLeft == _blitzNormalOnLeft; // hit «ВСЁ НОРМАЛЬНО»?
-            if (!pressedNormal) _blitzFails++;                      // «О НЕТ» / wrong side → +1 провал
+            bool pressedNormal = pressedYes == _blitzNormalOnYes;   // hit «ВСЁ НОРМАЛЬНО»?
+            if (!pressedNormal) _blitzFails++;                      // «О НЕТ» / wrong lever → +1 провал
             AdvanceBlitz();
         }
 

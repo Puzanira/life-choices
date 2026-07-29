@@ -14,7 +14,8 @@ namespace ThanksNoThanks
     ///
     /// Assets are loaded from <c>Assets/_Project/Art/Resources</c> (a Resources root nested under Art):
     /// sprites at <c>Sprites/*</c>, fonts at <c>Fonts/*</c>. Fonts are legacy uGUI dynamic fonts —
-    /// Russo One for display headlines, Rubik for the money pill (₽) and body copy.
+    /// Arimo Bold for display headlines/questions/buttons/HUD digits (meeting-revisions §8: metric
+    /// Helvetica lookalike, OFL, full Cyrillic + ₽), Rubik for the money pill (₽) and body copy.
     /// </summary>
     public sealed class GameDriver : MonoBehaviour
     {
@@ -43,7 +44,7 @@ namespace ThanksNoThanks
         private Game _game;
         public Game Game => _game;
 
-        private Font _display; // Russo One
+        private Font _display; // Arimo Bold (meeting-revisions §8 — «основные надписи»)
         private Font _body;    // Rubik (has ₽ + Cyrillic)
 
         // Panels
@@ -51,8 +52,17 @@ namespace ThanksNoThanks
         private GameObject _gamePanel;
         private GameObject _finalePanel;
 
-        // Shared background
+        // Shared background — a centred square of sunburst rays that slowly spins (meeting-revisions §7).
         private Image _bg;
+        /// <summary>Side of the background square, in reference px: ≥ the 1920×1080 diagonal (≈2203) plus headroom.</summary>
+        public const float BgSpinSquare = 2800f;
+        /// <summary>Where the rays CONVERGE inside sunburst-bg.png (measured: 964/1920, 444/1080 from the top).
+        /// Used as the rect PIVOT so the hub — not the sprite's geometric centre — sits on the screen centre and
+        /// stays put while the rays turn (a centre-pivot would orbit the hub around the screen ≈190 px off).</summary>
+        public static readonly Vector2 BgSpinPivot = new Vector2(0.502f, 0.589f);
+        /// <summary>Ray spin rate: 1 turn / 60 s = 6°/сек, clockwise (Unity z decreases).</summary>
+        public const float BgSpinDegPerSecond = 6f;
+        private float _bgSpin;   // accumulated clockwise degrees (monotonic, wrapped at 360)
 
         // HUD widgets (gated by age)
         private GameObject _hudRow;    // top-row container (age·деньги·здоровье·энергия·отношения·ребёнок)
@@ -90,10 +100,20 @@ namespace ThanksNoThanks
         private Image _noPlate;
         private RectTransform _yesRect;
         private RectTransform _noRect;
-        private Text _yesPlateText;   // relabelled during the crisis blitz («ВСЁ НОРМАЛЬНО» / «О НЕТ»)
+        private Text _yesPlateText;   // crisis-only overlay («ДА»/«СПАСИБО, НЕ НАДО» are BAKED in the art)
         private Text _noPlateText;
-        private const float YesTilt = -2f;
-        private const float NoTilt = 2f;
+        // The two answer-plate sprite sets. Ordinary play draws the ART-PACK plates with the lettering BAKED
+        // IN (`btn-yes` / `btn-no`, Simple — the art is not a 9-slice); the crisis (blitz + impulse) keeps the
+        // old blank code-plates + a dynamic Text, because it relabels them per thought («ВСЁ НОРМАЛЬНО» /
+        // «О НЕТ») and gold-highlights the decline. Switched by UseBakedPlates / UseCodePlates.
+        private Sprite _bakedYesSprite, _bakedNoSprite, _codeYesSprite, _codeNoSprite;
+        // Plate tilts (meeting-revisions §9 / build-spec §B), re-measured on «Экран спокойный обычный.png» by
+        // a min-area rotated-bbox fit over the plates' colour fill: red −9.05°, green +13.15° → the canon is
+        // ASYMMETRIC. The GREEN «ДА» plate (screen-RIGHT) leans up-to-the-right → Unity z = +13; the RED
+        // «СПАСИБО, НЕ НАДО» plate (screen-LEFT) leans down-to-the-right → Unity z = −9. (Reference check:
+        // the red plate's HIGHEST corner is its top-LEFT one, the green plate's is its top-RIGHT one.)
+        private const float YesTilt = 13f;
+        private const float NoTilt = -9f;
 
         // ---- midlife crisis HUD (S6 blitz / S13 impulse); built hidden, shown only while Game.InCrisis ----
         private GameObject _crisisInfo;       // top readout: «МЫСЛЬ N/5 · ПРОВАЛОВ: K» / «ИМПУЛЬС N/3»
@@ -240,11 +260,14 @@ namespace ThanksNoThanks
         // ---- public inspection accessors (visual-assembly PlayMode tests) ----
         public RectTransform CanvasRect { get; private set; }
         public Image BackgroundImage => _bg;
+        /// <summary>Accumulated CLOCKWISE spin of the background rays, in degrees (Layer-2 seam).</summary>
+        public float BackgroundSpinDegrees => _bgSpin;
         public Image CardFrameImage => _cardFrame;
         public RectTransform CardRect => _cardRoot;
         public Image YesPlateImage => _yesPlate;
         public Image NoPlateImage => _noPlate;
         public GameObject AgeBadge => _ageBadge;
+        public Text AgeText => _ageText;                 // the DIGITS on the age badge (not the «ВОЗРАСТ» label)
         public GameObject MoneyPill => _moneyPill;
         public GameObject HudRow => _hudRow;
         public GameObject HealthGroup => _healthGroup;
@@ -294,6 +317,8 @@ namespace ThanksNoThanks
 
         /// <summary>Test hook: run the age-gated HUD visibility for an arbitrary age.</summary>
         public void DebugApplyAgeGates(float age) => ApplyAgeGates(age);
+        /// <summary>Layer-2 seam: advance the §7 ray spin by <paramref name="dt"/> seconds (same path Update drives).</summary>
+        public void DebugSpinBackground(float dt) => SpinBackground(dt);
 
         /// <summary>
         /// Test hook: force the finale panel visible and render an arbitrary necrolog (title/cause/story)
@@ -436,7 +461,18 @@ namespace ThanksNoThanks
 
         private void Awake()
         {
-            _display = Resources.Load<Font>("Fonts/RussoOne");
+            // «Основные надписи» = Arimo Bold (meeting-revisions §8): headlines, the card question, the
+            // answer-plate labels and the HUD digits. Metric Helvetica lookalike, OFL, full Cyrillic + ₽.
+            _display = Resources.Load<Font>("Fonts/Arimo-Bold");
+            if (_display == null)
+            {
+                // Loud, not silent: without this the build would quietly fall through to Unity's
+                // LegacyRuntime face and every «основная надпись» would render in the wrong typeface
+                // (and Cyrillic/₽ coverage would be a lottery). Fall back to the shipped RussoOne.
+                Debug.LogError("GameDriver: Resources/Fonts/Arimo-Bold missing — «основные надписи» (§8) "
+                    + "fall back to RussoOne. Re-import Assets/_Project/Art/Resources/Fonts/Arimo-Bold.ttf.");
+                _display = Resources.Load<Font>("Fonts/RussoOne");
+            }
             _body = Resources.Load<Font>("Fonts/Rubik");
             if (_display == null) _display = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
             if (_body == null) _body = _display;
@@ -647,6 +683,7 @@ namespace ThanksNoThanks
         private void Update()
         {
             _dismissedThisFrame = false;         // fresh frame → the same-frame dismiss-swallow guard clears
+            SpinBackground(Time.deltaTime);      // ambient §7 ray spin — runs on every screen, pause included
             if (_game == null) return;
             _crankCap.Advance(Time.deltaTime);   // deterministic clock for the income cap
             _breath.Advance(Time.deltaTime);     // deterministic clock for the breathing rhythm
@@ -733,10 +770,13 @@ namespace ThanksNoThanks
             bool blitz = _game.Phase == CrisisPhase.Blitz;
             if (blitz)
             {
-                // «ВСЁ НОРМАЛЬНО» jumps sides each thought; ← = left plate (yes), → = right plate (no).
-                bool normalLeft = _game.BlitzNormalOnLeft;
-                _yesPlateText.text = normalLeft ? "ВСЁ\nНОРМАЛЬНО" : "О НЕТ";
-                _noPlateText.text = normalLeft ? "О НЕТ" : "ВСЁ\nНОРМАЛЬНО";
+                // «ВСЁ НОРМАЛЬНО» jumps between the two plates each thought (the randomisation lives in
+                // Game.BlitzNormalOnYes, which names the ДА/yes LEVER — the plate that lever drives sits on
+                // the RIGHT since §9, so painting the label here is what ties the lever to a screen side).
+                // Colour-to-meaning is unaffected: both blitz plates render plain white.
+                bool normalOnYes = _game.BlitzNormalOnYes;
+                _yesPlateText.text = normalOnYes ? "ВСЁ\nНОРМАЛЬНО" : "О НЕТ";
+                _noPlateText.text = normalOnYes ? "О НЕТ" : "ВСЁ\nНОРМАЛЬНО";
                 _yesPlate.color = Color.white;
                 _noPlate.color = Color.white;
                 // S6: both blitz plates are LARGE and EQUAL so the 2-line «ВСЁ НОРМАЛЬНО» sits fully inside
@@ -750,9 +790,11 @@ namespace ThanksNoThanks
             }
             else
             {
-                // Impulse (S13): ← = поддаться (ДА), → = «СПАСИБО, НЕ НАДО». Highlight the → decline (обратный акцент).
-                // Impulse keeps the normal-sized plates (per S13 / accepted 03 shot).
-                UseNormalPlates();
+                // Impulse (S13): рычаг ДА (правая плашка) = поддаться, рычаг НЕТ (левая) = «СПАСИБО, НЕ НАДО». Highlight the decline
+                // plate (обратный акцент) — the gold tint follows the MEANING, so it stays on the red plate.
+                // Impulse keeps the code-plates at the normal S13 sizes (per the accepted 03 shot) — the
+                // baked art can't be relabelled «поддаться/отказ» and must not show through here.
+                UseImpulsePlates();
                 _yesPlateText.text = "ДА";
                 _noPlateText.text = "СПАСИБО,\nНЕ НАДО";
                 _yesPlateText.resizeTextMaxSize = 60;   // single-line «ДА» reads big
@@ -777,7 +819,7 @@ namespace ThanksNoThanks
         private void RestoreNormalPlates()
         {
             _crisisUiActive = false;
-            UseNormalPlates();   // restore rect size, text rect + best-fit ceilings the crisis enlarged
+            UseBakedPlates();    // back to the baked art (and the crisis label overlay goes away with it)
             _yesPlateText.text = "ДА";
             _noPlateText.text = "СПАСИБО,\nНЕ НАДО";
             _yesPlate.color = Color.white;
@@ -787,36 +829,72 @@ namespace ThanksNoThanks
         }
 
         // ---- Answer-plate geometry ------------------------------------------------------------------
-        // The plate sprite is a 460×270 9-slice with an 82px border; its colored pill (the flat green/red
-        // fill) sits ~55px in from every rect edge REGARDLESS of the rect size (9-slice corners are fixed).
-        // So a plate rect of W×H shows a pill of only ~(W-110)×(H-110). The normal 190-tall plate therefore
-        // exposes a pill barely ~80px tall — fine for «ДА» / a small 2-line decline, but the blitz
-        // «ВСЁ НОРМАЛЬНО» needs a genuinely large pill or best-fit resolves a font whose two lines spill off
-        // the pill top/sides. The blitz uses an enlarged, equal pair; everything else uses the normal sizes.
-        private static readonly Vector2 NormalYesPlateSize = new Vector2(420f, 190f);
-        private static readonly Vector2 NormalNoPlateSize = new Vector2(470f, 190f);
-        private static readonly Vector2 CrisisBlitzPlateSize = new Vector2(520f, 250f);
+        // ORDINARY PLAY — the art-pack plates with BAKED lettering (`btn-no` 1422×685, `btn-yes` 907×594).
+        // Drawn Simple (the art is NOT a 9-slice), so the sprite spans the whole rect and the drawn artwork
+        // fills the rect's alpha-tight fraction (no: 96.84%×95.91% · yes: 96.58%×97.14% — measured on the
+        // PNGs). The rects below are the reference-screen sizes, derived instrumentally: on
+        // «Экран спокойный обычный.png» the plates' colour fill measures 505.5×221.3 (red) and 335.7×205.6
+        // (green) after undoing the tilt, and the SAME fill in the source art measures 1279×559 / 781×477 →
+        // a UNIFORM scale of 0.3956 / 0.4304 for the whole texture. Hence 1422×685→562×271 and
+        // 907×594→390×256: the drawn plate lands on the reference within ~0.5 px on both axes, and the rect
+        // keeps the texture's aspect (±0.3%) so the baked lettering is never stretched.
+        private static readonly Vector2 BakedYesPlateSize = new Vector2(390f, 256f);
+        private static readonly Vector2 BakedNoPlateSize = new Vector2(562f, 271f);
+
+        // CRISIS ONLY — the blank code-plates (9-slice, 460×270 with an 82px border) the blitz/impulse still
+        // use because they get RELABELLED per thought. Their coloured pill sits ~55px in from every rect edge
+        // REGARDLESS of the rect size (fixed 9-slice corners), so a rect of W×H shows a pill of only
+        // ~(W−110)×(H−110): the blitz «ВСЁ НОРМАЛЬНО» needs a genuinely large pill or best-fit resolves a font
+        // whose two lines spill off it. The blitz uses an enlarged, EQUAL pair; the impulse keeps the S13 pair.
+        private static readonly Vector2 ImpulseYesPlateSize = new Vector2(385f, 278f);
+        private static readonly Vector2 ImpulseNoPlateSize = new Vector2(615f, 275f);
+        private static readonly Vector2 CrisisBlitzPlateSize = new Vector2(615f, 280f);
+
+        // Ordinary play: baked art, NO dynamic label (the words are part of the picture — a live Text on top
+        // would double them). Idempotent; called on build, on every restart and when a crisis ends.
+        private void UseBakedPlates()
+        {
+            if (_yesPlate.sprite != _bakedYesSprite) _yesPlate.sprite = _bakedYesSprite;
+            if (_noPlate.sprite != _bakedNoSprite) _noPlate.sprite = _bakedNoSprite;
+            _yesPlate.type = Image.Type.Simple;
+            _noPlate.type = Image.Type.Simple;
+            _yesRect.sizeDelta = BakedYesPlateSize;
+            _noRect.sizeDelta = BakedNoPlateSize;
+            if (_yesPlateText.gameObject.activeSelf) _yesPlateText.gameObject.SetActive(false);
+            if (_noPlateText.gameObject.activeSelf) _noPlateText.gameObject.SetActive(false);
+        }
+
+        // Crisis: blank code-plates + the dynamic label back on (the caller sets the text/colours).
+        private void UseCodePlates(Vector2 yesSize, Vector2 noSize)
+        {
+            if (_yesPlate.sprite != _codeYesSprite) _yesPlate.sprite = _codeYesSprite;
+            if (_noPlate.sprite != _codeNoSprite) _noPlate.sprite = _codeNoSprite;
+            _yesPlate.type = Image.Type.Sliced;
+            _noPlate.type = Image.Type.Sliced;
+            _yesRect.sizeDelta = yesSize;
+            _noRect.sizeDelta = noSize;
+            if (!_yesPlateText.gameObject.activeSelf) _yesPlateText.gameObject.SetActive(true);
+            if (!_noPlateText.gameObject.activeSelf) _noPlateText.gameObject.SetActive(true);
+        }
 
         // Enlarge both blitz plates equally (S6) and push the text rect inside the (now taller) colored pill.
         private void UseCrisisBlitzPlates()
         {
-            _yesRect.sizeDelta = CrisisBlitzPlateSize;
-            _noRect.sizeDelta = CrisisBlitzPlateSize;
+            UseCodePlates(CrisisBlitzPlateSize, CrisisBlitzPlateSize);
             CrisisPlateTextRect(_yesPlateText.rectTransform);
             CrisisPlateTextRect(_noPlateText.rectTransform);
             _yesPlateText.resizeTextMinSize = 28; _yesPlateText.resizeTextMaxSize = 48;
             _noPlateText.resizeTextMinSize = 28; _noPlateText.resizeTextMaxSize = 48;
         }
 
-        // Normal answer plates (childhood/adult play + the S13 impulse): the sizes/insets built in BuildUi.
-        private void UseNormalPlates()
+        // S13 impulse plates: the code-plates at the sizes/insets the accepted 03 shot uses.
+        private void UseImpulsePlates()
         {
-            _yesRect.sizeDelta = NormalYesPlateSize;
-            _noRect.sizeDelta = NormalNoPlateSize;
+            UseCodePlates(ImpulseYesPlateSize, ImpulseNoPlateSize);
             PlateTextRect(_yesPlateText.rectTransform);
             PlateTextRect(_noPlateText.rectTransform);
-            _yesPlateText.resizeTextMinSize = 26; _yesPlateText.resizeTextMaxSize = 60;
-            _noPlateText.resizeTextMinSize = 22; _noPlateText.resizeTextMaxSize = 40;
+            _yesPlateText.resizeTextMinSize = 40; _yesPlateText.resizeTextMaxSize = 120;
+            _noPlateText.resizeTextMinSize = 24; _noPlateText.resizeTextMaxSize = 60;
         }
 
         // The game is paused while EITHER a tutorial overlay OR a rubric banner beat is up. Both share the
@@ -916,6 +994,16 @@ namespace ThanksNoThanks
             if (_breakupPlate.activeSelf != show) _breakupPlate.SetActive(show);
         }
 
+        // §7 ambient background: the sunburst turns 1 revolution per 60 s (6°/сек) CLOCKWISE — in Unity's
+        // CCW-positive z that is a NEGATIVE angle. Deliberately not frozen by Game.Paused: the spin is
+        // ambience behind tutorials/banners, not a gameplay clock.
+        private void SpinBackground(float dt)
+        {
+            if (_bg == null) return;
+            _bgSpin = Mathf.Repeat(_bgSpin + BgSpinDegPerSecond * dt, 360f);
+            _bg.rectTransform.localRotation = Quaternion.Euler(0f, 0f, -_bgSpin);
+        }
+
         // Show-reaction veil: dark alpha follows (health+energy+relationships)/3 via ShowMood, smoothed so
         // it never flickers. Only dims live gameplay; the opener/finale read at full brightness. Until
         // relationships have gone live (open OR lost) they pass as «full» (100) so they never dim early.
@@ -948,8 +1036,18 @@ namespace ThanksNoThanks
             CanvasRect = canvasGo.GetComponent<RectTransform>();
 
             // Shared sunburst background + static star accents (on all screens, per increment §1).
+            // The rays SPIN (meeting-revisions §7 / build-spec §6: 1 turn per 60 s ≈ 6°/сек, clockwise,
+            // continuous, on every screen). A stretched rect would bare the corners as soon as it turned, so
+            // the backdrop is an oversized SQUARE pinned to the screen centre by its PIVOT — and the pivot is
+            // the sprite's ray HUB, so the sunburst spins about its own centre instead of orbiting it. Every
+            // edge sits ≥ the frame's half-diagonal (≈1102 px) away from that pivot, so no rotation angle can
+            // bare a corner.
             _bg = NewSprite("Background", canvasGo.transform, Sprite("sunburst-bg"));
-            Stretch(_bg.rectTransform);
+            var bgRt = _bg.rectTransform;
+            bgRt.anchorMin = bgRt.anchorMax = new Vector2(0.5f, 0.5f);
+            bgRt.pivot = BgSpinPivot;
+            bgRt.anchoredPosition = Vector2.zero;
+            bgRt.sizeDelta = new Vector2(BgSpinSquare, BgSpinSquare);
             BuildStars(canvasGo.transform);
 
             BuildOpener(canvasGo.transform);
@@ -1155,28 +1253,45 @@ namespace ThanksNoThanks
             _cardPricePlate.gameObject.SetActive(false);
             _cardPriceText.gameObject.SetActive(false);
 
-            // ---- Answer plates (bottom) ----
-            _yesPlate = NewSprite("YesPlate", _gamePanel.transform, Sprite("plate-yes"));
-            _yesPlate.type = Image.Type.Sliced;
+            // ---- Answer plates (bottom) — RED «СПАСИБО, НЕ НАДО» LEFT, GREEN «ДА» RIGHT ----
+            // Sides/centres/tilts are canon from meeting-revisions §9 + build-spec §B (boxes 165,735,615,275
+            // and 1354,732,385,278), i.e. exactly the cabinet levers: left lever = НЕ НАДО (RedButton →
+            // AnswerNo), right lever = ДА (GreenButton → AnswerYes). Only the SCREEN side moved — the input
+            // mapping in ArcadeInputSource is unchanged.
+            // Ordinary play draws the ART-PACK plates, lettering baked in; the blank code-plates are kept
+            // loaded for the crisis relabel (UseBakedPlates / UseCodePlates swap the pair wholesale).
+            _bakedYesSprite = Sprite("btn-yes");
+            _bakedNoSprite = Sprite("btn-no");
+            _codeYesSprite = Sprite("plate-yes");
+            _codeNoSprite = Sprite("plate-no");
+
+            _yesPlate = NewSprite("YesPlate", _gamePanel.transform, _bakedYesSprite);
+            _yesPlate.type = Image.Type.Simple;
             _yesRect = _yesPlate.rectTransform;
-            AnchorPx(_yesRect, 610f, 940f, 420f, 190f);
+            AnchorPx(_yesRect, 1547f, 871f, BakedYesPlateSize.x, BakedYesPlateSize.y);
             _yesRect.localRotation = Quaternion.Euler(0, 0, YesTilt);
-            var yesText = NewText("YesText", _yesPlate.transform, "ДА", 64, TextAnchor.MiddleCenter, Ink, _display);
+            // Crisis-only overlay label — «ДА» is baked into the art, so this stays HIDDEN in ordinary play.
+            // (White with the ink kant, matching the baked lettering, for the «ВСЁ НОРМАЛЬНО»/«О НЕТ» relabel.)
+            var yesText = NewText("YesText", _yesPlate.transform, "ДА", 96, TextAnchor.MiddleCenter, Color.white, _display);
             PlateTextRect(yesText.rectTransform);   // inset onto the visible plate (clears the baked shadow)
-            yesText.resizeTextForBestFit = true; yesText.resizeTextMinSize = 26; yesText.resizeTextMaxSize = 60;
+            yesText.resizeTextForBestFit = true; yesText.resizeTextMinSize = 40; yesText.resizeTextMaxSize = 120;
             DisplayFx(yesText);
             _yesPlateText = yesText;
 
-            _noPlate = NewSprite("NoPlate", _gamePanel.transform, Sprite("plate-no"));
-            _noPlate.type = Image.Type.Sliced;
+            _noPlate = NewSprite("NoPlate", _gamePanel.transform, _bakedNoSprite);
+            _noPlate.type = Image.Type.Simple;
             _noRect = _noPlate.rectTransform;
-            AnchorPx(_noRect, 1310f, 940f, 470f, 190f);
+            // Centre 432 (not the §B box centre 472.5): on the reference explainer the red art is FLUSH LEFT
+            // in its build-spec box, so the drawn plate must start at x≈169 — canon call by the Maintainer,
+            // «explainer-PNG = пиксель-истина, табличные боксы — ориентир». The green plate is box-centred.
+            AnchorPx(_noRect, 432f, 872f, BakedNoPlateSize.x, BakedNoPlateSize.y);
             _noRect.localRotation = Quaternion.Euler(0, 0, NoTilt);
-            var noText = NewText("NoText", _noPlate.transform, "СПАСИБО,\nНЕ НАДО", 46, TextAnchor.MiddleCenter, Color.white, _display);
+            var noText = NewText("NoText", _noPlate.transform, "СПАСИБО,\nНЕ НАДО", 56, TextAnchor.MiddleCenter, Color.white, _display);
             PlateTextRect(noText.rectTransform);   // inset onto the visible plate (clears the baked shadow)
-            noText.resizeTextForBestFit = true; noText.resizeTextMinSize = 22; noText.resizeTextMaxSize = 40;
+            noText.resizeTextForBestFit = true; noText.resizeTextMinSize = 24; noText.resizeTextMaxSize = 60;
             DisplayFx(noText);
             _noPlateText = noText;
+            UseBakedPlates();   // hides both overlay labels — ordinary play shows the baked art alone
 
             // ---- Burnout state (S7): full-screen dim-cobalt sunburst takeover, shown while Game.Burnout ----
             // An OPAQUE deep-cobalt backing hides the show; a cobalt-tinted sunburst sprite over it paints the
@@ -1236,7 +1351,9 @@ namespace ThanksNoThanks
             warnImg.type = Image.Type.Sliced;
             warnImg.color = Ink;
             _impulseWarning = warnImg.gameObject;
-            AnchorPx(warnImg.rectTransform, 940f, 700f, 380f, 84f);
+            // Sits above the enlarged §9 answer plates (their tilted AABBs start at y≈703) so the pill never
+            // clips a plate corner.
+            AnchorPx(warnImg.rectTransform, 940f, 650f, 380f, 84f);
             var mute = NewSprite("MuteIcon", _impulseWarning.transform, MakeMuteSprite());
             Anchor(mute.rectTransform, new Vector2(0.14f, 0.5f), new Vector2(52, 52));
             var warn = NewText("ImpulseWarnText", _impulseWarning.transform,
@@ -1291,8 +1408,10 @@ namespace ThanksNoThanks
             // Taller (was 360×220 → 380×240) so a long host line has vertical room; width stays ~380 so the
             // left edge (≈1442px) still clears the card's right edge (≈1430px) and never covers it.
             Anchor(bubbleImg.rectTransform, new Vector2(0.85f, 0.42f), new Vector2(384, 330));
+            // Host replies are «комментарии» → Rubik (meeting-revisions §8), not the display face: the
+            // bubble carries the Ведущий's spoken line, the same role as the necrolog/tutorial body copy.
             _bubbleText = NewText("HostBubbleText", _hostBubble.transform, "", 34,
-                TextAnchor.MiddleCenter, Ink, _display);
+                TextAnchor.MiddleCenter, Ink, _body);
             // The «bubble» sprite is 9-slice border 70/120/70/70 — the FLAT gold fill starts ~70px inside the
             // rect (rounded corners + outline live in that border), and the bottom 120px is the tail. So the
             // text rect must inset PAST the border on every side, or glyphs spill onto the corners/outline
@@ -2042,12 +2161,14 @@ namespace ThanksNoThanks
         // Text rect for an answer plate: the plate sprites carry a baked drop-shadow toward the
         // bottom-right, so the visible red/green sits toward the top-left. Inset asymmetrically (more
         // bottom+right) so best-fit text lands fully ON the plate, never spilling onto the background.
+        // Every inset is ≥ the fixed ~55px 9-slice corner inset, so the text rect is a subset of the
+        // visible coloured pill — best-fit can then only ever draw glyphs ON the pill (Layer-2 guard).
         private static void PlateTextRect(RectTransform rt)
         {
             rt.anchorMin = Vector2.zero;
             rt.anchorMax = Vector2.one;
-            rt.offsetMin = new Vector2(30f, 48f);    // left, bottom
-            rt.offsetMax = new Vector2(-46f, -26f);  // right, top
+            rt.offsetMin = new Vector2(58f, 76f);    // left, bottom
+            rt.offsetMax = new Vector2(-74f, -56f);  // right, top
         }
 
         // Text rect for an opener rule plate (bar-track 9-slice): inset well past the rounded corners so the

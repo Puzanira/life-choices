@@ -88,8 +88,14 @@ namespace ThanksNoThanks.Tests.PlayMode
             AssertAt(canvas, (RectTransform)driver.EnergyGroup.transform,  1085f, 66f, 290f, 72f,  "energy capsule");
             AssertAt(canvas, (RectTransform)driver.BalancerGroup.transform, 1444f, 66f, 380f, 72f, "relationships capsule");
             AssertAt(canvas, (RectTransform)driver.TimerRingFill.transform.parent, 960f, 250f, 180f, 180f, "timer ring");
-            AssertAt(canvas, driver.YesPlateImage.rectTransform,           610f, 940f, 420f, 190f, "ДА plate");
-            AssertAt(canvas, driver.NoPlateImage.rectTransform,            1310f, 940f, 470f, 190f, "СПАСИБО НЕ НАДО plate");
+            // §9 canon: RED «СПАСИБО, НЕ НАДО» LEFT (432,872), GREEN «ДА» RIGHT (1547,871) — the cabinet-lever
+            // layout, replacing the old green-left/red-right anchors. Since the baked art-pack plates landed,
+            // the rect is the art's own box (562×271 / 390×256 — the reference scale of `btn-no`/`btn-yes`,
+            // see BakedNo/YesPlateSize), not the old code-plate boxes. The red centre is 432, NOT the §B box
+            // centre 472.5: on the reference explainer the art sits flush with the box's LEFT edge (drawn
+            // plate x≈169..693) — Maintainer canon call, the explainer PNG outranks the spec table.
+            AssertAt(canvas, driver.NoPlateImage.rectTransform,             432f, 872f, 562f, 271f, "СПАСИБО НЕ НАДО plate (left)");
+            AssertAt(canvas, driver.YesPlateImage.rectTransform,           1547f, 871f, 390f, 256f, "ДА plate (right)");
 
             Object.Destroy(go);
             yield return null;
@@ -186,7 +192,7 @@ namespace ThanksNoThanks.Tests.PlayMode
                 "bar-track", "balancer-track", "balancer-marker",    // relationships capsule
                 "timer-ring-track", "timer-ring-track", "timer-ring", "marquee-bulb",  // timer ring layers
                 "marquee-frame-bulbs",                               // card
-                "plate-yes", "plate-no",                             // answer plates
+                "btn-yes", "btn-no",                                 // answer plates (baked art, §9)
             }.OrderBy(s => s).ToList();
 
             CollectionAssert.AreEqual(expected, actual,
@@ -289,6 +295,185 @@ namespace ThanksNoThanks.Tests.PlayMode
             // The text rect is inset 120 from the card root; assert the drawn glyphs stay inside that interior
             // (well within the bulb border) — pill = 120 against the card frame.
             AssertGeneratedInPill(cardText, driver.CardFrameImage, 120f, "longest card question");
+
+            Object.Destroy(go);
+            yield return null;
+        }
+
+        // ============================================================ §9 · buttons swapped (visual-foundation)
+
+        // The plate sprites expose a coloured pill ~55px inside the rect on every side (fixed 9-slice corner).
+
+        /// Signed tilt of a rect in degrees, CCW-positive (Unity z), normalised to (−180,180].
+        private static float TiltZ(RectTransform rt) => Mathf.DeltaAngle(0f, rt.localEulerAngles.z);
+
+        // The art-pack plates carry the words BAKED INTO the picture, and the PNGs have a transparent margin:
+        // the drawn (alpha-tight) art covers this fraction of the Image rect — measured on the source files
+        // btn-no.png 1422×685 → 1377×657 and btn-yes.png 907×594 → 876×577.
+        private const float NoArtFracX = 0.9684f, NoArtFracY = 0.9591f;
+        private const float YesArtFracX = 0.9658f, YesArtFracY = 0.9714f;
+        // The same plates measured on the reference screen «Экран спокойный обычный.png» (colour fill fitted
+        // with a min-area rotated bbox, then scaled out to the full art): the DRAWN plate is 544.7×259.9 (red)
+        // and 377.1×248.4 (green). This is the «видимая заливка как на эталоне» check — a rect that no longer
+        // matches the art's aspect (stretched lettering) or a plate a quarter too small fails it.
+        private const float NoArtRefW = 544.7f, NoArtRefH = 259.9f;
+        private const float YesArtRefW = 377.1f, YesArtRefH = 248.4f;
+        private const float ArtSizeTol = 6f;
+
+        // §9 canon: on EVERY ordinary choice screen the RED «СПАСИБО, НЕ НАДО» is the LEFT plate and the GREEN
+        // «ДА» is the RIGHT one — matching the cabinet levers (RedButton→AnswerNo left, GreenButton→AnswerYes
+        // right; ArcadeInputSource is untouched, only the screen side moved). Both are the ART-PACK sprites
+        // with the lettering baked in, so the dynamic label overlay must be HIDDEN (a live Text on top would
+        // double the words). Tilts are the reference's asymmetric pair (red −9°, green +13°, measured by a
+        // min-area rotated-bbox fit), and the drawn art matches the reference size.
+        [UnityTest]
+        public IEnumerator AnswerPlates_RedLeft_GreenRight_BakedArt_ReferenceTiltsAndSizes()
+        {
+            var driver = BootToAdult(out var go);
+            yield return ToAdult(driver);
+            var canvas = driver.CanvasRect;
+
+            var no = OwnBounds(canvas, driver.NoPlateImage.rectTransform);
+            var yes = OwnBounds(canvas, driver.YesPlateImage.rectTransform);
+
+            // Sides: canvas-local x = 0 is the screen centre (the 960 reference column).
+            Assert.Less(no.center.x, 0f, "the RED «СПАСИБО, НЕ НАДО» plate is LEFT of screen centre");
+            Assert.Greater(yes.center.x, 0f, "the GREEN «ДА» plate is RIGHT of screen centre");
+            Assert.Less(no.center.x, yes.center.x, "red is left of green (never the old green-left layout)");
+            Assert.IsFalse(Overlap(no, yes), "the two plates never overlap each other");
+
+            // The art-pack sprites, each on its own side — колор-к-смыслу plus the baked wording.
+            Assert.AreEqual("btn-no", driver.NoPlateImage.sprite.name,
+                "the left plate is the baked RED «СПАСИБО НЕ НАДО» art (btn-no), not a code plate");
+            Assert.AreEqual("btn-yes", driver.YesPlateImage.sprite.name,
+                "the right plate is the baked GREEN «ДА» art (btn-yes), not a code plate");
+            Assert.AreEqual(Image.Type.Simple, driver.NoPlateImage.type, "baked art draws Simple (not 9-sliced)");
+            Assert.AreEqual(Image.Type.Simple, driver.YesPlateImage.type, "baked art draws Simple (not 9-sliced)");
+
+            // The words come from the PICTURE: the dynamic overlay label is hidden in ordinary play.
+            Assert.IsFalse(driver.YesPlateText.gameObject.activeInHierarchy,
+                "«ДА» is baked into the art — the dynamic label must be hidden (no doubled text)");
+            Assert.IsFalse(driver.NoPlateText.gameObject.activeInHierarchy,
+                "«СПАСИБО, НЕ НАДО» is baked into the art — the dynamic label must be hidden");
+            Assert.IsTrue(driver.YesPlateImage.color.r > 0.9f && driver.YesPlateImage.color.g > 0.9f
+                && driver.YesPlateImage.color.b > 0.9f, "the baked art is drawn untinted (white) in normal play");
+
+            // Tilts per the reference — ASYMMETRIC and signed (a mirrored sign is a visible defect).
+            Assert.AreEqual(-9f, TiltZ(driver.NoPlateImage.rectTransform), 0.5f,
+                "the red LEFT plate leans down-to-the-right (Unity z = −9, reference −9.05)");
+            Assert.AreEqual(13f, TiltZ(driver.YesPlateImage.rectTransform), 0.5f,
+                "the green RIGHT plate leans up-to-the-right (Unity z = +13, reference +13.15)");
+
+            // Visible (drawn) size == the reference plate, ±6 px — rotation-independent (own rect × art frac).
+            var noRect = driver.NoPlateImage.rectTransform.rect;
+            var yesRect = driver.YesPlateImage.rectTransform.rect;
+            Assert.AreEqual(NoArtRefW, noRect.width * NoArtFracX, ArtSizeTol, "drawn width of the red plate ≈ reference");
+            Assert.AreEqual(NoArtRefH, noRect.height * NoArtFracY, ArtSizeTol, "drawn height of the red plate ≈ reference");
+            Assert.AreEqual(YesArtRefW, yesRect.width * YesArtFracX, ArtSizeTol, "drawn width of the green plate ≈ reference");
+            Assert.AreEqual(YesArtRefH, yesRect.height * YesArtFracY, ArtSizeTol, "drawn height of the green plate ≈ reference");
+
+            Object.Destroy(go);
+            yield return null;
+        }
+
+        // §8 typography: «основные надписи» (headlines, the card question, the plate labels, the HUD digits)
+        // render in Arimo Bold — and that font really carries the Cyrillic + ₽ glyphs they draw (anti-tofu:
+        // HasCharacter, not a glyph count, which a replacement box would satisfy).
+        [UnityTest]
+        public IEnumerator DisplayFont_IsArimoBold_AndCarriesCyrillicAndRouble()
+        {
+            var driver = BootToAdult(out var go);
+            yield return ToAdult(driver);
+
+            var display = driver.YesPlateText.font;
+            Assert.IsNotNull(display, "the display font is loaded (never a null font → all tofu)");
+            StringAssert.Contains("Arimo", display.name,
+                "«основные надписи» use Arimo Bold (meeting-revisions §8), not Russo One");
+
+            // The HUD digits + card question + headline share that same display font.
+            Assert.AreSame(display, driver.NoPlateText.font, "the decline label uses the display font");
+            Assert.AreSame(display, driver.CardRect.Find("CardText").GetComponent<Text>().font,
+                "the card question uses the display font");
+            Assert.AreSame(display, driver.AgeText.font,
+                "the age DIGITS use the display font");
+            foreach (var t in driver.AgeBadge.GetComponentsInChildren<Text>(includeInactive: true))
+                Assert.AreSame(display, t.font,
+                    "every age-badge label («" + t.text + "») uses the display font");
+
+            const string needed = "ДЯ₽СПАБОЕНХ0123456789";
+            if (display.dynamic) display.RequestCharactersInTexture(needed, 64, FontStyle.Normal);
+            foreach (char c in needed)
+                Assert.IsTrue(display.HasCharacter(c),
+                    "display font «" + display.name + "» has a real glyph for '" + c
+                        + "' (U+" + ((int)c).ToString("X4") + ") — not a tofu box");
+
+            // Body copy stays Rubik (a different font asset) — §8 keeps the two roles apart. The Ведущий's
+            // bubble is the canonical «комментарий», so assert the bubble's OWN Text, not a stand-in.
+            var body = driver.HostBubbleText.font;
+            Assert.IsNotNull(body, "the body font is loaded");
+            StringAssert.Contains("Rubik", body.name, "облачко Ведущего stays Rubik (§8 «комментарии»)");
+            Assert.AreNotSame(display, body, "the body face is a different asset from the display face");
+            Assert.AreSame(body, driver.CardPriceText.font, "small copy (BLOCK$ price) shares the body font");
+
+            Object.Destroy(go);
+            yield return null;
+        }
+
+        // §7 background: the rays are a CENTRED SQUARE big enough to cover the 1920×1080 diagonal at ANY
+        // rotation angle (никогда не оголяет углы), and they spin CLOCKWISE at 6°/сек (1 turn / 60 s).
+        [UnityTest]
+        public IEnumerator Background_CoversTheRotationDiagonal_AndSpinsClockwise()
+        {
+            var driver = BootToAdult(out var go);
+            yield return ToAdult(driver);
+            var canvas = driver.CanvasRect;
+
+            var bg = driver.BackgroundImage.rectTransform;
+            float diagonal = Mathf.Sqrt(1920f * 1920f + 1080f * 1080f);   // ≈2202.9 reference px
+            Assert.GreaterOrEqual(Mathf.Min(bg.rect.width, bg.rect.height), diagonal,
+                "the rays square covers the frame diagonal — corners stay filled at every spin angle");
+            Assert.AreEqual(bg.rect.width, bg.rect.height, 1f, "the rays backdrop is square");
+
+            // The spin centre = the screen centre: the rect's PIVOT (its rotation centre) is pinned there.
+            Assert.AreEqual(0.5f, bg.anchorMin.x, 0.001f, "the rays are anchored to the screen CENTRE (x)");
+            Assert.AreEqual(0.5f, bg.anchorMin.y, 0.001f, "the rays are anchored to the screen CENTRE (y)");
+            Assert.AreEqual(Vector2.zero, bg.anchoredPosition, "the pivot sits exactly on the screen centre");
+            var pivotOnCanvas = canvas.InverseTransformPoint(bg.position);
+            Assert.AreEqual(0f, pivotOnCanvas.x, 1f, "the rotation centre is the screen centre (x)");
+            Assert.AreEqual(0f, pivotOnCanvas.y, 1f, "the rotation centre is the screen centre (y)");
+
+            // Real coverage guard: EVERY edge is at least the frame's half-diagonal away from that pivot, so
+            // no rotation angle can bare a corner (a centre-pivot square alone would not prove this once the
+            // pivot moved onto the sprite's ray hub).
+            float halfDiag = 0.5f * Mathf.Sqrt(canvas.rect.width * canvas.rect.width
+                                             + canvas.rect.height * canvas.rect.height);
+            var p = bg.pivot;
+            float w2 = bg.rect.width, h2 = bg.rect.height;
+            foreach (var (dist, edge) in new[]
+            {
+                (p.x * w2, "left"), ((1f - p.x) * w2, "right"),
+                (p.y * h2, "bottom"), ((1f - p.y) * h2, "top"),
+            })
+                Assert.GreaterOrEqual(dist, halfDiag,
+                    "the rays reach past the frame corner in every direction (" + edge + " edge)");
+
+            // (a) live wiring: consecutive Update frames must actually MOVE the rays, clockwise
+            //     (Unity z decreasing). Frame-rate independent — only the sign/motion is asserted here.
+            float spin0 = driver.BackgroundSpinDegrees;
+            float z0 = bg.localEulerAngles.z;
+            yield return null;
+            yield return null;
+            yield return null;
+            float z1 = bg.localEulerAngles.z;
+            Assert.Greater(driver.BackgroundSpinDegrees, spin0, "the rays keep spinning frame to frame (Update-driven)");
+            Assert.Less(Mathf.DeltaAngle(z0, z1), 0f,
+                "the rendered rays turn CLOCKWISE (Unity z decreases) — не против часовой");
+
+            // (b) exact rate through the very same code path, on a deterministic dt: 6°/сек = 1 turn / 60 s.
+            float zBefore = bg.localEulerAngles.z;
+            driver.DebugSpinBackground(10f);
+            Assert.AreEqual(-60f, Mathf.DeltaAngle(zBefore, bg.localEulerAngles.z), 0.05f,
+                "10 s of spin = 60° clockwise → 6°/сек, one revolution per 60 s (meeting-revisions §7)");
 
             Object.Destroy(go);
             yield return null;

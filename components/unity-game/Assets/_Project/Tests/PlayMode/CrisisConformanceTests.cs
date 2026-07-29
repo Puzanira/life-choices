@@ -43,8 +43,9 @@ namespace ThanksNoThanks.Tests.PlayMode
         }
 
         // A deck of just the intro milestone I03 + neutral filler, plus the real crisis block — so the run
-        // climbs straight to the 45 crisis with «ВСЁ НОРМАЛЬНО» pinned to the LEFT (yes) plate. No depression.
-        private static Game CrisisGame(string csv)
+        // climbs straight to the 45 crisis with «ВСЁ НОРМАЛЬНО» pinned to one LEVER (normalOnYes = the ДА
+        // lever; which screen side that paints is the driver's business). No depression.
+        private static Game CrisisGame(string csv, bool normalOnYes = true)
         {
             var byId = CardLoader.ParseAll(csv).ToDictionary(c => c.Id);
             var filler = new Card
@@ -62,7 +63,7 @@ namespace ThanksNoThanks.Tests.PlayMode
             };
             return new Game(() => plan, coin: () => false)
             {
-                BlitzNormalOnLeftRoll = () => true,   // «ВСЁ НОРМАЛЬНО» → left (yes) plate
+                BlitzNormalOnYesRoll = () => normalOnYes,   // pin «ВСЁ НОРМАЛЬНО» to one lever
                 DepressionTriggerRoll = () => false,  // stay on the crisis (no «тёмная полоса» tail)
             };
         }
@@ -199,9 +200,11 @@ namespace ThanksNoThanks.Tests.PlayMode
             StringAssert.Contains("МЫСЛЬ 1/5", driver.CrisisInfoText.text, "counter reads the thought number");
             StringAssert.Contains("ПРОВАЛОВ", driver.CrisisInfoText.text, "counter reads the fail count");
 
-            // (3) «ВСЁ НОРМАЛЬНО» is on the LEFT (yes) plate and its rendered glyphs land fully on the plate's
-            // visible colored pill — no spill onto the frame/background on any side.
-            Assert.AreEqual("ВСЁ\nНОРМАЛЬНО", driver.YesPlateText.text, "left plate is «ВСЁ НОРМАЛЬНО»");
+            // (3) «ВСЁ НОРМАЛЬНО» is on the ДА/yes plate (since meeting-revisions §9 that is the RIGHT-hand
+            // plate on screen — Game.BlitzNormalOnYes names the LEVER, not the screen side; the screen-side ⇄
+            // scoring coupling itself is asserted in Blitz_NormalLabelSide_ScoresForThatSidesLever) and its
+            // rendered glyphs land fully on the plate's visible colored pill — no spill on any side.
+            Assert.AreEqual("ВСЁ\nНОРМАЛЬНО", driver.YesPlateText.text, "the ДА plate reads «ВСЁ НОРМАЛЬНО»");
             AssertLabelFits(driver.YesPlateText, driver.YesPlateImage, "«ВСЁ НОРМАЛЬНО»");
 
             // (4) Timer ring disjoint from the counter badge and the card.
@@ -231,6 +234,115 @@ namespace ThanksNoThanks.Tests.PlayMode
             yield return null;
         }
 
+        // The screen-side ⇄ scoring coupling of the blitz, asserted through the RENDERED layout only — never
+        // through Game's flag name. Since meeting-revisions §9 swapped the plates, Game's «yes/no» names the
+        // LEVER while the driver decides which SCREEN side that lever paints; a future re-swap that moved the
+        // plates without moving the scoring (or vice versa) would leave every existing assert green while the
+        // player pressed the label they saw and got a провал. So: read which plate DRAWS «ВСЁ НОРМАЛЬНО» and
+        // where that plate physically sits on the canvas, press the lever belonging to THAT side, and require
+        // a hit; the other side's lever must cost a fail. Run for both pinned rolls → both screen sides.
+        private IEnumerator AssertNormalLabelSideScores(bool normalOnYesLever)
+        {
+            var driver = Boot(out var go, out var fake);
+            yield return null;
+            var g = CrisisGame(Csv(), normalOnYesLever);
+            yield return DriveToCrisis(driver, fake, g);
+            driver.DebugPumpHost(3f);                     // clear the CR00 beat → the blitz is answerable
+            yield return null;
+
+            var canvas = driver.CanvasRect;
+            float yesX = OwnBounds(canvas, driver.YesPlateImage.rectTransform).center.x;
+            float noX = OwnBounds(canvas, driver.NoPlateImage.rectTransform).center.x;
+            Assert.AreNotEqual(yesX, noX, "the two plates occupy different screen sides");
+            float midX = 0.5f * (yesX + noX);
+
+            // Geometry → lever: the lever whose plate is drawn on the requested screen side.
+            GameInput LeverOnSide(bool right) => right == (yesX > noX) ? GameInput.AnswerYes : GameInput.AnswerNo;
+
+            // Which side DRAWS «ВСЁ НОРМАЛЬНО» right now (from the rendered labels + their rect positions).
+            bool NormalIsOnScreenRight()
+            {
+                bool onYesPlate = driver.YesPlateText.text.Contains("НОРМАЛЬНО");
+                Assert.AreNotEqual(onYesPlate, driver.NoPlateText.text.Contains("НОРМАЛЬНО"),
+                    "«ВСЁ НОРМАЛЬНО» is drawn on exactly one of the two plates");
+                return (onYesPlate ? yesX : noX) > midX;
+            }
+
+            // (a) pressing the lever of the side that SHOWS «ВСЁ НОРМАЛЬНО» scores — no fail, blitz advances.
+            bool normalRight = NormalIsOnScreenRight();
+            int failsBefore = g.BlitzFails;
+            int thoughtBefore = g.BlitzThoughtNumber;
+            fake.Fire(LeverOnSide(normalRight));
+            Assert.AreEqual(failsBefore, g.BlitzFails,
+                "pressing the lever on the side that RENDERS «ВСЁ НОРМАЛЬНО» ("
+                    + (normalRight ? "right" : "left") + ") is a hit, not a провал");
+            Assert.AreNotEqual(thoughtBefore, g.BlitzThoughtNumber, "…and the blitz advanced to the next thought");
+            yield return null;                            // driver re-renders the next thought's plates
+
+            // (b) …and the OTHER side's lever is a miss on the next thought.
+            bool normalRightNow = NormalIsOnScreenRight();
+            failsBefore = g.BlitzFails;
+            fake.Fire(LeverOnSide(!normalRightNow));
+            Assert.AreEqual(failsBefore + 1, g.BlitzFails,
+                "pressing the lever on the side that shows «О НЕТ» costs a провал");
+
+            Object.Destroy(go);
+            yield return null;
+        }
+
+        [UnityTest]
+        public IEnumerator Blitz_NormalLabelSide_ScoresForThatSidesLever_NormalOnYesLever()
+            => AssertNormalLabelSideScores(normalOnYesLever: true);
+
+        [UnityTest]
+        public IEnumerator Blitz_NormalLabelSide_ScoresForThatSidesLever_NormalOnNoLever()
+            => AssertNormalLabelSideScores(normalOnYesLever: false);
+
+        // §9 baked art ⇄ crisis code-plates, THERE AND BACK. Ordinary play draws the art-pack plates with the
+        // words baked in (dynamic label hidden); the blitz/impulse must swap to the blank code-plates, because
+        // they relabel the pair per thought («ВСЁ НОРМАЛЬНО»/«О НЕТ») and gold-highlight the decline — and the
+        // moment the crisis ends the baked art must come back (a stuck code-plate = «ДА» silently missing).
+        [UnityTest]
+        public IEnumerator Plates_SwapToCodePlates_ForTheCrisis_AndBackToBakedArt()
+        {
+            var driver = Boot(out var go, out var fake);
+            yield return null;
+
+            // (1) ordinary play: baked art, no live label.
+            Assert.AreEqual("btn-yes", driver.YesPlateImage.sprite.name, "ordinary play draws the baked ДА art");
+            Assert.AreEqual("btn-no", driver.NoPlateImage.sprite.name, "ordinary play draws the baked НЕ НАДО art");
+            Assert.IsFalse(driver.YesPlateText.gameObject.activeSelf, "the label overlay is hidden (baked words)");
+            Assert.IsFalse(driver.NoPlateText.gameObject.activeSelf, "the label overlay is hidden (baked words)");
+
+            var g = CrisisGame(Csv());
+            yield return DriveToCrisis(driver, fake, g);
+            driver.DebugPumpHost(3f);                     // clear the CR00 beat → the blitz view is up
+            yield return null;
+
+            // (2) blitz: blank code-plates + the live relabel.
+            Assert.AreEqual(CrisisPhase.Blitz, g.Phase, "in the blitz");
+            Assert.AreEqual("plate-yes", driver.YesPlateImage.sprite.name, "the blitz uses the blank code-plate");
+            Assert.AreEqual("plate-no", driver.NoPlateImage.sprite.name, "the blitz uses the blank code-plate");
+            Assert.IsTrue(driver.YesPlateText.gameObject.activeInHierarchy, "the blitz label overlay is VISIBLE");
+            Assert.IsTrue(driver.NoPlateText.gameObject.activeInHierarchy, "the blitz label overlay is VISIBLE");
+            StringAssert.Contains("НОРМАЛЬНО", driver.YesPlateText.text + driver.NoPlateText.text,
+                "one of the blitz plates is relabelled «ВСЁ НОРМАЛЬНО»");
+
+            // (3) clear the blitz cleanly (roll pinned to the ДА lever) → ordinary play resumes…
+            for (int i = 0; i < 5; i++) fake.Yes();
+            Assert.AreEqual(CrisisPhase.None, g.Phase, "a clean blitz ends the crisis (no impulse)");
+            yield return null;                            // RestoreNormalPlates runs on the first normal frame
+
+            // …and the baked art is back, label overlay hidden again.
+            Assert.AreEqual("btn-yes", driver.YesPlateImage.sprite.name, "the baked ДА art returns after the crisis");
+            Assert.AreEqual("btn-no", driver.NoPlateImage.sprite.name, "the baked НЕ НАДО art returns after the crisis");
+            Assert.IsFalse(driver.YesPlateText.gameObject.activeSelf, "the crisis label overlay is hidden again");
+            Assert.IsFalse(driver.NoPlateText.gameObject.activeSelf, "the crisis label overlay is hidden again");
+
+            Object.Destroy(go);
+            yield return null;
+        }
+
         [UnityTest]
         public IEnumerator Impulse_ShowsDrawnMuteWarning_AndHighlightsDecline()
         {
@@ -254,6 +366,11 @@ namespace ThanksNoThanks.Tests.PlayMode
             var muteImg = mute.GetComponent<Image>();
             Assert.IsNotNull(muteImg, "the mute icon is a drawn Image (not a Text glyph)");
             Assert.IsNotNull(muteImg.sprite, "the mute icon has a real sprite (not tofu)");
+
+            // The impulse keeps the blank code-plates + live labels (the baked art can't carry «поддаться»).
+            Assert.AreEqual("plate-yes", driver.YesPlateImage.sprite.name, "the impulse uses the code-plate");
+            Assert.AreEqual("plate-no", driver.NoPlateImage.sprite.name, "the impulse uses the code-plate");
+            Assert.IsTrue(driver.NoPlateText.gameObject.activeInHierarchy, "the impulse label overlay is VISIBLE");
 
             // «СПАСИБО, НЕ НАДО» is the highlighted decline (gold), «ДА» sits on the yes plate.
             var noC = driver.NoPlateImage.color;

@@ -59,8 +59,8 @@ namespace ThanksNoThanks.Tests.PlayMode
             AssertOnCanvas(driver, driver.CardRect, "card marquee");
 
             // Answer plates: correct sprites + tilt, both on canvas.
-            Assert.AreEqual("plate-yes", driver.YesPlateImage.sprite.name);
-            Assert.AreEqual("plate-no", driver.NoPlateImage.sprite.name);
+            Assert.AreEqual("btn-yes", driver.YesPlateImage.sprite.name);   // §9 baked art
+            Assert.AreEqual("btn-no", driver.NoPlateImage.sprite.name);
             AssertOnCanvas(driver, driver.YesPlateImage.rectTransform, "ДА plate");
             AssertOnCanvas(driver, driver.NoPlateImage.rectTransform, "СПАСИБО НЕ НАДО plate");
 
