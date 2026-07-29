@@ -176,4 +176,4 @@
 ## 6. Playtest verdict
 
 `Playtest ok:` — (в пачку на плейтест основательницы)
-`Landed:` —
+`Landed:` ab64357 (2026-07-29)
