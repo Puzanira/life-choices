@@ -12,14 +12,17 @@ namespace ThanksNoThanks.Tests.PlayMode
     /// <summary>
     /// Layer-2 conformance for the four TEXT screens (design gate: S1 opener, S5 tutorial, S11/S12 finales).
     /// Asserts the RENDERED result, not activeSelf flags:
-    ///  • opener: the four rules each render inside their OWN cobalt plate's visible pill, the «НАЧАТЬ ЖИЗНЬ»
-    ///    label lands on its green plate's pill, and the panel renders EXACTLY its expected sprite set;
-    ///  • tutorial: the hint body sits fully inside the yellow modal's visible pill, the «ПОНЯТНО — Enter»
+    ///  • opener: the logo cut, the marquee frame and the cream rules plate sit in their MEASURED explainer
+    ///    boxes (×0.6977, ±10 px), the bulb ring rides the gold band, the CANON rules copy renders whole
+    ///    inside the plate, the «НАЧАТЬ ЖИЗНЬ — ЖМИ ЗЕЛЁНУЮ» CTA lands on its green pill, and the panel
+    ///    renders EXACTLY its expected sprite census;
+    ///  • tutorial: the hint body sits fully inside the yellow modal's visible pill, the «ПОНЯТНО» dismiss
     ///    button label is inside its pill AND the button is not flush to the modal bottom (a clear margin),
     ///    the gameplay behind is dimmed, and the modal renders exactly modal+button;
     ///  • finales: the cause line is on-screen (never clipped by the 16:9 edge), a worst-case LONG story
-    ///    still fits inside the story plate's visible pill, the «НАЧАТЬ ЗАНОВО» label lands on its pill, and
-    ///    the finale panel renders exactly story-plate + restart-plate.
+    ///    still fits inside the story plate's visible pill, the «НАЧАТЬ ЗАНОВО» label lands on its pill,
+    ///    that pill renders the GREEN token (same assertion as the opener CTA — both name the same physical
+    ///    button), and the finale panel renders exactly cause-pill + story-plate + restart rim+plate.
     /// The visible pill = the plate rect shrunk by the sprite's 9-slice corner inset (NOT the raw text rect):
     /// best-fit only shrinks glyphs to WITHIN the text rect, so text-rect ⊆ pill guarantees the drawn label
     /// lands on the coloured pill for any best-fit result. Geometric + deterministic (stable headless).
@@ -27,7 +30,6 @@ namespace ThanksNoThanks.Tests.PlayMode
     public class ScreensConformanceTests
     {
         // Per-sprite visible-pill corner insets (UI units), conservative vs the raw 9-slice border.
-        private const float PlatePill = 55f;     // plate-yes / plate-no (82px border → ~55 visible)
         private const float BarTrackPill = 16f;  // bar-track rounded rect — only the corners are cut
 
         private static GameDriver Boot(out GameObject go, out PlayFakeInputSource fake)
@@ -112,6 +114,23 @@ namespace ThanksNoThanks.Tests.PlayMode
             }
         }
 
+        // Both confirm CTAs (opener «НАЧАТЬ ЖИЗНЬ», finale «НАЧАТЬ ЗАНОВО») promise the GREEN cabinet
+        // button, so their plate must render the GREEN token #05CE51 — not merely a green. uGUI MULTIPLIES
+        // the Image tint by the sprite's own fill, so the rendered colour (what the design gate measures off
+        // the frame) is fill × tint; asserting the raw tint would pass on a plate that renders pale.
+        private static void AssertTokenGreen(Image plate, string what)
+        {
+            Assert.AreEqual("bar-track", plate.sprite.name,
+                what + " is built on bar-track — the only plate sprite a tint can drive to the token");
+            var rendered = new Color(GameDriver.BarTrackFillToken.r * plate.color.r,
+                                     GameDriver.BarTrackFillToken.g * plate.color.g,
+                                     GameDriver.BarTrackFillToken.b * plate.color.b);
+            var token = GameDriver.GoGreenToken;
+            Assert.AreEqual(token.r, rendered.r, 1f / 255f, what + " renders the GREEN token R (#05CE51)");
+            Assert.AreEqual(token.g, rendered.g, 1f / 255f, what + " renders the GREEN token G (#05CE51)");
+            Assert.AreEqual(token.b, rendered.b, 1f / 255f, what + " renders the GREEN token B (#05CE51)");
+        }
+
         private static List<string> SpriteNames(GameObject root)
             => root.GetComponentsInChildren<Image>(includeInactive: false)
                 .Select(i => i.sprite != null ? (string.IsNullOrEmpty(i.sprite.name) ? "<unnamed>" : i.sprite.name) : "<null>")
@@ -181,44 +200,109 @@ namespace ThanksNoThanks.Tests.PlayMode
 
         // ============================================================ S1 opener
 
+        /// <summary>Канон-текст правил опенера (build-spec §A) — независимая копия, чтобы тест реально
+        /// СВЕРЯЛ строку драйвера с каноном, а не сравнивал константу саму с собой.</summary>
+        private const string CanonRules =
+            "Добро пожаловать в увлекательное шоу длинною в жизнь! Пройди от 1 года до 100 лет, "
+            + "постарайся принять правильные решения и за всем уследить. Со временем жизнь будет "
+            + "становиться всё сложнее и быстрее. Уследить за всем невозможно, но давай попробуем!";
+
+        private static string Squash(string s)
+            => System.Text.RegularExpressions.Regex.Replace(s ?? string.Empty, @"\s+", " ").Trim();
+
+        /// <summary>
+        /// Assert an element sits in its MEASURED mockup box — (cx, cy-from-top, w, h) at 1920×1080, i.e.
+        /// the explainer box × 0.6977. Read back out of the rect's own anchor + sizeDelta (the exact inverse
+        /// of GameDriver.AnchorPx): the batch canvas is not 16:9, so canvas-pixel arithmetic would lie about
+        /// sizes, while the authored anchor/size pair IS the geometry that ships on the 1920×1080 cabinet.
+        /// </summary>
+        private static void AssertMockBox(RectTransform rt, float cx, float cyTop, float w, float h,
+            float tol, string what)
+        {
+            Assert.AreEqual(rt.anchorMin, rt.anchorMax, what + ": point-anchored (AnchorPx)");
+            Assert.AreEqual(0f, rt.anchoredPosition.x, 0.01f, what + ": sits on its anchor (x)");
+            Assert.AreEqual(0f, rt.anchoredPosition.y, 0.01f, what + ": sits on its anchor (y)");
+            Assert.AreEqual(cx, rt.anchorMin.x * 1920f, tol, what + ": centre X (эталон ×0.6977)");
+            Assert.AreEqual(cyTop, (1f - rt.anchorMin.y) * 1080f, tol, what + ": centre Y from the TOP");
+            Assert.AreEqual(w, rt.sizeDelta.x, tol, what + ": width");
+            Assert.AreEqual(h, rt.sizeDelta.y, tol, what + ": height");
+        }
+
         [UnityTest]
-        public IEnumerator Opener_RulesInPlates_StartLabelOnPill_ExactSprites()
+        public IEnumerator Opener_MatchesExplainer_CanonRules_GreenCta_ExactSprites()
         {
             var driver = Boot(out var go, out var fake);
             yield return null;                                  // Awake built the HUD; boots in the opener
 
             Assert.AreEqual(GameState.Opener, driver.Game.State, "boots into the opener");
             Assert.IsTrue(driver.OpenerPanel.activeSelf, "opener panel is up");
+            Assert.IsFalse(driver.GamePanel.activeSelf, "HUD/таймер на опенере не идут (build-spec §A)");
+            Assert.IsFalse(driver.FinalePanel.activeSelf, "no finale panel on the opener");
 
             var opener = driver.OpenerPanel;
 
-            // (1) Exactly four rules, each inside its OWN cobalt plate's visible pill (never bare on the
-            //     sunburst). Teeth for "exactly four": the four Find()s below prove >=4, and asserting there
-            //     is NO fifth plate proves <=4 (a stray 5th plate would fail here rather than pass silently).
-            Assert.IsNull(opener.transform.Find("RulePlate4"), "no fifth rule plate — exactly four (S1)");
-            for (int i = 0; i < 4; i++)
+            // (1) The three measured boxes off `explainers/Стартовый экран.png` (2752×1536 × 0.6977), ±10 px.
+            Assert.IsNotNull(driver.OpenerLogo, "the opener has a logo Image");
+            Assert.IsNotNull(driver.OpenerLogo.sprite, "…with a real sprite (not a missing asset)");
+            Assert.AreEqual("opener-logo-v2", driver.OpenerLogo.sprite.name,
+                "the logo is the cut taken from the explainer");
+            AssertMockBox(driver.OpenerLogo.rectTransform, 954f, 279f, 1017f, 477f, 10f, "логотип");
+
+            var frame = opener.transform.Find("MarqueeFrame").GetComponent<Image>();
+            AssertMockBox(frame.rectTransform, 966f, 781f, 1798f, 522f, 10f, "марки-рамка");
+            AssertMockBox(driver.OpenerPlate.rectTransform, 966f, 781f, 1726f, 450f, 10f, "плашка правил");
+
+            // The cream plate really is INSIDE the marquee frame (a gold band on every side), and the logo
+            // clears the frame — i.e. the composition, not just four independent numbers.
+            Assert.Greater(frame.rectTransform.sizeDelta.x, driver.OpenerPlate.rectTransform.sizeDelta.x,
+                "the cream plate sits inside the marquee frame (width)");
+            Assert.Greater(frame.rectTransform.sizeDelta.y, driver.OpenerPlate.rectTransform.sizeDelta.y,
+                "the cream plate sits inside the marquee frame (height)");
+            float logoBottom = 279f + 477f * 0.5f;
+            float frameTop = 781f - 522f * 0.5f;
+            Assert.LessOrEqual(logoBottom, frameTop + 1f, "the logo clears the rules frame (no overlap)");
+
+            // (2) Marquee bulbs: a real ring around the frame, every bulb ON the gold band's midline.
+            var bulbs = frame.GetComponentsInChildren<Image>(true)
+                .Where(i => i.gameObject.name.StartsWith("Bulb")).ToList();
+            Assert.AreEqual(118, bulbs.Count, "48 bulbs across × 2 + 11 down × 2 — the explainer's cadence");
+            float hx = frame.rectTransform.sizeDelta.x * 0.5f;
+            float hy = frame.rectTransform.sizeDelta.y * 0.5f;
+            foreach (var b in bulbs)
             {
-                var plateT = opener.transform.Find("RulePlate" + i);
-                Assert.IsNotNull(plateT, "rule plate " + i + " exists");
-                var plate = plateT.GetComponent<Image>();
-                var text = plateT.Find("RuleText" + i).GetComponent<Text>();
-                AssertTextInPill(text, plate, BarTrackPill, "rule " + i);
+                var p = b.rectTransform.anchoredPosition;
+                bool onSide = Mathf.Abs(Mathf.Abs(p.x) - (hx - 18.5f)) < 1f;
+                bool onCap = Mathf.Abs(Mathf.Abs(p.y) - (hy - 18.5f)) < 1f;
+                Assert.IsTrue(onSide || onCap,
+                    "bulb «" + b.gameObject.name + "» sits on the gold band, not adrift on the plate");
+                Assert.LessOrEqual(Mathf.Abs(p.x), hx, "bulb inside the frame (x)");
+                Assert.LessOrEqual(Mathf.Abs(p.y), hy, "bulb inside the frame (y)");
             }
 
-            // (2) «НАЧАТЬ ЖИЗНЬ (Enter)» label lands on the green start plate's visible pill.
+            // (3) The CANON rules copy, whole and unedited, with its drawn glyphs inside the cream plate.
+            Assert.AreEqual(CanonRules, Squash(driver.OpenerRules.text),
+                "правила опенера = канон build-spec §A (без «5 секунд»), целиком");
+            AssertGeneratedInPill(driver.OpenerRules, driver.OpenerPlate, BarTrackPill, "канон-текст правил");
+            AssertNoTofu(driver.OpenerRules, "канон-текст правил");
+
+            // (4) The start CTA names the PHYSICAL green button (founder 99fab3c) and lands on its own pill.
             var startPlate = opener.transform.Find("StartPlate").GetComponent<Image>();
             var startText = startPlate.transform.Find("StartText").GetComponent<Text>();
             StringAssert.Contains("НАЧАТЬ ЖИЗНЬ", startText.text, "start button reads «НАЧАТЬ ЖИЗНЬ»");
-            // Two-line CTA: assert the DRAWN glyph mesh (not just the rect) fits the green pill on all sides.
-            AssertGeneratedInPill(startText, startPlate, PlatePill, "«НАЧАТЬ ЖИЗНЬ» two-line label");
+            StringAssert.Contains("ЗЕЛЁНУЮ", startText.text, "…and names the GREEN cabinet button");
+            AssertGeneratedInPill(startText, startPlate, BarTrackPill, "«НАЧАТЬ ЖИЗНЬ» CTA");
+            AssertTokenGreen(startPlate, "opener start CTA");
 
-            // (3) Exhaustive enumeration: exactly the four rule plates + the start plate (no stray Image).
-            var expected = new List<string> { "bar-track", "bar-track", "bar-track", "bar-track", "plate-yes" };
-            CollectionAssert.AreEqual(expected.OrderBy(s => s).ToList(), SpriteNames(opener),
-                "opener renders exactly four rule plates + the start plate — no stray/placeholder Image");
+            // (5) Exhaustive census: logo + 4 layered plates (frame rim/gold, plate rim/cream) + the CTA
+            //     (rim + green) + 118 bulbs — no stray/placeholder Image anywhere on the screen.
+            var census = SpriteNames(opener).GroupBy(s => s).ToDictionary(g => g.Key, g => g.Count());
+            Assert.AreEqual(1, census["opener-logo-v2"], "exactly one logo");
+            Assert.AreEqual(118, census["marquee-bulb"], "exactly the measured bulb ring");
+            Assert.AreEqual(6, census["bar-track"], "frame rim+gold, plate rim+cream, CTA rim+green");
+            Assert.AreEqual(3, census.Count, "opener renders NOTHING else — no stray/placeholder Image");
 
-            // (4) Exhaustive Text enumeration: title + four rules + the start label; no stray/tofu text.
-            AssertExactTexts(opener, 6, "opener");
+            // (6) Exhaustive Text enumeration: the rules copy + the start CTA; no stray/tofu text.
+            AssertExactTexts(opener, 2, "opener");
 
             Object.Destroy(go);
             yield return null;
@@ -263,9 +347,10 @@ namespace ThanksNoThanks.Tests.PlayMode
             // multi-line hint under verticalOverflow, so assert the DRAWN glyph mesh (not just the rect) fits.
             AssertGeneratedInPill(driver.TutorialText, modal, BarTrackPill, "hint body");
 
-            // (3) «ПОНЯТНО — Enter» button label inside its own pill.
+            // (3) «ПОНЯТНО — ЖМИ ЗЕЛЁНУЮ» button label inside its own pill.
             StringAssert.Contains("ПОНЯТНО", driver.TutorialButtonText.text, "button reads «ПОНЯТНО»");
-            StringAssert.Contains("Enter", driver.TutorialButtonText.text, "button spells out «Enter»");
+            StringAssert.Contains("ЗЕЛЁНУЮ", driver.TutorialButtonText.text,
+                "the dismiss button names the PHYSICAL green control, never a dev key (founder 99fab3c)");
             AssertTextInPill(driver.TutorialButtonText, driver.TutorialButton, BarTrackPill, "«ПОНЯТНО»");
 
             // (4) The button is NOT flush to the modal bottom — a clear margin below it (S5 mockup).
@@ -326,16 +411,23 @@ namespace ThanksNoThanks.Tests.PlayMode
             // DRAWN glyph mesh (best-fit honoured), not just the rect, so a vertical spill past the pill fails.
             AssertGeneratedInPill(driver.FinaleStoryText, driver.FinaleStoryPlate, BarTrackPill, "long finale story");
 
-            // (3) «НАЧАТЬ ЗАНОВО (Enter)» two-line label — drawn glyphs land on the green restart plate's pill.
+            // (3) «НАЧАТЬ ЗАНОВО / ЖМИ ЗЕЛЁНУЮ» two-line label — drawn glyphs land on the green restart pill.
             var again = driver.FinalePanel.transform.Find("AgainPlate").GetComponent<Image>();
             var againText = again.transform.Find("AgainText").GetComponent<Text>();
             StringAssert.Contains("НАЧАТЬ ЗАНОВО", againText.text, "restart button reads «НАЧАТЬ ЗАНОВО»");
-            AssertGeneratedInPill(againText, again, PlatePill, "«НАЧАТЬ ЗАНОВО» two-line label");
+            AssertGeneratedInPill(againText, again, BarTrackPill, "«НАЧАТЬ ЗАНОВО» two-line label");
 
-            // (4) Exhaustive enumeration: exactly the cause pill + the story plate + the restart plate.
-            var expected = new List<string> { "bar-track", "bar-track", "plate-yes" }.OrderBy(s => s).ToList();
+            // (3b) …and the pill is the GREEN TOKEN itself, not «some green»: the label names the green
+            // cabinet button, so a paler plate (plate-yes' own #5CBF5F) makes the hint point at a colour the
+            // cabinet does not have (design gate 2026-07-31). Asserted on the RENDERED colour — uGUI
+            // multiplies the tint by the sprite's own fill — exactly as the opener CTA is asserted below.
+            AssertTokenGreen(again, "finale restart CTA");
+
+            // (4) Exhaustive enumeration: exactly the cause pill + the story plate + the restart plate
+            //     (rim + green, built like the opener CTA so both confirm plates carry the same token).
+            var expected = new List<string> { "bar-track", "bar-track", "bar-track", "bar-track" };
             CollectionAssert.AreEqual(expected, SpriteNames(driver.FinalePanel),
-                "the finale renders exactly the cause pill + story plate + restart plate — no stray Image");
+                "the finale renders exactly the cause pill + story plate + restart rim+plate — no stray Image");
 
             // (5) Exhaustive Text enumeration: title + cause + story + restart label; no stray/tofu text.
             AssertExactTexts(driver.FinalePanel, 4, "finale");

@@ -11,8 +11,9 @@ namespace ThanksNoThanks.Tests.PlayMode
     /// Arcade contract §5 lifecycle, driven END-TO-END through the REAL arcade path: the package's
     /// <see cref="FakeBackend"/> feeds ArcadeInput, the driver's own <see cref="ArcadeInputSource"/>
     /// (added by GameDriver.Start — no semantic fake injected) translates buttons to GameInput. So these
-    /// tests exercise the actual cabinet flow: GREEN starts a life / dismisses hints, RED answers and
-    /// restarts from the finale, MENU exits a live run cleanly to a fresh opener.
+    /// tests exercise the actual cabinet flow: GREEN is the ONE confirm — it starts a life, dismisses hints
+    /// AND restarts from the finale (founder 99fab3c); RED only answers cards and is inert on the finale;
+    /// MENU exits a live run cleanly to a fresh opener.
     /// </summary>
     public class ArcadeExitTests
     {
@@ -91,7 +92,7 @@ namespace ThanksNoThanks.Tests.PlayMode
         }
 
         [UnityTest]
-        public IEnumerator Red_Declines_A_Whole_Life_To_The_Finale_Then_Red_Restarts()
+        public IEnumerator Red_Declines_A_Whole_Life_To_The_Finale_Then_Green_Restarts()
         {
             yield return BootArcadeGame();
             yield return Press(Green);   // opener → playing
@@ -116,9 +117,14 @@ namespace ThanksNoThanks.Tests.PlayMode
             Assert.AreEqual(GameState.Finale, _driver.Game.State, "an all-RED (СПАСИБО НЕ НАДО) run reached an ending");
             Assert.IsNotNull(_driver.Game.Necrolog, "the necrolog rendered");
 
-            // Founder mapping: RED on the finale = restart (the arcade confirm of the death screen).
+            // Founder mapping 2026-07-29 (99fab3c), OVERRIDING the earlier «рестарт = красная» row:
+            // GREEN is the one confirm everywhere, and RED on the finale is INERT.
             yield return Press(Red);
-            Assert.AreEqual(GameState.Opener, _driver.Game.State, "RED restarted from the finale to the opener");
+            Assert.AreEqual(GameState.Finale, _driver.Game.State,
+                "RED on the finale does nothing — the payoff screen cannot be mashed away");
+
+            yield return Press(Green);
+            Assert.AreEqual(GameState.Opener, _driver.Game.State, "GREEN restarted from the finale to the opener");
             Assert.AreEqual(100, _driver.Game.Scales.Health, "state fully reset for the next player");
 
             yield return Press(Green);

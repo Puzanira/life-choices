@@ -20,6 +20,19 @@ namespace ThanksNoThanks.Tests.PlayMode
         private const int W = 1920;
         private const int H = 1080;
 
+        // A representative finished life for the «finale» pose — a handful of real necrolog lines + a cause.
+        private static NecrologResult SampleNecrolog()
+        {
+            var entries = new System.Collections.Generic.List<NecrologEntry>
+            {
+                new NecrologEntry { Age = 7,  Order = 0, Line = "В семь лет вы завели рыжего кота и назвали его Борщ.", IsRond = false },
+                new NecrologEntry { Age = 24, Order = 1, Line = "В двадцать четыре вы уехали в другой город и ни разу не пожалели.", IsRond = false },
+                new NecrologEntry { Age = 41, Order = 2, Line = "К сорока одному у вас была работа, которую вы почти любили.", IsRond = false },
+                new NecrologEntry { Age = 68, Order = 3, Line = "В шестьдесят восемь внуки научили вас проигрывать в карты.", IsRond = false },
+            };
+            return Necrolog.Build("спокойная старость", entries);
+        }
+
         [UnityTest]
         public IEnumerator Capture_Arcade_Frame_NoMagenta()
         {
@@ -40,6 +53,17 @@ namespace ThanksNoThanks.Tests.PlayMode
                     break;
                 case "childflash": driver.DebugPreviewChildFlash(); break;
                 case "host": driver.DebugPreviewHostComment(); break;
+                case "opener":
+                    // S1 as the player meets it: the driver already boots into the opener, so the pose is
+                    // «touch nothing». Freeze Update so the spinning rays land on a deterministic angle.
+                    driver.enabled = false;
+                    break;
+                case "finale":
+                    // S11: the payoff screen with a real necrolog, so the design gate can read the
+                    // «НАЧАТЬ ЗАНОВО — ЖМИ ЗЕЛЁНУЮ» restart CTA against the founder's control language.
+                    driver.DebugRenderFinale(SampleNecrolog());
+                    driver.enabled = false;
+                    break;
                 default: driver.DebugPreviewArcadeShot(); break;
             }
             // Optional energy override, so the design gate can look at the lightning layer against a cream,

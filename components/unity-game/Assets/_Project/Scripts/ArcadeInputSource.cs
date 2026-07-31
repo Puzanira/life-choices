@@ -13,8 +13,10 @@ namespace ThanksNoThanks
     ///
     /// Physical → semantic mapping (founder Gate-2 decisions marked ✔; the rest are natural defaults awaiting
     /// Gate-2 sign-off — see the increment report):
-    ///   GreenButton ✔ → ДА  (AnswerYes; on the opener/hint the driver reads it as CONFIRM/proceed)
-    ///   RedButton   ✔ → НЕТ (AnswerNo;  on the finale the driver reads it as CONFIRM/restart)
+    ///   GreenButton ✔ → ДА  (AnswerYes; on the opener/hint/FINALE the driver reads it as CONFIRM —
+    ///                        i.e. start / dismiss / restart: the ONE confirm control, founder 99fab3c)
+    ///   RedButton   ✔ → НЕТ (AnswerNo; answer-only. On the finale it is deliberately INERT so a masher
+    ///                        can never skip the necrolog — this overrides the old «рестарт = красная»)
     ///   MenuButton  ✔ → выход (Exit — clean end-of-run, arcade contract §5)
     ///   Crank         → крутилка денег (accumulated degrees → discrete MoneyTick — a literal money crank)
     ///   BangButton    → «жми по вспышке» кнопка ребёнка (ChildPress)

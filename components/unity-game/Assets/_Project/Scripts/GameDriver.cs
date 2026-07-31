@@ -36,6 +36,13 @@ namespace ThanksNoThanks
         private static readonly Color TimerHot = new(1f, 0.32f, 0.18f);        // low-time shift
         private static readonly Color PlateMute = new(0.62f, 0.62f, 0.64f);    // S10: muted answer plates while BLOCK$-blocked
         private static readonly Color CardBlockDim = new(0.52f, 0.54f, 0.60f); // S10: tint the card frame when unaffordable (dims to muted cobalt)
+        // S1 opener, снято с эталона «Стартовый экран.png»: золото марки-рамки и тёплый крем её плашки —
+        // это СВОИ значения экрана (крем опенера теплее токена CREAM карточек), поэтому отдельные токены.
+        private static readonly Color MarqueeGold = new(248f / 255f, 180f / 255f, 50f / 255f); // #f8b432
+        private static readonly Color OpenerCream = new(247f / 255f, 228f / 255f, 187f / 255f);// #f7e4bb
+        private static readonly Color GoGreen = new(5f / 255f, 206f / 255f, 81f / 255f);       // #05CE51 — GREEN кабинета
+        /// <summary>The GREEN token, exposed so a test can bind BOTH confirm CTAs to the canon hex.</summary>
+        public static Color GoGreenToken => GoGreen;
 
         // ---- age gates (canon opening ages, S5 tutorial) : purely visual reveal ----
         public const int MoneyAge = 18;
@@ -57,6 +64,11 @@ namespace ThanksNoThanks
         private GameObject _openerPanel;
         private GameObject _gamePanel;
         private GameObject _finalePanel;
+
+        // S1 opener parts (design-gate handles: logo cut, cream rules plate, canon rules copy)
+        private Image _openerLogo;
+        private Image _openerPlate;
+        private Text _openerRules;
 
         // Shared background — `sunburst-bg-v3`, a SCREEN-SPACE synthesis of the art-pack rays.
         // Why a synthesis (design-gate round 2): the reference explainer was assembled with the rays at
@@ -420,7 +432,7 @@ namespace ThanksNoThanks
 
         private const string MoneyTutorialText =
             "ТЕПЕРЬ У ВАС ЕСТЬ РАБОТА!\n\n" +
-            "Крутите ПРОБЕЛ — и деньги потекут. Но жизнь идёт своим чередом:\n" +
+            "Крутите РУЧКУ — и деньги потекут. Но жизнь идёт своим чередом:\n" +
             "содержать себя стоит денег каждую секунду.\n\n" +
             "Рук всего две — крутить и отвечать придётся разом.";
 
@@ -429,13 +441,13 @@ namespace ThanksNoThanks
         private const string RelationshipsTutorialText =
             "ПЕРВАЯ ЛЮБОВЬ!\n\n" +
             "Появился БАЛАНСИР ОТНОШЕНИЙ — маркер всё время сползает ВНИЗ.\n" +
-            "ДЕРЖИТЕ ↑, чтобы удержать его в зелёной зоне (↓ — опустить).\n\n" +
+            "ДЕРЖИТЕ ДЖОЙСТИК ВВЕРХ, чтобы удержать его в зелёной зоне (ВНИЗ — опустить).\n\n" +
             "Упадёт в КРАСНУЮ надолго — расстанетесь. Задушите вверху — ссоры.";
 
         private const string EnergyTutorialText =
             "ПЕРВАЯ УСТАЛОСТЬ!\n\n" +
             "Появилась ЭНЕРГИЯ — и она тает сама собой.\n" +
-            "Дышите РИТМИЧНО: жмите E в спокойном темпе, не долбите.\n\n" +
+            "Дышите РИТМИЧНО: ведите ДАТЧИК ВЫСОТЫ в спокойном темпе, не долбите.\n\n" +
             "Ровное дыхание возвращает силы.";
 
         private const string HealthTutorialText =
@@ -447,7 +459,7 @@ namespace ThanksNoThanks
         private const string BurnoutHintText =
             "ВЫГОРАНИЕ!\n\n" +
             "Всё даётся тяжелее — деньги идут вдвое медленнее.\n" +
-            "Подышите (E), чтобы прийти в себя.\n\n" +
+            "Подышите ДАТЧИКОМ ВЫСОТЫ, чтобы прийти в себя.\n\n" +
             "Отпустит само, когда энергия восстановится.";
 
         // Child S5 hint. Must NOT contain «УСТАЛОСТЬ»/«ТАЯТЬ»/«ОТНОШЕНИЙ» — the PlayMode hint-walkers key
@@ -455,7 +467,7 @@ namespace ThanksNoThanks
         private const string ChildTutorialText =
             "ПОПОЛНЕНИЕ!\n\n" +
             "Появился РЕБЁНОК — кнопка на пульте загорается время от времени.\n" +
-            "Жмите Enter, пока она горит — по вспышке.\n\n" +
+            "Жмите кнопку «!», пока она горит — по вспышке.\n\n" +
             "Пропустите подряд — станете плохим родителем.";
 
         // ---- public inspection accessors (visual-assembly PlayMode tests) ----
@@ -489,6 +501,12 @@ namespace ThanksNoThanks
         public Image RelBarImage => _relBarImg;
         public Image TimerRingFill => _timerFill;
         public GameObject OpenerPanel => _openerPanel;
+        /// <summary>S1: the show logo cut from the explainer (`opener-logo-v2`).</summary>
+        public Image OpenerLogo => _openerLogo;
+        /// <summary>S1: the cream rules plate inside the marquee frame.</summary>
+        public Image OpenerPlate => _openerPlate;
+        /// <summary>S1: the canon rules copy drawn inside that plate.</summary>
+        public Text OpenerRules => _openerRules;
         public GameObject GamePanel => _gamePanel;
         public GameObject FinalePanel => _finalePanel;
         public GameObject TutorialOverlay => _tutorialOverlay;
@@ -824,12 +842,15 @@ namespace ThanksNoThanks
         }
 
         /// <summary>
-        /// Input funnel. Space (MONEY_TICK / repeat) is the money crank and ONLY that: it cranks during
+        /// Input funnel. The crank (MONEY_TICK / repeat) is the money crank and ONLY that: it cranks during
         /// Playing and is fully inert everywhere else — opener, finale AND tutorial (founder Gate-2:
-        /// holding/mashing the crank must never confirm, start, restart, or skip a hint). Enter /
-        /// Numpad-Enter (CONFIRM) is the sole key that starts the game, dismisses a hint, and restarts
-        /// from the finale. The ~5/s income cap applies only on the gameplay-crank branch. While the
-        /// overlay is up, all other input is swallowed. Pure <see cref="Game"/> gets a clean semantic event.
+        /// holding/mashing the crank must never confirm, start, restart, or skip a hint). GREEN
+        /// (<see cref="GameInput.AnswerYes"/>) is the ONE physical confirm on every non-gameplay screen: it
+        /// starts the game, dismisses a hint and restarts from the finale (founder 99fab3c) — RED is inert
+        /// there. Enter / Numpad-Enter (CONFIRM) survives only as the HIDDEN dev emulation of that green
+        /// button; no on-screen hint names it. The ~5/s income cap applies only on the gameplay-crank
+        /// branch. While the overlay is up, all other input is swallowed. Pure <see cref="Game"/> gets a
+        /// clean semantic event.
         /// </summary>
         private void OnInput(GameInput input)
         {
@@ -846,13 +867,15 @@ namespace ThanksNoThanks
             // answer the hidden card or skip the announce unread. It auto-advances on its own ~1.5s clock.
             if (_bannerTimer.Visible && _game.State == GameState.Playing) return;
 
-            // The arcade cabinet has no dedicated CONFIRM control (founder Gate-2 mapping). On non-gameplay
-            // screens the two answer buttons act as confirm: GREEN (ДА) proceeds — start a life on the opener,
-            // dismiss a hint — and RED (НЕТ) restarts from the finale. During Playing they stay ДА/НЕТ, so the
-            // card logic is untouched. Keyboard-dev drives Green=«2», Red=«1» via the packaged mapping.
-            if (input == GameInput.AnswerYes && (_game.State == GameState.Opener || _tutorialShowing))
-                input = GameInput.Confirm;
-            else if (input == GameInput.AnswerNo && _game.State == GameState.Finale)
+            // The arcade cabinet has no dedicated CONFIRM control (founder Gate-2 mapping). FOUNDER DECISION
+            // 2026-07-29 (99fab3c): GREEN (ДА) is the ONE confirm across every non-gameplay screen — it starts
+            // a life on the opener, dismisses a hint AND restarts from the finale. RED is answer-only: on the
+            // finale it is deliberately INERT (Game ignores AnswerNo outside Playing), so a masher on the red
+            // lever can never skip the necrolog. This overrides the earlier «рестарт = красная» row of the
+            // input map. During Playing both stay ДА/НЕТ, so the card logic is untouched. Enter (CONFIRM)
+            // survives as the hidden dev emulation only — no on-screen hint names it.
+            if (input == GameInput.AnswerYes
+                && (_game.State == GameState.Opener || _game.State == GameState.Finale || _tutorialShowing))
                 input = GameInput.Confirm;
             else if (input == GameInput.AnswerYes && _game.State == GameState.Playing && _game.InDepression)
                 input = GameInput.Confirm;   // depression pulse-catch: the cabinet has no Confirm control
@@ -861,20 +884,21 @@ namespace ThanksNoThanks
 
             if (_tutorialShowing)
             {
-                // FOUNDER DECISION (Gate-2 playtest): hints dismiss on Enter ONLY. She holds/mashes
-                // Space for the crank — fresh Space presses AND repeats are both inert here, so a
-                // hint can never be skipped unread. (Overrides the earlier «fresh Space dismisses».)
+                // FOUNDER DECISION (Gate-2 playtest, re-mapped by 99fab3c): a hint dismisses on the
+                // CONFIRM event ONLY — which on the cabinet means the GREEN button (mapped above), and
+                // for dev the hidden Enter. She holds/mashes the crank — fresh crank ticks AND repeats
+                // are both inert here, so a hint can never be skipped unread.
                 if (input == GameInput.Confirm) { DismissTutorial(); _dismissedThisFrame = true; }
                 return;
             }
 
             if (input == GameInput.MoneyTick || input == GameInput.MoneyTickRepeat)
             {
-                // FOUNDER DECISION (Gate-2 round 2): Space is the money crank and NOTHING else — it must
-                // never confirm/start/restart. Outside Playing it is fully inert (she holds Space through
+                // FOUNDER DECISION (Gate-2 round 2): the crank is the money crank and NOTHING else — it
+                // must never confirm/start/restart. Outside Playing it is fully inert (she holds it through
                 // the necrolog and it must not skip the payoff screen). This also matches the hardware
-                // abstraction: the crank encoder and the CONFIRM button are separate physical controls,
-                // so the crank must never fire a confirm. Enter (CONFIRM) is the sole confirm key.
+                // abstraction: the crank encoder and the confirm control are separate physical controls, so
+                // the crank must never fire a confirm — the GREEN button is the confirm (99fab3c).
                 if (_game.State != GameState.Playing) return;
                 if (!_crankCap.TryAccept()) return;         // income cap (anti-mashgun) — gameplay only
                 _game.HandleInput(GameInput.MoneyTick);     // Game sees only the semantic crank event
@@ -1326,50 +1350,162 @@ namespace ThanksNoThanks
             BuildTutorialOverlay(canvasGo.transform);   // top-most: dims every screen when up
         }
 
-        // The four opener rules (S1) — each on its own cobalt plate, verbatim from the mockup.
-        private static readonly string[] OpenerRules =
+        // ---- S1 opener geometry, MEASURED off `explainers/Стартовый экран.png` -------------------------
+        // The explainer is 2752×1536, so every box below is the measured source box × 0.6977 (→ 1920×1080):
+        //   логотип      src x639..2096 y59..742    → 1920: x446..1462 y41..518  → centre (954,279) 1017×477
+        //   марки-рамка  src x97..2674  y745..1493  → 1920: x68..1866  y520..1042 → centre (967,781) 1798×522
+        //   плашка правил src x150..2624 y797..1442 → 1920: x105..1831 y556..1006 → centre (968,781) 1726×450
+        //   ряд лампочек (осевая линия золотой полосы) → 1920: x87..1849 y538..1024, 48 поперёк / 13 вдоль,
+        //   шаг 37.5 / 40.5, диаметр ≈24 — все три сняты инструментально (PIL), не на глаз.
+        private const float OpenerLogoCx = 954f, OpenerLogoCy = 279f;
+        private const float OpenerLogoW = 1017f, OpenerLogoH = 477f;
+        private const float OpenerPlateCx = 966f, OpenerPlateCy = 781f;   // рамка и плашка соосны
+        private const float OpenerFrameW = 1798f, OpenerFrameH = 522f;
+        private const float OpenerCreamW = 1726f, OpenerCreamH = 450f;
+        private const float OpenerBulbInset = 18.5f;   // от края рамки до осевой линии лампочек
+        private const float OpenerBulbSize = 24f;
+        private const int OpenerBulbsAcross = 48, OpenerBulbsDown = 13;
+        private const float OpenerRim = 6f;            // тёмный кант вокруг рамки и вокруг кремовой плашки
+
+        // `bar-track` — не белая заготовка: её заливка #E7E9F5, и uGUI УМНОЖАЕТ тинт на неё, так что
+        // «покрасить в токен» напрямую даёт ~10 % грязи (замерено на кадре: золото выходило 224,164,47
+        // вместо 248,180,50). Делим токен на заливку спрайта; канал ярче заливки недостижим и просто
+        // упирается в неё (у крема/золота это красный: 231 вместо 247/248 — Δ6 %, глазом не читается).
+        // ⚠ Гасить ПРОПОРЦИОНАЛЬНО, не клампом по каналу: у крема #F7E4BB красный (247) выше заливки (231),
+        // а зелёный (228) — нет; кламп одного красного равняет R и G и уводит кремовую плашку в хаки
+        // (проверено на кадре). Поэтому берём общий множитель по самому тесному каналу — тон сохраняется,
+        // плашка садится на 6.5 % темнее токена, и это единственное, что физически достижимо на этом спрайте.
+        private static readonly Color BarTrackFill = new(231f / 255f, 233f / 255f, 245f / 255f);
+        /// <summary>
+        /// `bar-track`'s own fill, exposed so a test can compute the RENDERED colour of a tinted plate
+        /// (uGUI multiplies the tint by the sprite: rendered = <see cref="BarTrackFillToken"/> × Image.color)
+        /// instead of trusting the raw tint value.
+        /// </summary>
+        public static Color BarTrackFillToken => BarTrackFill;
+        private static Color OnBarTrack(Color target)
         {
-            "Проживите ЦЕЛУЮ ЖИЗНЬ за пару минут — в прямом эфире!",
-            "На каждый вопрос — рычаг: ДА или СПАСИБО, НЕ НАДО. 5 секунд — дальше решаем за вас!",
-            "С возрастом откроются ручки жизни. Рук две — всё удержать нельзя, и это нормально!",
-            "Правильного ответа нет. Есть только ВАША жизнь.",
-        };
+            float s = 1f;
+            if (target.r > 0.001f) s = Mathf.Min(s, BarTrackFill.r / target.r);
+            if (target.g > 0.001f) s = Mathf.Min(s, BarTrackFill.g / target.g);
+            if (target.b > 0.001f) s = Mathf.Min(s, BarTrackFill.b / target.b);
+            return new Color(target.r * s / BarTrackFill.r,
+                             target.g * s / BarTrackFill.g,
+                             target.b * s / BarTrackFill.b, target.a);
+        }
+
+        /// <summary>
+        /// Канон-текст правил опенера (build-spec §A, БЕЗ «5 секунд»). Переносы расставлены ВРУЧНУЮ ровно
+        /// по строкам эталона (5 строк) — автоперенос по ширине ректа рвал второе предложение в другом
+        /// месте и оставлял куцую строку в две трети пустоты.
+        /// </summary>
+        public const string OpenerRulesText =
+            "Добро пожаловать в увлекательное шоу длинною в жизнь!\n" +
+            "Пройди от 1 года до 100 лет, постарайся принять\n" +
+            "правильные решения и за всем уследить.\n" +
+            "Со временем жизнь будет становиться всё сложнее и быстрее.\n" +
+            "Уследить за всем невозможно, но давай попробуем!";
+
+        /// <summary>CTA опенера — называет ФИЗИЧЕСКИЙ контрол (founder 99fab3c), не dev-клавишу.</summary>
+        public const string OpenerStartHintText = "НАЧАТЬ ЖИЗНЬ — ЖМИ ЗЕЛЁНУЮ";
 
         private void BuildOpener(Transform parent)
         {
             _openerPanel = NewGroup("Opener", parent);
 
-            var title = NewText("Title", _openerPanel.transform,
-                "«СПАСИБО, НЕ НАДО»", 96, TextAnchor.MiddleCenter, TextLight, _display);
-            AnchorPx(title.rectTransform, 960f, 150f, 1650f, 175f);
-            DisplayFx(title);
+            // (1) Логотип шоу — вырезка из эталона (`opener-logo-v2`, альфа снята заливкой фона по тёмному
+            // контуру), кладётся 1:1 в свой измеренный бокс. Фон под ним — общие вращающиеся лучи HUD.
+            _openerLogo = NewSprite("Logo", _openerPanel.transform, Sprite("opener-logo-v2"));
+            AnchorPx(_openerLogo.rectTransform, OpenerLogoCx, OpenerLogoCy, OpenerLogoW, OpenerLogoH);
 
-            // S1: each rule on its OWN cobalt rounded plate (bar-track 9-slice tinted deep cobalt) —
-            // never bare text on the sunburst. White best-fit text inside each plate's visible pill.
-            float[] cy = { 360f, 484f, 608f, 726f };   // column nudged up → room for the taller CTA below
-            float[] hh = { 116f, 116f, 116f, 92f };
-            for (int i = 0; i < OpenerRules.Length; i++)
+            // (2) Марки-рамка: тёмный кант → золотая полоса → тёмный кант → кремовая плашка. bar-track —
+            // это залитый скруглённый прямоугольник (9-slice), так что рамка собирается слоями, а не
+            // растягиванием готового marquee-frame-bulbs (у него нет 9-slice-бордера: лампочки поплыли бы).
+            var frameEdge = NewSprite("FrameEdge", _openerPanel.transform, Sprite("bar-track"));
+            frameEdge.type = Image.Type.Sliced;
+            frameEdge.color = OnBarTrack(Ink);
+            AnchorPx(frameEdge.rectTransform, OpenerPlateCx, OpenerPlateCy,
+                OpenerFrameW + 2f * OpenerRim, OpenerFrameH + 2f * OpenerRim);
+
+            var frame = NewSprite("MarqueeFrame", _openerPanel.transform, Sprite("bar-track"));
+            frame.type = Image.Type.Sliced;
+            frame.color = OnBarTrack(MarqueeGold);
+            AnchorPx(frame.rectTransform, OpenerPlateCx, OpenerPlateCy, OpenerFrameW, OpenerFrameH);
+
+            // (3) Лампочки по осевой линии золотой полосы — `marquee-bulb` (уже золотая с бликом), шагом
+            // с эталона. Углы общие, поэтому боковые колонки идут без первой и последней позиции.
+            float hx = OpenerFrameW * 0.5f - OpenerBulbInset;
+            float hy = OpenerFrameH * 0.5f - OpenerBulbInset;
+            int bulb = 0;
+            for (int i = 0; i < OpenerBulbsAcross; i++)
             {
-                var plate = NewSprite("RulePlate" + i, _openerPanel.transform, Sprite("bar-track"));
-                plate.type = Image.Type.Sliced;
-                plate.color = CobaltDeep;
-                AnchorPx(plate.rectTransform, 960f, cy[i], 1360f, hh[i]);
-                var rt = NewText("RuleText" + i, plate.transform, OpenerRules[i], 38,
-                    TextAnchor.MiddleCenter, TextLight, _body);
-                RulePlateTextRect(rt.rectTransform);
-                rt.resizeTextForBestFit = true; rt.resizeTextMinSize = 24; rt.resizeTextMaxSize = 40;
+                float x = Mathf.Lerp(-hx, hx, i / (float)(OpenerBulbsAcross - 1));
+                AddBulb(frame.transform, x, hy, bulb++);
+                AddBulb(frame.transform, x, -hy, bulb++);
+            }
+            for (int i = 1; i < OpenerBulbsDown - 1; i++)
+            {
+                float y = Mathf.Lerp(hy, -hy, i / (float)(OpenerBulbsDown - 1));
+                AddBulb(frame.transform, -hx, y, bulb++);
+                AddBulb(frame.transform, hx, y, bulb++);
             }
 
-            // Green «НАЧАТЬ ЖИЗНЬ (Enter)» button (S1) — two lines, text inside the plate's visible pill.
-            var start = NewSprite("StartPlate", _openerPanel.transform, Sprite("plate-yes"));
+            var plateEdge = NewSprite("PlateEdge", _openerPanel.transform, Sprite("bar-track"));
+            plateEdge.type = Image.Type.Sliced;
+            plateEdge.color = OnBarTrack(Ink);
+            AnchorPx(plateEdge.rectTransform, OpenerPlateCx, OpenerPlateCy,
+                OpenerCreamW + 2f * 5f, OpenerCreamH + 2f * 5f);
+
+            _openerPlate = NewSprite("RulesPlate", _openerPanel.transform, Sprite("bar-track"));
+            _openerPlate.type = Image.Type.Sliced;
+            _openerPlate.color = OnBarTrack(OpenerCream);
+            AnchorPx(_openerPlate.rectTransform, OpenerPlateCx, OpenerPlateCy, OpenerCreamW, OpenerCreamH);
+
+            // (4) Канон-текст правил ЦЕЛИКОМ внутри кремовой плашки, Rubik, INK, по центру. Rubik.ttf —
+            // вариативный с дефолтом wght=300 (Light), а на эталоне обводка/капитель = 0.135 (≈Regular),
+            // так что лёгкое начертание догоняется однопиксельным Outline того же цвета: чисто «вес»,
+            // без тени и без каймы другого цвета.
+            _openerRules = NewText("RulesText", _openerPlate.transform, OpenerRulesText, 46,
+                TextAnchor.MiddleCenter, Ink, _body);
+            var rrt = _openerRules.rectTransform;
+            rrt.anchorMin = rrt.anchorMax = new Vector2(0.5f, 0.5f);
+            rrt.pivot = new Vector2(0.5f, 0.5f);
+            rrt.sizeDelta = new Vector2(1620f, 260f);
+            rrt.anchoredPosition = new Vector2(0f, 68f);
+            _openerRules.resizeTextForBestFit = true;
+            _openerRules.resizeTextMinSize = 26; _openerRules.resizeTextMaxSize = 46;
+            _openerRules.verticalOverflow = VerticalWrapMode.Truncate;   // best-fit честно держит и ВЫСОТУ
+            var weight = _openerRules.gameObject.AddComponent<Outline>();
+            weight.effectColor = Ink;
+            weight.effectDistance = new Vector2(1f, 1f);
+
+            // (5) CTA — зелёная плашка в низу кремовой: «НАЧАТЬ ЖИЗНЬ — ЖМИ ЗЕЛЁНУЮ», Arimo Bold. Кнопка
+            // САМА зелёная, так что подсказка совпадает с физической кнопкой кабинета (founder 99fab3c).
+            // plate-yes сюда не годится: его 9-slice-бордер 82 px выше самой плашки (104) и раздавил бы её.
+            var startEdge = NewSprite("StartPlateEdge", _openerPanel.transform, Sprite("bar-track"));
+            startEdge.type = Image.Type.Sliced;
+            startEdge.color = OnBarTrack(Ink);
+            AnchorPx(startEdge.rectTransform, OpenerPlateCx, 921f, 972f, 116f);
+
+            var start = NewSprite("StartPlate", _openerPanel.transform, Sprite("bar-track"));
             start.type = Image.Type.Sliced;
-            AnchorPx(start.rectTransform, 960f, 900f, 600f, 210f);   // taller pill + comfortable bottom margin
+            start.color = OnBarTrack(GoGreen);
+            AnchorPx(start.rectTransform, OpenerPlateCx, 921f, 960f, 104f);
             var startText = NewText("StartText", start.transform,
-                "НАЧАТЬ ЖИЗНЬ\n(Enter)", 40, TextAnchor.MiddleCenter, Ink, _display);
-            Inset(startText.rectTransform, 68f);   // text rect well INSIDE the visible pill (55px 9-slice) → padding all sides
-            startText.resizeTextForBestFit = true; startText.resizeTextMinSize = 26; startText.resizeTextMaxSize = 40;
-            startText.verticalOverflow = VerticalWrapMode.Truncate;  // best-fit now honours HEIGHT → both rows fit the pill
+                OpenerStartHintText, 46, TextAnchor.MiddleCenter, Ink, _display);
+            Inset(startText.rectTransform, 26f);   // ≥ видимого скругления bar-track (16) → глифы всегда на плашке
+            startText.resizeTextForBestFit = true; startText.resizeTextMinSize = 28; startText.resizeTextMaxSize = 46;
+            startText.verticalOverflow = VerticalWrapMode.Truncate;
             // No DisplayFx: dark Ink text on the green pill needs no dark outline (it muddies it to a blob).
+        }
+
+        private void AddBulb(Transform frame, float x, float y, int index)
+        {
+            var b = NewSprite("Bulb" + index, frame, Sprite("marquee-bulb"));
+            var rt = b.rectTransform;
+            rt.anchorMin = rt.anchorMax = new Vector2(0.5f, 0.5f);
+            rt.pivot = new Vector2(0.5f, 0.5f);
+            rt.sizeDelta = new Vector2(OpenerBulbSize, OpenerBulbSize);
+            rt.anchoredPosition = new Vector2(x, y);
         }
 
         private void BuildGamePanel(Transform parent)
@@ -1948,12 +2084,23 @@ namespace ThanksNoThanks
             _finaleStory.verticalOverflow = VerticalWrapMode.Truncate;  // best-fit now honours HEIGHT → the worst-case long story shrinks to fit inside the pill instead of spilling past the plate
             DisplayFx(_finaleStory);
 
-            var again = NewSprite("AgainPlate", _finalePanel.transform, Sprite("plate-yes"));
+            // Restart CTA. The plate IS the green cabinet button its label names, so its fill must be the
+            // GREEN token #05CE51 — `plate-yes` carries its own paler art green (#5CBF5F), and a uGUI tint
+            // only ever MULTIPLIES, so no tint on that sprite can reach the token (design gate 2026-07-31:
+            // «зелёный финала бледнее опенера»). Built exactly like the opener CTA instead — dark Ink rim +
+            // `bar-track` tinted through OnBarTrack(GoGreen) — so both confirm CTAs render the SAME token.
+            var againEdge = NewSprite("AgainPlateEdge", _finalePanel.transform, Sprite("bar-track"));
+            againEdge.type = Image.Type.Sliced;
+            againEdge.color = OnBarTrack(Ink);
+            AnchorPx(againEdge.rectTransform, 960f, 936f, 614f, 224f);
+
+            var again = NewSprite("AgainPlate", _finalePanel.transform, Sprite("bar-track"));
             again.type = Image.Type.Sliced;
+            again.color = OnBarTrack(GoGreen);
             AnchorPx(again.rectTransform, 960f, 936f, 600f, 210f);   // taller pill + comfortable bottom margin
             var againText = NewText("AgainText", again.transform,
-                "НАЧАТЬ ЗАНОВО\n(Enter)", 40, TextAnchor.MiddleCenter, Ink, _display);
-            Inset(againText.rectTransform, 68f);   // text rect well INSIDE the visible pill (55px 9-slice) → padding all sides
+                "НАЧАТЬ ЗАНОВО\nЖМИ ЗЕЛЁНУЮ", 40, TextAnchor.MiddleCenter, Ink, _display);
+            Inset(againText.rectTransform, 34f);   // text rect well INSIDE the visible pill (bar-track cuts ~16px corners) → padding all sides
             againText.resizeTextForBestFit = true; againText.resizeTextMinSize = 26; againText.resizeTextMaxSize = 40;
             againText.verticalOverflow = VerticalWrapMode.Truncate;  // best-fit now honours HEIGHT → both rows fit the pill
             // No DisplayFx: dark Ink text on the green pill needs no dark outline (it muddies it to a blob).
@@ -1981,15 +2128,15 @@ namespace ThanksNoThanks
             trt.offsetMin = new Vector2(120f, 20f); trt.offsetMax = new Vector2(-120f, -100f);
             _tutorialText.resizeTextForBestFit = true; _tutorialText.resizeTextMinSize = 26; _tutorialText.resizeTextMaxSize = 44;
 
-            // Blue «ПОНЯТНО — Enter» button (S5) with a clear bottom margin inside the modal (NOT flush to
-            // the edge). «Enter» is spelled out (founder Gate-2): Space is the crank and must never dismiss,
-            // so the dismiss key stays discoverable on the button. bar-track 9-slice tinted cobalt.
+            // Blue «ПОНЯТНО — ЖМИ ЗЕЛЁНУЮ» button (S5) with a clear bottom margin inside the modal (NOT flush
+            // to the edge). The dismiss control is named by its PHYSICAL colour (founder 99fab3c): the crank
+            // must never dismiss, so the green lever stays discoverable on the button. bar-track tinted cobalt.
             var plate = NewSprite("GotItPlate", modal.transform, Sprite("bar-track"));
             plate.type = Image.Type.Sliced;
             plate.color = Cobalt;
             Anchor(plate.rectTransform, new Vector2(0.5f, 0.16f), new Vector2(470, 116));
             _tutorialButton = plate;
-            var plateTxt = NewText("GotItText", plate.transform, "ПОНЯТНО — Enter", 32, TextAnchor.MiddleCenter, Color.white, _display);
+            var plateTxt = NewText("GotItText", plate.transform, "ПОНЯТНО — ЖМИ ЗЕЛЁНУЮ", 32, TextAnchor.MiddleCenter, Color.white, _display);
             Inset(plateTxt.rectTransform, 30f);
             plateTxt.resizeTextForBestFit = true; plateTxt.resizeTextMinSize = 22; plateTxt.resizeTextMaxSize = 34;
             DisplayFx(plateTxt);
@@ -2540,16 +2687,6 @@ namespace ThanksNoThanks
             rt.anchorMax = Vector2.one;
             rt.offsetMin = new Vector2(58f, 76f);    // left, bottom
             rt.offsetMax = new Vector2(-74f, -56f);  // right, top
-        }
-
-        // Text rect for an opener rule plate (bar-track 9-slice): inset well past the rounded corners so the
-        // white rule text always lands inside the visible cobalt pill on all four sides.
-        private static void RulePlateTextRect(RectTransform rt)
-        {
-            rt.anchorMin = Vector2.zero;
-            rt.anchorMax = Vector2.one;
-            rt.offsetMin = new Vector2(64f, 22f);
-            rt.offsetMax = new Vector2(-64f, -22f);
         }
 
         // Text rect for the ENLARGED blitz plate: inset past the ~55px 9-slice corner so best-fit text lands

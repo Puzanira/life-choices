@@ -26,6 +26,40 @@ namespace ThanksNoThanks.Tests
             StringAssert.StartsWith("Но не переживайте! Ведь вы…", r.ComposeStory());
         }
 
+        // The intro ends with «…» and the parents line OPENS with «…»: plain concatenation printed
+        // «Ведь вы… …родились у прекрасных родителей» on the finale frame (design gate 2026-07-31).
+        // The SEAM is normalised — the CSV/const content itself is never edited.
+        [Test]
+        public void Glue_CollapsesDoubleEllipsisAtTheSeam()
+        {
+            Assert.AreEqual("Ведь вы… родились у прекрасных родителей.",
+                Necrolog.Glue("Ведь вы…", "…родились у прекрасных родителей."),
+                "«…» + «…» collapse into a single ellipsis");
+            Assert.AreEqual("Ведь вы… родились.", Necrolog.Glue("Ведь вы…", "...родились."),
+                "the ASCII spelling «...» collapses too");
+            Assert.AreEqual("Жили ярко. Родились.", Necrolog.Glue("Жили ярко.", "…Родились."),
+                "a full stop already terminates the seam — the leading ellipsis is redundant there too");
+            Assert.AreEqual("Ведь вы… Жили ярко.", Necrolog.Glue("Ведь вы…", "Жили ярко."),
+                "a fragment that does NOT open with an ellipsis is appended verbatim");
+            Assert.AreEqual("Ведь вы…", Necrolog.Glue("Ведь вы…", "…"),
+                "a fragment that is nothing but an ellipsis leaves no dangling seam");
+        }
+
+        [Test]
+        public void ComposedStory_HasNoDoubleEllipsis()
+        {
+            var r = Necrolog.Build("весёлая старость", new List<NecrologEntry>
+            {
+                new() { Age = 5, Order = 0, Line = "Ели жуков и ничего не боялись." },
+            });
+            var story = r.ComposeStory();
+
+            StringAssert.StartsWith("Но не переживайте! Ведь вы… родились у прекрасных родителей.", story);
+            StringAssert.DoesNotContain("… …", story, "no double ellipsis anywhere in the glued story");
+            StringAssert.DoesNotContain("……", story, "…nor a glued-together one");
+            StringAssert.Contains("Ели жуков и ничего не боялись.", story, "the CSV line itself is untouched");
+        }
+
         [Test]
         public void EmptyLines_And_Nulls_Excluded()
         {
