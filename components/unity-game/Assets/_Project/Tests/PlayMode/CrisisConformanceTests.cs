@@ -221,9 +221,9 @@ namespace ThanksNoThanks.Tests.PlayMode
                 .ToList();
             var expected = new List<string>
             {
-                "age-badge",                                        // minimal HUD (age only)
+                "age-badge-v2",                                     // minimal HUD (age only)
                 "timer-ring-track", "timer-ring-track", "timer-ring", "marquee-bulb",  // timer ring
-                "marquee-frame-bulbs",                              // blitz thought card
+                "choice-plate-v2",                                  // blitz thought card (art-pack plate)
                 "plate-yes", "plate-no",                            // the two blitz buttons
                 "bar-track",                                        // the dark counter badge
             }.OrderBy(s => s).ToList();

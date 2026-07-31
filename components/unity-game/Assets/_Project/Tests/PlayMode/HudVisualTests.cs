@@ -49,14 +49,14 @@ namespace ThanksNoThanks.Tests.PlayMode
             Assert.AreEqual(GameState.Playing, driver.Game.State);
             Assert.IsTrue(driver.GamePanel.activeSelf, "game panel shown while playing");
 
-            // Background is the sunburst sprite, full-screen.
+            // Background is the art-pack sunburst (core patched out), oversized behind everything.
             Assert.IsNotNull(driver.BackgroundImage.sprite, "background has a sprite");
-            Assert.AreEqual("sunburst-bg", driver.BackgroundImage.sprite.name);
+            Assert.AreEqual("sunburst-bg-v3", driver.BackgroundImage.sprite.name);
 
-            // Card marquee: bulbs-frame sprite, real rect on canvas.
+            // Card: the art-pack cream plate, real rect on canvas.
             Assert.IsNotNull(driver.CardFrameImage.sprite, "card frame has a sprite");
-            Assert.AreEqual("marquee-frame-bulbs", driver.CardFrameImage.sprite.name);
-            AssertOnCanvas(driver, driver.CardRect, "card marquee");
+            Assert.AreEqual("choice-plate-v2", driver.CardFrameImage.sprite.name);
+            AssertOnCanvas(driver, driver.CardRect, "card plate");
 
             // Answer plates: correct sprites + tilt, both on canvas.
             Assert.AreEqual("btn-yes", driver.YesPlateImage.sprite.name);   // §9 baked art
@@ -88,30 +88,30 @@ namespace ThanksNoThanks.Tests.PlayMode
             // Childhood: only the age badge — money/energy/health/balancer hidden.
             driver.DebugApplyAgeGates(7f);
             Assert.IsTrue(driver.AgeBadge.activeSelf, "childhood keeps the age badge");
-            Assert.IsFalse(driver.MoneyPill.activeSelf, "money pill hidden at age 7");
+            Assert.IsFalse(driver.MoneyJar.activeSelf, "money jar hidden at age 7");
             Assert.IsFalse(driver.BalancerGroup.activeSelf, "balancer hidden at age 7");
-            Assert.IsFalse(driver.EnergyGroup.activeSelf, "energy bar hidden at age 7");
+            Assert.IsFalse(driver.EnergyGroup.activeSelf, "battery hidden at age 7");
             Assert.IsFalse(driver.HealthGroup.activeSelf, "health bar hidden at age 7");
 
             // Money reveals at 18.
             driver.DebugApplyAgeGates(17f);
-            Assert.IsFalse(driver.MoneyPill.activeSelf, "money pill still hidden at 17");
+            Assert.IsFalse(driver.MoneyJar.activeSelf, "money jar still hidden at 17");
             driver.DebugApplyAgeGates(18f);
-            Assert.IsTrue(driver.MoneyPill.activeSelf, "money pill revealed at 18");
-            AssertOnCanvas(driver, (RectTransform)driver.MoneyPill.transform, "money pill (revealed)");
+            Assert.IsTrue(driver.MoneyJar.activeSelf, "money jar revealed at 18");
+            AssertOnCanvas(driver, driver.MoneyJarImage.rectTransform, "money jar (revealed)");
 
             // Balancer at 20, energy at 25, health at 30.
             driver.DebugApplyAgeGates(20f);
             Assert.IsTrue(driver.BalancerGroup.activeSelf, "balancer revealed at 20");
-            Assert.IsFalse(driver.EnergyGroup.activeSelf, "energy still hidden at 20");
+            Assert.IsFalse(driver.EnergyGroup.activeSelf, "battery still hidden at 20");
 
             driver.DebugApplyAgeGates(25f);
-            Assert.IsTrue(driver.EnergyGroup.activeSelf, "energy revealed at 25");
+            Assert.IsTrue(driver.EnergyGroup.activeSelf, "battery revealed at 25");
             Assert.IsFalse(driver.HealthGroup.activeSelf, "health still hidden at 25");
 
             driver.DebugApplyAgeGates(30f);
             Assert.IsTrue(driver.HealthGroup.activeSelf, "health revealed at 30 (full HUD)");
-            AssertOnCanvas(driver, (RectTransform)driver.HealthGroup.transform, "health bar (revealed)");
+            AssertOnCanvas(driver, driver.HealthBarImage.rectTransform, "health bar (revealed)");
 
             Object.Destroy(go);
             yield return null;
@@ -149,23 +149,25 @@ namespace ThanksNoThanks.Tests.PlayMode
             // on any of these would otherwise render blank/wrong while rect checks stay green).
             (Image img, string sprite, string what)[] table =
             {
-                (ChildImage(driver.AgeBadge, ""),                "age-badge",       "age badge"),
-                (ChildImage(driver.MoneyPill, ""),               "money-pill",      "money pill"),
-                (ChildImage(driver.MoneyPill, "Coin"),           "icon-coin",       "money coin icon"),
-                (ChildImage(driver.HealthGroup, "Icon"),         "icon-heart",      "health icon"),
-                (ChildImage(driver.HealthGroup, "Track"),        "bar-track",       "health track"),
-                (ChildImage(driver.HealthGroup, "Track/Fill"),   "bar-health-fill", "health fill"),
-                (ChildImage(driver.EnergyGroup, "Icon"),         "icon-lightning",  "energy icon"),
-                (ChildImage(driver.EnergyGroup, "Track"),        "bar-track",       "energy track"),
-                (ChildImage(driver.EnergyGroup, "Track/Fill"),   "bar-energy-fill", "energy fill"),
-                (ChildImage(driver.BalancerGroup, "Track"),      "balancer-track",  "balancer track"),
-                (ChildImage(driver.BalancerGroup, "Track/Marker"), "balancer-marker", "balancer marker"),
-                (driver.TimerRingFill,                           "timer-ring",      "timer ring fill"),
+                (ChildImage(driver.AgeBadge, ""),                    "age-badge-v2",      "age badge"),
+                (ChildImage(driver.MoneyJar, "Jar"),                 "money-jar-v2",      "money jar"),
+                (ChildImage(driver.MoneyJar, "Coin"),                "coin-v2",           "money coin"),
+                (ChildImage(driver.HealthGroup, "HealthBar"),        "health-bar-v2",     "health bar"),
+                (ChildImage(driver.HealthGroup, "Marker"),           "health-marker-v2",  "health marker"),
+                (ChildImage(driver.EnergyGroup, "Battery"),          "energy-battery-v2", "battery"),
+                (ChildImage(driver.BalancerGroup, "RelBar"),         "rel-bar-v2",        "relationships bar"),
+                (ChildImage(driver.BalancerGroup, "Marker"),         "rel-marker-heart-v2", "relationships marker"),
+                (driver.TimerRingFill,                               "timer-ring",        "timer ring fill"),
                 (ChildImage(driver.TimerRingFill.transform.parent.gameObject, "RingTrack"),
-                                                                 "timer-ring-track", "timer ring track"),
+                                                                     "timer-ring-track",  "timer ring track"),
             };
             foreach (var row in table)
                 AssertSprite(row.img, row.sprite, row.what);
+
+            // The battery's live level is drawn as two flat rects over the cavity (no sprite by design):
+            // assert they exist and carry NO sprite, so a future «give it a sprite» change is a conscious one.
+            Assert.IsNull(driver.EnergyEmpty.sprite, "the battery's cream «empty» rect is a flat fill");
+            Assert.IsNull(driver.EnergyTopUp.sprite, "the battery's yellow top-up rect is a flat fill");
 
             Object.Destroy(go);
             yield return null;

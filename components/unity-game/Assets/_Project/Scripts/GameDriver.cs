@@ -15,14 +15,19 @@ namespace ThanksNoThanks
     /// Assets are loaded from <c>Assets/_Project/Art/Resources</c> (a Resources root nested under Art):
     /// sprites at <c>Sprites/*</c>, fonts at <c>Fonts/*</c>. Fonts are legacy uGUI dynamic fonts —
     /// Arimo Bold for display headlines/questions/buttons/HUD digits (meeting-revisions §8: metric
-    /// Helvetica lookalike, OFL, full Cyrillic + ₽), Rubik for the money pill (₽) and body copy.
+    /// Helvetica lookalike, OFL, full Cyrillic + ₽), Rubik for body copy and small print (the BLOCK$
+    /// price sub-line, the Ведущий bubble).
     /// </summary>
     public sealed class GameDriver : MonoBehaviour
     {
         // ---- palette tokens (#kit) — used for text only; sprites carry their own colour ----
         private static readonly Color Cobalt = new(0.184f, 0.329f, 0.784f);    // #2f54c8
         private static readonly Color CobaltDeep = new(0.122f, 0.227f, 0.588f);// #1f3a96
-        private static readonly Color Ink = new(0.078f, 0.102f, 0.239f);       // #141a3d
+        // INK is the build-spec §2 token #0B0F1A, re-affirmed as canon by the founder (asset-map §12-4):
+        // the dark text/outline colour comes from the TOKENS, never sampled off an explainer PNG.
+        private static readonly Color Ink = new(11f / 255f, 15f / 255f, 26f / 255f);   // #0B0F1A
+        /// <summary>The INK token, exposed so a test can bind the constant to the canon hex.</summary>
+        public static Color InkToken => Ink;
         private static readonly Color TextLight = new(0.918f, 0.941f, 1f);     // #eaf0ff
         private static readonly Color Bulb = new(1f, 0.847f, 0.451f);          // #ffd873
         private static readonly Color Energy = new(0.973f, 0.824f, 0.271f);    // #f8d24c
@@ -45,45 +50,241 @@ namespace ThanksNoThanks
         public Game Game => _game;
 
         private Font _display; // Arimo Bold (meeting-revisions §8 — «основные надписи»)
-        private Font _body;    // Rubik (has ₽ + Cyrillic)
+        private Font _body;    // Rubik (has ₽ + Cyrillic) — the VARIABLE file, i.e. its default wght 300
+        private Font _bodyBold;// Rubik-Bold: static wght=700 instance of the same OFL file (host replies)
 
         // Panels
         private GameObject _openerPanel;
         private GameObject _gamePanel;
         private GameObject _finalePanel;
 
-        // Shared background — a centred square of sunburst rays that slowly spins (meeting-revisions §7).
+        // Shared background — `sunburst-bg-v3`, a SCREEN-SPACE synthesis of the art-pack rays.
+        // Why a synthesis (design-gate round 2): the reference explainer was assembled with the rays at
+        // ≈×1.22, i.e. the sprite's DARK outer half fills the frame. Any plain overscan big enough to
+        // cover the rotation diagonal (×2.16) shows only the sprite's light inner part, and the whole
+        // screen washed out — measured ring medians of R 138/116/81/60 against the reference's 54/30/24/23.
+        // `scratchpad/synth_bg_v3.py` therefore resamples the (core-patched) sprite by ANGLE and RADIUS
+        // into a 2210² screen-space square: inside the frame every pixel is what the reference sees, and
+        // past the sprite's reach in a direction the colour of its maximum radius (the dark edge) is
+        // carried on out. Rotating the square just turns the rays, so the 6°/сек spin is unchanged.
         private Image _bg;
-        /// <summary>Side of the background square, in reference px: ≥ the 1920×1080 diagonal (≈2203) plus headroom.</summary>
-        public const float BgSpinSquare = 2800f;
-        /// <summary>Where the rays CONVERGE inside sunburst-bg.png (measured: 964/1920, 444/1080 from the top).
-        /// Used as the rect PIVOT so the hub — not the sprite's geometric centre — sits on the screen centre and
-        /// stays put while the rays turn (a centre-pivot would orbit the hub around the screen ≈190 px off).</summary>
-        public static readonly Vector2 BgSpinPivot = new Vector2(0.502f, 0.589f);
+        /// <summary>Background rect, reference px. Square, 1:1 with the synthesised texture (no rescale =
+        /// no resampling blur), and every EDGE is 1105 px from the pivot — past the 1920×1080 half-diagonal
+        /// (1101.6), so no spin angle can bare a corner.</summary>
+        public const float BgOverscanW = 2210f;
+        public const float BgOverscanH = 2210f;
+        /// <summary>Ray hub = the geometric centre of `sunburst-bg-v3` (the synthesis puts the convergence at
+        /// the texture centre), so a plain centre pivot keeps the hub pinned on the screen centre while the
+        /// rays turn.</summary>
+        public static readonly Vector2 BgSpinPivot = new Vector2(0.5f, 0.5f);
         /// <summary>Ray spin rate: 1 turn / 60 s = 6°/сек, clockwise (Unity z decreases).</summary>
         public const float BgSpinDegPerSecond = 6f;
         private float _bgSpin;   // accumulated clockwise degrees (monotonic, wrapped at 360)
 
-        // HUD widgets (gated by age)
-        private GameObject _hudRow;    // top-row container (age·деньги·здоровье·энергия·отношения·ребёнок)
-        private GameObject _ageBadge;
-        private GameObject _moneyPill;
-        private GameObject _healthGroup;
-        private GameObject _energyGroup;
-        private GameObject _balancerGroup;
+        // ---- HUD widgets (art-pack row, gated by age) ------------------------------------------------
+        private GameObject _hudRow;    // top-row container (батарея · отношения · здоровье · банка · бейдж)
+        private GameObject _ageBadge;      // age_frame_blue badge (digits only, no «ВОЗРАСТ» caption)
+        private GameObject _moneyGroup;    // money jar + sum label + coin
+        private GameObject _healthGroup;   // health bar + its own marker
+        private GameObject _energyGroup;   // battery + cavity fill
+        private GameObject _balancerGroup; // relationships bar + its own marker
 
         private Text _ageText;
-        private Text _moneyText;
-        private Text _moneyLabel;      // «ДЕНЬГИ ×N» under the pill (dark-blue)
-        private Text _healthLabel;     // «ЗДОРОВЬЕ» under the capsule
-        private Text _energyLabel;     // «ЭНЕРГИЯ»
-        private Text _relLabel;        // «ОТНОШЕНИЯ»
-        private Image _healthFill;
-        private Image _energyFill;
+        private Text _moneyText;           // the sum INSIDE the jar's cream label (compact «₽12.5к», §11-6)
+        private Image _moneyCoin;          // coin over the jar throat — drops in on an income tick
+        private Image _jarImg, _batteryImg, _ageBadgeImg;
+        // Battery level (asset-map §5.6/§8): the sprite carries a BAKED level at 75.1 % of its cavity, so the
+        // live level is drawn as two flat rects over the cavity instead of repainting it — a cream «empty»
+        // rect from the cavity top DOWN to the level line (its bottom edge IS the reading), plus a yellow
+        // top-up rect between the baked line and a level above it. Everything the art draws inside the
+        // cavity (the lightning bolt) survives untouched.
+        private Image _energyEmpty;
+        private Image _energyTopUp;
+        private Image _energyBolt;         // the art's lightning, its own layer above the fill (§12-3)
+        // Bar markers: the art's own health marker was a BAKED silhouette (patched out, asset-map §11-3), so
+        // both bars carry OUR marker, drawn in the same flat-black figure style, positioned through the
+        // non-linear value→track map (§11-2/4).
+        private Image _relBarImg, _healthBarImg;
         private RectTransform _balancerMarker;
-        private Image _balancerTrackImg;   // tinted red in the >75% «красная зона»
-        private Image _balancerMarkerImg;  // tinted red in the red zone too
-        private float _balancerTrackWidth;
+        private Image _balancerMarkerImg;  // tinted red in the >75 % «красная зона»
+        private RectTransform _healthMarker;
+        private Image _healthMarkerImg;
+
+        // ================================================================ art-pack HUD geometry
+        // Every art-pack PNG carries a transparent margin, and an Image/Simple stretches the WHOLE sprite
+        // rect over its RectTransform — so a rect set to the measured DRAWN box would draw the artwork too
+        // small. The rects below are the drawn boxes of asset-map §2 divided out by each sprite's own
+        // alpha-tight fraction (measured on the imported PNGs), i.e. «put the rect here and the ARTWORK
+        // lands exactly on the reference box». Format: cx, cyTop, w, h in 1920×1080 reference px.
+        //   sprite (tight bbox / texture)          drawn box §2            → rect
+        //   energy-battery-v2 (18,21,379,859/420,910)  127,58,114,218      → 184.75, 168.14, 126.33, 230.94
+        //   rel-bar-v2        (18,11,1136,286/1172,309) 413,35,523,132     → 674.50, 101.23, 539.57, 142.62
+        //   health-bar-v2     (18,11,1136,286/1172,309) 1042,38,504,127    → 1294.00, 101.72, 519.97, 137.21
+        //   money-jar-v2      (126,103,772,835/1024²)   1664,65,173,185    → 1750.50, 155.62, 229.47, 226.87
+        //   coin-v2           (1,0,858,868/860,869)     1714,6,68,68       → 1748.00, 40.04, 68.16, 68.08
+        //   age-badge-v2      (35,63,947,923/1024²)     1639,392,212,207   → 1745.78, 492.70, 229.24, 229.65
+        //   choice-plate-v2   (34,26,1468,968/1536,1024) 413,229,1093,721  → 959.50, 590.99, 1143.63, 762.71
+        // The JAR box is NOT the asset-map §2 row (design gate round 2: the table is wrong for the jar and
+        // the explainer wins) — the jar's own drawn glass, measured on the reference without the coin, is
+        // 1664,65,173,185. The COIN is unchanged (it was already within 2 px), and moving the jar UP is what
+        // seats the coin IN the lid slot the way the reference draws it.
+        private static readonly Vector4 BatteryRect = new(184.75f, 168.14f, 126.33f, 230.94f);
+        private static readonly Vector4 RelBarRect = new(674.50f, 101.23f, 539.57f, 142.62f);
+        private static readonly Vector4 HealthBarRect = new(1294.00f, 101.72f, 519.97f, 137.21f);
+        private static readonly Vector4 MoneyJarRect = new(1750.50f, 155.62f, 229.47f, 226.87f);
+        private static readonly Vector4 CoinRect = new(1748.00f, 40.04f, 68.16f, 68.08f);
+        private static readonly Vector4 AgeBadgeRect = new(1745.78f, 492.70f, 229.24f, 229.65f);
+        private static readonly Vector4 CardPlateRect = new(959.50f, 590.99f, 1143.63f, 762.71f);
+
+        // Inner boxes, straight from asset-map §8 (screen px @1920×1080; x/y are LEFT/TOP edges).
+        /// <summary>Battery cavity — the fill box: x, yTop, w, h.</summary>
+        public const float CavityX = 141f, CavityTop = 88f, CavityW = 86f, CavityH = 175f;
+        /// <summary>Level baked into `energy-battery-v2` (asset-map §5.6): cream above, yellow below.</summary>
+        public const float BakedEnergyLevel = 0.751f;
+        /// <summary>Relationships track (asset-map §8): left edge and width in screen px.</summary>
+        public const float RelTrackX = 513f, RelTrackW = 316f, RelTrackTop = 85f, RelTrackH = 35f;
+        /// <summary>Health track (asset-map §8).</summary>
+        public const float HealthTrackX = 1097f, HealthTrackW = 397f, HealthTrackTop = 78f, HealthTrackH = 56f;
+        /// <summary>Jar throat — where a dropped coin lands. Asset-map §8 gives it in SPRITE px (323,151,364,50);
+        /// re-projected through the corrected jar box its centre sits at screen y ≈ 81.</summary>
+        public const float ThroatCenterY = 81.2f;
+        /// <summary>Jar sum label, re-projected from the sprite box (asset-map §8: 292,488,440,171) through the
+        /// corrected jar box → screen 1701.2, 150.3, 98.6, 37.9.</summary>
+        public const float JarLabelW = 98.6f, JarLabelH = 37.9f;
+
+        // ---- markers ARE the art's own elements (founder canon, asset-map §12-1) ---------------------
+        // The heart was patched OUT of the relationships track and the black figure cut from the UNPATCHED
+        // health bar; both now RIDE their track through the §11-2/§11-4 map. Boxes are the elements' own
+        // drawn sizes, re-projected from the sprite through each bar's screen box — i.e. the marker is
+        // exactly as big, and sits exactly as high, as the art drew it.
+        //   rel-marker-heart-v2 : cut at sprite (512,89,158,136) of rel-bar-v2   → 72.7 × 62.8, centre y 102.4
+        //   health-marker-v2    : cut at sprite (526,52,163,236) of health-bar   → 72.3 × 104.8, centre y 108.6
+        public const float RelMarkerW = 72.7f, RelMarkerH = 62.8f, RelMarkerCy = 102.4f;
+        public const float HealthMarkerW = 72.3f, HealthMarkerH = 104.8f, HealthMarkerCy = 108.6f;
+
+        // ---- the END DECORATIONS own the ends of the track (design gate, round 3) ---------------------
+        // Each bar draws a fixed decoration at each end of its own track — the health bar a skull and a
+        // heart INSIDE the track, the relationships bar the two faces sitting ON its ends. They are as black
+        // (health) or as busy (rel) as the markers themselves, so a marker parked on one reads as a single
+        // unreadable blob: at 100 health the figure covered the heart to its middle. The marker therefore
+        // travels between them with a gap, and the value→track maps below carry that travel window in their
+        // END knots (the INTERIOR knots — the drawn zone borders — are untouched canon).
+        // Boxes are the DRAWN ink, measured on the imported PNGs and re-projected through each bar's screen
+        // rect (health: sprite→screen ×0.4437 from x 1034.01; rel: ×0.4604 from x 404.71):
+        //   health skull  sprite x 165…256   → screen 1107.2…1148.0
+        //   health heart  sprite x 921…1015  → screen 1442.6…1484.8
+        //   rel boy face  sprite x  95…245 skin + 7 px of its ink outline → screen 445.2…521.2
+        //   rel girl face sprite x 922…1089 skin − 7 px of its ink outline → screen 825.9…909.7
+        // The two FACES carry their edge from the RENDERED frame (523 / 822), not from that projection: the
+        // rel bar draws at 0.46 of its source, and the resampled ink edge lands 2…4 px further out than the
+        // sprite-space arithmetic predicts. The player sees the frame, so the frame wins; the skull and the
+        // heart need no such correction (their edges agree to within a pixel).
+        /// <summary>Right edge of the health bar's drawn skull (screen px).</summary>
+        public const float HealthSkullRight = 1148.0f;
+        /// <summary>Left edge of the health bar's drawn heart (screen px).</summary>
+        public const float HealthHeartLeft = 1442.6f;
+        /// <summary>Right edge of the relationships bar's drawn boy face, outline included (screen px).</summary>
+        public const float RelBoyFaceRight = 523f;
+        /// <summary>Left edge of the relationships bar's drawn girl face, outline included (screen px).</summary>
+        public const float RelGirlFaceLeft = 822f;
+        /// <summary>Clear air between a marker's drawn box and an end decoration. The design gate asks for
+        /// ≥4 px; 8 keeps that true ON THE FRAME too — the bars draw at ≈0.44…0.46 of their source, and the
+        /// resampled ink edge lands ≈2 px further out than the sprite-space projection predicts (measured on
+        /// the regenerated poses).</summary>
+        public const float MarkerEndIconGap = 8f;
+        /// <summary>Travel window of the health marker's CENTRE (screen px) — its drawn box stays clear of
+        /// both decorations.</summary>
+        public const float HealthMarkerMinCx = HealthSkullRight + MarkerEndIconGap + HealthMarkerW / 2f;
+        public const float HealthMarkerMaxCx = HealthHeartLeft - MarkerEndIconGap - HealthMarkerW / 2f;
+        /// <summary>Travel window of the relationships marker's CENTRE (screen px).</summary>
+        public const float RelMarkerMinCx = RelBoyFaceRight + MarkerEndIconGap + RelMarkerW / 2f;
+        public const float RelMarkerMaxCx = RelGirlFaceLeft - MarkerEndIconGap - RelMarkerW / 2f;
+
+        // ---- host bubble: the art-pack megaphone plate (`host-comment-v2`, 1445×506) -------------------
+        // Measured on `explainers/Экран - комментарий ведущего.png` (1920×1080, pixel truth), by flood-filling
+        // the plate's cream+gold body and growing through its ink outline:
+        //   visible PLATE (cream + gold rim + ink)   257, 201, 453, 248   centre 483.5, 325.0
+        //   visible WHOLE glyph (plate + megaphone)  198, 197, 512, 255
+        // Fitting the sprite against BOTH boxes (scale × tilt × centre, minimising the box error) has one
+        // solution: uniform scale 0.375, tilt +14.5°, rect centre (449, 333). The tilt is POSITIVE = counter-
+        // clockwise: on the explainer the plate's RIGHT end rides higher and the megaphone hangs down-left.
+        /// <summary>Sprite px → screen px for `host-comment-v2` (measured against the explainer).</summary>
+        public const float BubbleScale = 0.375f;
+        /// <summary>Plate tilt in degrees, CCW (+) — the right end sits higher, exactly as the explainer draws it.</summary>
+        public const float BubbleTiltDeg = 14.5f;
+        /// <summary>Bubble rect: centre x, centre y (from TOP), w, h — the sprite's full 1445×506 at <see cref="BubbleScale"/>.</summary>
+        public static readonly Vector4 BubbleRect =
+            new(449f, 333f, 1445f * BubbleScale, 506f * BubbleScale);
+        // 9-slice borders live in SPRITE px (340,80,80,80 — asset-map §5): the LEFT one is wide because it has
+        // to carry the whole megaphone (sprite x 19…330) plus the plate's left cap, so a resize never stretches
+        // them. Drawn border = border / pixelsPerUnitMultiplier, so the multiplier below is what puts the
+        // borders on the SAME 0.375 as the rest of the art (otherwise a 340 px border would eat 63 % of a
+        // 542 px plate). With the rect at exactly 0.375×the texture, the stretched middle lands on 0.375 too —
+        // the plate draws as a clean uniform scale of the source art, and 9-slice only absorbs later resizes.
+        /// <summary>Border sprite-px, left (the megaphone side) and bottom/right/top.</summary>
+        public const float BubbleBorderLeftPx = 340f, BubbleBorderPx = 80f;
+        // Text insets, in SPRITE px, = the border + slop. The right one additionally clears the gold star baked
+        // into the plate's bottom-right corner (sprite x 1297…1388): the largest rectangle that fits inside the
+        // cream fill without touching the rim or that star is sprite 323…1286 × 77…429, so 159 from the right.
+        // The extra slop exists because uGUI's best-fit only honours HEIGHT in Wrap mode: at the size it picks,
+        // a wrapped line can still run ~2 px past the rect. Without the slop those 2 px land on the gold rim
+        // (guarded RED by HostReactionTests — «Зачем терапевт, когда есть кот.» was the line that found it).
+        /// <summary>Best-fit slop margin, sprite px (horizontal, vertical).</summary>
+        public const float BubbleTextSlopXPx = 32f, BubbleTextSlopYPx = 16f;
+        /// <summary>Reply kegl cap: the explainer's own cap-height (27.0 px de-tilted) ÷ Rubik's capHeight
+        /// (700/1000 em). Best-fit shrinks a long line from here; a 1–3 word line draws at this size.</summary>
+        public const int BubbleTextMaxSize = 39;
+        /// <summary>Text insets from the plate's edges, in sprite px (left = the whole megaphone border).</summary>
+        public const float BubbleTextLeftPx = BubbleBorderLeftPx + BubbleTextSlopXPx;
+        public const float BubbleTextRightPx = 159f + BubbleTextSlopXPx;
+        public const float BubbleTextVertPx = BubbleBorderPx + BubbleTextSlopYPx;
+
+        // ---- battery lightning: its own layer (founder canon §12-3) ----------------------------------
+        // Patched out of the cavity fill and cut as `battery-bolt-v2`; drawn OVER the mask and the top-up so
+        // it always reads whole, at any level. Cut at sprite (119,408,182,316) of energy-battery-v2.
+        public static readonly Vector4 BoltRect = new(184.75f, 196.30f, 54.74f, 80.20f);
+
+        // ---- card: cream field, the question's safe box and the reserved bottom band -------------------
+        /// <summary>Cream field of `choice-plate-v2` on screen (asset-map §8: 467,286,984,606).</summary>
+        public const float FieldX = 467f, FieldTop = 286f, FieldW = 984f, FieldH = 606f;
+        /// <summary>Question safe box (asset-map §8: 578,322,764,535) — x column and top edge.</summary>
+        public const float CardTextX = 578f, CardTextW = 764f, CardTextTop = 322f;
+        /// <summary>Bottom of the question box when the card carries NOTHING else (the full §8 safe box).</summary>
+        public const float CardTextFullBottom = 857f;
+        /// <summary>
+        /// Top of the RESERVED bottom band of the cream field: the BLOCK$ banner (y 705…815) and the price
+        /// sub-line (y 811…889) live here. While either is up the question box must end above this line —
+        /// без этого длинный вопрос гарантированно печатается прямо по баннеру и цене (skeptic MAJOR-1).
+        /// </summary>
+        public const float CardBandTop = 705f;
+        /// <summary>Clearance between the last line of the question and the reserved band.</summary>
+        public const float CardTextBandGap = 12f;
+        /// <summary>Bottom of the question box while the reserved band is occupied.</summary>
+        public const float CardTextShortBottom = CardBandTop - CardTextBandGap;
+
+        // ---- child «cabinet button» placeholder (инкремент «звонок» переделает) -----------------------
+        // Free slot in the art row's right column: the gap BETWEEN the money jar (drawn box 1674,74,161,174
+        // → bottom 248) and the age badge (1639,392,212,207 → top 392), right of the card plate (drawn right
+        // edge 1506). The whole cluster — including the halo at its PULSE PEAK — has to fit that 144 px gap
+        // and stay in frame, so the sizes below are derived from it, not picked by eye (skeptic MAJOR-2).
+        /// <summary>Centre of the child button cluster, 1920×1080 reference px (x from LEFT, y from TOP).</summary>
+        public const float ChildCx = 1840f, ChildCy = 320f;
+        /// <summary>Halo (ChildGlow) rect size at rest; it pulse-scales while the flash window is open.</summary>
+        public const float ChildGlowSize = 106f;
+        /// <summary>Halo flash pulse: scale = mid ± amp. Peak size = ChildGlowSize × (mid + amp) ≈ 130 px.</summary>
+        public const float ChildGlowPulseMid = 1.05f, ChildGlowPulseAmp = 0.18f;
+        /// <summary>Button rect size at rest; sized so the halo stays bigger even at the pulse TROUGH.</summary>
+        public const float ChildButtonSize = 66f;
+        /// <summary>Button flash pulse: scale = mid ± amp.</summary>
+        public const float ChildButtonPulseMid = 1.28f, ChildButtonPulseAmp = 0.10f;
+        /// <summary>Halo size at the pulse PEAK — the worst case a layout guard has to clear.</summary>
+        public const float ChildGlowPeakSize = ChildGlowSize * (ChildGlowPulseMid + ChildGlowPulseAmp);
+        /// <summary>Button size at the pulse PEAK.</summary>
+        public const float ChildButtonPeakSize = ChildButtonSize * (ChildButtonPulseMid + ChildButtonPulseAmp);
+
+        // Baked cavity colours, sampled off `energy-battery-v2`: cream «empty», saturated yellow «full».
+        private static readonly Color BatteryCream = new(253f / 255f, 249f / 255f, 230f / 255f);
+        private static readonly Color BatteryYellow = new(254f / 255f, 210f / 255f, 1f / 255f);
 
         // ---- child button (opens on MD02=ДА, not age-gated; flashes on the signal-response window) ----
         private GameObject _childGroup;    // whole widget; shown while Game.ChildOpen, hidden after LT04
@@ -267,16 +468,25 @@ namespace ThanksNoThanks
         public Image YesPlateImage => _yesPlate;
         public Image NoPlateImage => _noPlate;
         public GameObject AgeBadge => _ageBadge;
-        public Text AgeText => _ageText;                 // the DIGITS on the age badge (not the «ВОЗРАСТ» label)
-        public GameObject MoneyPill => _moneyPill;
+        public Text AgeText => _ageText;                 // the DIGITS on the age badge (no caption since the art pack)
+        public Image AgeBadgeImage => _ageBadgeImg;
+        public GameObject MoneyJar => _moneyGroup;
+        public Image MoneyJarImage => _jarImg;
+        public Text MoneyText => _moneyText;             // the sum drawn INSIDE the jar's cream label
+        public Image MoneyCoin => _moneyCoin;
         public GameObject HudRow => _hudRow;
         public GameObject HealthGroup => _healthGroup;
+        public Image HealthBarImage => _healthBarImg;
+        public GameObject HealthMarker => _healthMarker != null ? _healthMarker.gameObject : null;
         public GameObject EnergyGroup => _energyGroup;
+        public Image BatteryImage => _batteryImg;
+        /// <summary>Cream «empty» rect over the battery cavity — its BOTTOM edge is the energy reading.</summary>
+        public Image EnergyEmpty => _energyEmpty;
+        public Image EnergyTopUp => _energyTopUp;
+        /// <summary>The lightning layer — drawn whole above the mask and the top-up at every level.</summary>
+        public Image EnergyBolt => _energyBolt;
         public GameObject BalancerGroup => _balancerGroup;
-        public Text MoneyLabel => _moneyLabel;
-        public Text HealthLabel => _healthLabel;
-        public Text EnergyLabel => _energyLabel;
-        public Text RelLabel => _relLabel;
+        public Image RelBarImage => _relBarImg;
         public Image TimerRingFill => _timerFill;
         public GameObject OpenerPanel => _openerPanel;
         public GameObject GamePanel => _gamePanel;
@@ -298,6 +508,8 @@ namespace ThanksNoThanks
         public GameObject BalancerMarker => _balancerMarker != null ? _balancerMarker.gameObject : null;
         public GameObject ChildGroup => _childGroup;
         public Image ChildButtonImage => _childButtonImg;
+        /// <summary>The pulsing halo BEHIND the child button — the widget's true visible extent.</summary>
+        public Image ChildGlow => _childGlow;
         public Image BrightnessVeil => _brightness;
         public Text TutorialText => _tutorialText;
         public GameObject HostBubble => _hostBubble;
@@ -319,6 +531,14 @@ namespace ThanksNoThanks
         public void DebugApplyAgeGates(float age) => ApplyAgeGates(age);
         /// <summary>Layer-2 seam: advance the §7 ray spin by <paramref name="dt"/> seconds (same path Update drives).</summary>
         public void DebugSpinBackground(float dt) => SpinBackground(dt);
+        /// <summary>Layer-2 seam: draw an arbitrary scale reading onto the art HUD (battery level + both bar
+        /// markers) without driving a whole life — the same code path Update/UpdateHudValues use.</summary>
+        public void DebugReflectScales(float energy, float health, float relations, bool relRedZone = false)
+        {
+            ReflectEnergyLevel(energy);
+            ReflectHealthMarker(health);
+            ReflectRelationsMarker(relations, relRedZone);
+        }
 
         /// <summary>
         /// Test hook: force the finale panel visible and render an arbitrary necrolog (title/cause/story)
@@ -380,7 +600,11 @@ namespace ThanksNoThanks
             _cardText.text = "Обычная жизнь идёт…";
             _childGroup.SetActive(true);
             _childButtonImg.color = Bulb;                                  // lit gold
-            _childButtonImg.rectTransform.localScale = Vector3.one * 1.10f; // max flash pulse
+            // Pose the flash at its PEAK — the same constants the layout guard clears.
+            _childButtonImg.rectTransform.localScale =
+                Vector3.one * (ChildButtonPulseMid + ChildButtonPulseAmp);
+            _childGlow.color = new Color(Bulb.r, Bulb.g, Bulb.b, 0.85f);
+            _childGlow.rectTransform.localScale = Vector3.one * (ChildGlowPulseMid + ChildGlowPulseAmp);
             _bubbleText.text = "Скорее!"; _hostBubble.SetActive(true);
             enabled = false;
         }
@@ -392,6 +616,45 @@ namespace ThanksNoThanks
         {
             var tint = blocked ? CardBlockDim : Color.white;
             if (_cardFrame.color != tint) _cardFrame.color = tint;
+        }
+
+        // ---- the question box vs the card's reserved bottom band (skeptic MAJOR-1) --------------------
+        // The BLOCK$ banner (screen y 705…815) and the price sub-line (811…889) sit INSIDE the cream field,
+        // in the band below the question. The question's §8 safe box reaches y 857, so whenever either was
+        // up a long question printed straight THROUGH them — best-fit only shrinks text to its RECT, and the
+        // rect overlapped. Fix: the rect itself moves. Its bottom rises above the band while the band is
+        // occupied, and returns to the full §8 safe box when the card carries nothing else.
+        private void SetCardTextBottom(float bottomRef)
+        {
+            float h = bottomRef - CardTextTop;
+            float cyRef = CardTextTop + h / 2f;
+            float cardLeft = CardPlateRect.x - CardPlateRect.z / 2f;   // card rect edges in reference px
+            float cardTop = CardPlateRect.y - CardPlateRect.w / 2f;
+            Anchor(_cardText.rectTransform,
+                new Vector2((CardTextX + CardTextW / 2f - cardLeft) / CardPlateRect.z,
+                            1f - (cyRef - cardTop) / CardPlateRect.w),
+                new Vector2(CardTextW, h));
+        }
+
+        /// <summary>
+        /// Recompute the question box from what the reserved bottom band currently carries. Called from
+        /// EVERY place that toggles the block banner or the price line, so «banner up + tall text box» is
+        /// not a reachable state.
+        /// </summary>
+        private void ReflectCardTextBand()
+        {
+            bool band = (_blockBanner != null && _blockBanner.activeSelf)
+                     || (_cardPricePlate != null && _cardPricePlate.gameObject.activeSelf);
+            SetCardTextBottom(band ? CardTextShortBottom : CardTextFullBottom);
+        }
+
+        /// <summary>Screenshot pose: an ordinary frame with the Ведущий's comment plate up, so the
+        /// reference-placed bubble (top-left, riding the card's corner) can be judged by eye.</summary>
+        public void DebugPreviewHostComment()
+        {
+            DebugPreviewArcadeShot();          // ordinary frame, driver frozen
+            _bubbleText.text = "Трещина на потолке — бесплатный ночник для мыслей.";
+            _hostBubble.SetActive(true);
         }
 
         public void DebugPreviewBlocked()
@@ -415,13 +678,11 @@ namespace ThanksNoThanks
             ApplyAgeGates(35f);                       // reveal money + health + energy + relationships widgets
             RestoreNormalPlates();
             _ageText.text = "35";
-            _moneyText.text = FormatMoney(1240);
-            _moneyLabel.text = FormatMoneyLabel(1);
+            _moneyText.text = FormatMoneyJar(1240);
             _cardText.text = "Взять ипотеку на 25 лет?";
-            _healthFill.fillAmount = 0.72f;
-            _energyFill.fillAmount = 0.58f;
-            if (_balancerMarker != null)
-                _balancerMarker.anchoredPosition = new Vector2(0.12f * _balancerTrackWidth, 0f);
+            ReflectEnergyLevel(58f);
+            ReflectHealthMarker(72f);
+            ReflectRelationsMarker(58f, redZone: false);
             _yesPlate.color = Color.white; _noPlate.color = Color.white;
             _yesPlateText.text = "ДА"; _noPlateText.text = "СПАСИБО,\nНЕ НАДО";
             _timerText.text = "4";
@@ -474,8 +735,19 @@ namespace ThanksNoThanks
                 _display = Resources.Load<Font>("Fonts/RussoOne");
             }
             _body = Resources.Load<Font>("Fonts/Rubik");
+            // Rubik.ttf is a VARIABLE font whose wght axis is 300…900 with a DEFAULT of 300 — legacy uGUI
+            // rasterises the default instance, so every Rubik line came out Light. The Ведущий's plate is
+            // drawn HEAVY on the explainer (measured stroke/cap 0.219 against Rubik's 0.081 at 300 and 0.216
+            // at 700), so the bubble runs on a static wght=700 instance cut from the same OFL file.
+            _bodyBold = Resources.Load<Font>("Fonts/Rubik-Bold");
             if (_display == null) _display = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
             if (_body == null) _body = _display;
+            if (_bodyBold == null)
+            {
+                Debug.LogError("GameDriver: Resources/Fonts/Rubik-Bold missing — реплики Ведущего рисуются "
+                    + "лёгким Rubik (variable default 300). Re-import Art/Resources/Fonts/Rubik-Bold.ttf.");
+                _bodyBold = _body;
+            }
             _voice = new HostVoice(new System.Random().NextDouble);   // named-line priority + seeded pool
             BuildHud();
             LoadGame();
@@ -606,10 +878,10 @@ namespace ThanksNoThanks
                 if (_game.State != GameState.Playing) return;
                 if (!_crankCap.TryAccept()) return;         // income cap (anti-mashgun) — gameplay only
                 _game.HandleInput(GameInput.MoneyTick);     // Game sees only the semantic crank event
-                if (_game.MoneyOpen && isActiveAndEnabled)  // pill pulse on each PAYING tick
+                if (_game.MoneyOpen && isActiveAndEnabled)  // coin drops into the jar on each PAYING tick
                 {
                     if (_moneyPulse != null) StopCoroutine(_moneyPulse);
-                    _moneyPulse = StartCoroutine(PulseMoney());
+                    _moneyPulse = StartCoroutine(DropCoin());
                 }
                 return;
             }
@@ -701,19 +973,12 @@ namespace ThanksNoThanks
             {
                 if (_crisisUiActive) RestoreNormalPlates();   // just resumed from a crisis → restore the plates
                 _ageText.text = Mathf.FloorToInt(_game.Age).ToString();
-                _moneyText.text = FormatMoney(_game.Money);   // live: ticks up on crank, drains down
-                _moneyLabel.text = FormatMoneyLabel(_game.IncomeMultiplier);   // ×N (burnout halves live)
-                // Live health/energy bars + balancer move on their own (decay/drain/breath), not just on cards.
+                _moneyText.text = FormatMoneyJar(_game.Money);   // live: ticks up on crank, drains down
+                // Live battery/bars move on their own (decay/drain/breath), not just on cards.
                 var s = _game.Scales;
-                _healthFill.fillAmount = Mathf.Clamp01(s.Health / 100f);
-                _energyFill.fillAmount = Mathf.Clamp01(s.Energy / 100f);
-                float rel = Mathf.Clamp01(s.Relationships / 100f);
-                _balancerMarker.anchoredPosition = new Vector2((rel - 0.5f) * _balancerTrackWidth, 0f);
-                // «Красная зона» (>75%): keep the zone bar's own colours (tinting the green HOLD-ZONE red
-                // muddied it to brown) and flag the risk on the MARKER alone.
-                var markerTint = _game.RelationshipRedZone ? TimerRed : Color.white;
-                if (_balancerTrackImg.color != Color.white) _balancerTrackImg.color = Color.white;
-                if (_balancerMarkerImg.color != markerTint) _balancerMarkerImg.color = markerTint;
+                ReflectEnergyLevel(s.Energy);
+                ReflectHealthMarker(s.Health);
+                ReflectRelationsMarker(s.Relationships, _game.RelationshipRedZone);
                 if (_burnoutPlate.activeSelf != _game.Burnout) _burnoutPlate.SetActive(_game.Burnout);
                 // S10: while the current card is BLOCK$-blocked, mute the two answer plates (the card veil
                 // dims the marquee, this dims the plates) so the whole board reads «недоступно».
@@ -753,9 +1018,8 @@ namespace ThanksNoThanks
             _cardText.text = c != null ? c.Question : "";
 
             // S6 minimal HUD: only the age badge + the crisis counter show during the crisis — hide the
-            // money pill / bars / balancer / child (re-revealed by ApplyAgeGates the moment play resumes).
-            _moneyPill.SetActive(false);
-            _moneyLabel.gameObject.SetActive(false);
+            // money jar / bars / balancer / child (re-revealed by ApplyAgeGates the moment play resumes).
+            _moneyGroup.SetActive(false);
             _healthGroup.SetActive(false);
             _energyGroup.SetActive(false);
             _balancerGroup.SetActive(false);
@@ -766,6 +1030,7 @@ namespace ThanksNoThanks
             _blockBanner.SetActive(false);
             _cardPriceText.gameObject.SetActive(false);
             _cardPricePlate.gameObject.SetActive(false);
+            ReflectCardTextBand();          // band free again → the thought/impulse text gets the full box
 
             bool blitz = _game.Phase == CrisisPhase.Blitz;
             if (blitz)
@@ -972,15 +1237,17 @@ namespace ThanksNoThanks
             // Unmissable flash: the button flares gold and jumps ~1.3× (was a barely-there 1.1× tint pulse),
             // and the halo behind it flares bright and breathes. At rest the halo is fully transparent and the
             // button sits at its idle size — so the «жми Enter по вспышке» beat is impossible to miss.
+            // Both pulses stay within their PEAK constants — the layout guard clears the peak, so the live
+            // rects can never leave the jar↔badge gap.
             _childButtonImg.rectTransform.localScale = lit
-                ? Vector3.one * (1.28f + 0.10f * Mathf.Sin(Time.time * 11f))
+                ? Vector3.one * (ChildButtonPulseMid + ChildButtonPulseAmp * Mathf.Sin(Time.time * 11f))
                 : Vector3.one;
             if (_childGlow != null)
             {
                 float a = lit ? 0.55f + 0.30f * Mathf.Sin(Time.time * 11f) : 0f;
                 _childGlow.color = new Color(Bulb.r, Bulb.g, Bulb.b, a);
                 _childGlow.rectTransform.localScale = lit
-                    ? Vector3.one * (1.05f + 0.18f * Mathf.Sin(Time.time * 11f))
+                    ? Vector3.one * (ChildGlowPulseMid + ChildGlowPulseAmp * Mathf.Sin(Time.time * 11f))
                     : Vector3.one;
             }
         }
@@ -1035,20 +1302,16 @@ namespace ThanksNoThanks
             scaler.matchWidthOrHeight = 0.5f;
             CanvasRect = canvasGo.GetComponent<RectTransform>();
 
-            // Shared sunburst background + static star accents (on all screens, per increment §1).
-            // The rays SPIN (meeting-revisions §7 / build-spec §6: 1 turn per 60 s ≈ 6°/сек, clockwise,
-            // continuous, on every screen). A stretched rect would bare the corners as soon as it turned, so
-            // the backdrop is an oversized SQUARE pinned to the screen centre by its PIVOT — and the pivot is
-            // the sprite's ray HUB, so the sunburst spins about its own centre instead of orbiting it. Every
-            // edge sits ≥ the frame's half-diagonal (≈1102 px) away from that pivot, so no rotation angle can
-            // bare a corner.
-            _bg = NewSprite("Background", canvasGo.transform, Sprite("sunburst-bg"));
+            // Shared sunburst background — `sunburst-bg-v3`, the screen-space synthesis (see the field's
+            // comment). Drawn 1:1 (2210² texture into a 2210² rect), centre pivot on the screen centre, and
+            // it SPINS (meeting-revisions §7 / build-spec §6: 1 turn per 60 s = 6°/сек, clockwise, on every
+            // screen). NO star accents — the reference background is clean.
+            _bg = NewSprite("Background", canvasGo.transform, Sprite("sunburst-bg-v3"));
             var bgRt = _bg.rectTransform;
             bgRt.anchorMin = bgRt.anchorMax = new Vector2(0.5f, 0.5f);
             bgRt.pivot = BgSpinPivot;
             bgRt.anchoredPosition = Vector2.zero;
-            bgRt.sizeDelta = new Vector2(BgSpinSquare, BgSpinSquare);
-            BuildStars(canvasGo.transform);
+            bgRt.sizeDelta = new Vector2(BgOverscanW, BgOverscanH);
 
             BuildOpener(canvasGo.transform);
             BuildGamePanel(canvasGo.transform);
@@ -1061,23 +1324,6 @@ namespace ThanksNoThanks
             BuildDepressionOverlay(canvasGo.transform);  // B&W wash + grain + pulse (above the show veil)
 
             BuildTutorialOverlay(canvasGo.transform);   // top-most: dims every screen when up
-        }
-
-        private void BuildStars(Transform parent)
-        {
-            (Vector2 pos, string sprite, float size)[] stars =
-            {
-                (new Vector2(0.09f, 0.56f), "star-white",   84f),
-                (new Vector2(0.155f, 0.30f), "star-outline", 60f),
-                (new Vector2(0.87f, 0.66f), "star-white",   88f),
-                (new Vector2(0.905f, 0.38f), "star-outline", 64f),
-                (new Vector2(0.80f, 0.84f), "star-white",   54f),
-            };
-            foreach (var s in stars)
-            {
-                var star = NewSprite("Star", parent, Sprite(s.sprite));
-                Anchor(star.rectTransform, s.pos, new Vector2(s.size, s.size));
-            }
         }
 
         // The four opener rules (S1) — each on its own cobalt plate, verbatim from the mockup.
@@ -1130,56 +1376,29 @@ namespace ThanksNoThanks
         {
             _gamePanel = NewGroup("Game", parent);
 
-            // ---- HUD row (styleframe-03 / C2 / INDEX anchors, 1920×1080, y from top) ----
+            // ---- HUD row — the art pack, pixel-placed off «Экран спокойный обычный.png» (asset-map §2) ----
             // A dedicated container so the row can be enumerated (no stray/placeholder Image) and so the
-            // whole row skins/moves as one. All row widgets are pixel-anchored via AnchorPx.
+            // whole row hides as one on a rubric beat. Rects come from the geometry block above.
             _hudRow = NewGroup("HudRow", _gamePanel.transform);
 
-            // Возраст — синий квадрат-стикер ~x58 y30 w200 h224, «ВОЗРАСТ» сверху + крупная цифра.
-            // Nudged right of x46 so neither the sticker nor its caption clip the left screen edge.
-            _ageBadge = NewSprite("AgeBadge", _hudRow.transform, Sprite("age-badge")).gameObject;
-            AnchorPx(_ageBadge.GetComponent<RectTransform>(), 158f, 142f, 200f, 224f);
-            var ageLbl = NewText("AgeLbl", _ageBadge.transform, "ВОЗРАСТ", 18, TextAnchor.MiddleCenter, Color.white, _display);
-            Anchor(ageLbl.rectTransform, new Vector2(0.5f, 0.80f), new Vector2(172, 30));
-            ageLbl.resizeTextForBestFit = true; ageLbl.resizeTextMinSize = 10; ageLbl.resizeTextMaxSize = 18;
-            _ageText = NewText("AgeText", _ageBadge.transform, "0", 78, TextAnchor.MiddleCenter, Color.white, _display);
-            Anchor(_ageText.rectTransform, new Vector2(0.5f, 0.36f), new Vector2(190, 120));
-            DisplayFx(_ageText);
+            BuildBattery();       // энергия — v3_energy, заливка полости
+            BuildRelBar();        // отношения — hf_relationship_cute_c + свой маркер
+            BuildHealthBar();     // здоровье  — patched copy + свой маркер
+            BuildMoneyJar();      // деньги    — банка + сумма в лейбле + монета
+            BuildAgeBadge();      // возраст   — бейдж + цифра ~112 px, без подписи
 
-            // Деньги — СИНЯЯ пилюля (кобальт) x270 y30 w330 h88; «₽ N» белым; подпись «ДЕНЬГИ ×N» ПОД пилюлей.
-            _moneyPill = NewSprite("MoneyPill", _hudRow.transform, Sprite("money-pill")).gameObject;
-            var moneyImg = _moneyPill.GetComponent<Image>();
-            moneyImg.type = Image.Type.Sliced;
-            moneyImg.color = Cobalt;                          // white sprite → cobalt pill (design gate)
-            AnchorPx(_moneyPill.GetComponent<RectTransform>(), 435f, 74f, 330f, 88f);
-            // «₽ N» crisp white on the cobalt pill (no dark outline/shadow — it dulls the value to gray).
-            _moneyText = NewText("MoneyText", _moneyPill.transform, "₽ 0", 40, TextAnchor.MiddleCenter, Color.white, _body);
-            Inset(_moneyText.rectTransform, 18f);
-            // Caption UNDER the pill: «ДЕНЬГИ ×N» dark-blue, with the coin ◎ following it (INDEX order).
-            // The coin stays a direct child of the pill (P0-sprite test path) but sits in the caption row.
-            _moneyLabel = NewText("MoneyLabel", _hudRow.transform, "ДЕНЬГИ", 24, TextAnchor.MiddleLeft, CobaltDeep, _display);
-            AnchorPx(_moneyLabel.rectTransform, 388f, 150f, 232f, 32f);
-            var coin = NewSprite("Coin", _moneyPill.transform, Sprite("icon-coin"));
-            AnchorPx(coin.rectTransform, 478f, 150f, 26f, 26f);
+            // Кнопка-ребёнок (заглушка, инкремент «звонок»): moved out of the art row's way — the jar now
+            // owns the old 1850,88 corner. Lives in the free gap BETWEEN the jar and the age badge; its
+            // size comes from that gap (geometry block, ChildCx/ChildCy/ChildGlowSize).
+            BuildChildButton();
 
-            // Здоровье / Энергия — белые капсулы w290 h72 с иконкой-спрайтом + бар, подпись СНИЗУ.
-            _healthGroup = BuildBar("HealthGroup", 771f, 66f, "ЗДОРОВЬЕ", "icon-heart",
-                "bar-health-fill", out _healthFill, out _healthLabel);
-            _energyGroup = BuildBar("EnergyGroup", 1085f, 66f, "ЭНЕРГИЯ", "icon-lightning",
-                "bar-energy-fill", out _energyFill, out _energyLabel);
-
-            // Отношения — белая капсула w380 h72 с зона-баром + маркер, подпись снизу.
-            BuildBalancer(1444f, 66f);
-
-            // Кнопка-ребёнок — своя зона верх-право (1850,88), НЕ поверх плашек.
-            BuildChildButton(1850f, 88f);
-
-            // ---- Timer ring — в ЗАЗОРЕ под HUD (центр x960 y250), НЕ поверх энергии/шкал ----
-            // Layered to match the mockup: white outline (back) · cobalt base ring · red arc (=remaining) ·
-            // cobalt centre disc · white number on top.
+            // ---- Timer ring (инкремент «купол» переделает) — parked low in the LEFT column: the art-pack
+            // card owns the centre, and at the old 252,430 spot the host-bubble HORN (ends y≈455, x≤300)
+            // covered the ring. 252,590 clears the horn by ~45 px and the НЕ НАДО plate (top ≈725) by ~45 px.
+            // Layered as before: white outline · cobalt base ring · red arc · disc · digit.
             var ringGroup = NewGroup("Timer", _gamePanel.transform);
             _timerGroup = ringGroup;
-            AnchorPx(ringGroup.GetComponent<RectTransform>(), 960f, 250f, 180f, 180f);
+            AnchorPx(ringGroup.GetComponent<RectTransform>(), 252f, 590f, 180f, 180f);
             var ringOutline = NewSprite("RingOutline", ringGroup.transform, Sprite("timer-ring-track"));
             Stretch(ringOutline.rectTransform);
             ringOutline.color = Color.white;                       // white outer outline
@@ -1201,21 +1420,25 @@ namespace ThanksNoThanks
             Stretch(_timerText.rectTransform);
             DisplayFx(_timerText);
 
-            // ---- Card marquee (centre x960, in the gap below the timer ring) ----
+            // ---- Card — the art-pack cream plate (`choice-plate-v2`), INK question on the cream field ----
+            // Image.Type.Simple, never 9-slice: the plate's tabs sit at the middle of each side and its stars
+            // sit in the corners, so a sliced draw would stretch both (asset-map §1.1/§5).
             _cardRoot = NewGroup("Card", _gamePanel.transform).GetComponent<RectTransform>();
-            AnchorPx(_cardRoot, 960f, 560f, 940f, 430f);
-            _cardFrame = NewSprite("CardFrame", _cardRoot, Sprite("marquee-frame-bulbs"));
+            AnchorPx(_cardRoot, CardPlateRect.x, CardPlateRect.y, CardPlateRect.z, CardPlateRect.w);
+            _cardFrame = NewSprite("CardFrame", _cardRoot, Sprite("choice-plate-v2"));
+            _cardFrame.type = Image.Type.Simple;
             Stretch(_cardFrame.rectTransform);
-            _cardText = NewText("CardText", _cardRoot, "", 64, TextAnchor.MiddleCenter, Color.white, _display);
-            Inset(_cardText.rectTransform, 120f);
-            _cardText.resizeTextForBestFit = true;   // auto-shrink long questions to fit the marquee
+            // Question text on the plate's SAFE box (asset-map §8: screen 578,322,764,535 — inside the cream
+            // field 467,286,984,606), expressed as a fraction of the card rect. Ink on cream: NO DisplayFx —
+            // a dark outline on dark letters over a light plate just muddies them (the reference is flat black).
+            _cardText = NewText("CardText", _cardRoot, "", 64, TextAnchor.MiddleCenter, Ink, _display);
+            SetCardTextBottom(CardTextFullBottom);   // full §8 safe box until the bottom band is occupied
+            _cardText.resizeTextForBestFit = true;   // auto-shrink long questions to fit the plate
             _cardText.resizeTextMinSize = 30;
             _cardText.resizeTextMaxSize = 64;
             // Truncate (not the NewText default Overflow) so best-fit honours HEIGHT too: a long question (the
-            // deck's longest is 67 chars) otherwise rendered too big and spilled above the top bulbs / below the
-            // bottom edge of the marquee. With Truncate it shrinks to fit inside the card (design-gate S15 fix).
+            // deck's longest is 67 chars) otherwise rendered too big and spilled off the cream field.
             _cardText.verticalOverflow = VerticalWrapMode.Truncate;
-            DisplayFx(_cardText);
 
             // ---- BLOCK$ (S10): dim veil over the card + red block-tag banner (hidden by default) ----
             // No separate dim veil: the card is dimmed by tinting _cardFrame directly (SetCardBlockedDim) so
@@ -1227,7 +1450,9 @@ namespace ThanksNoThanks
             blockBannerImg.type = Image.Type.Sliced;
             blockBannerImg.color = new Color(0.90f, 0.18f, 0.14f);   // punchy saturated red (S10 banner)
             _blockBanner = blockBannerImg.gameObject;
-            Anchor(blockBannerImg.rectTransform, new Vector2(0.5f, 0.22f), new Vector2(900, 132));
+            // Low on the taller art-pack plate but still INSIDE its cream field (screen y≈705..815 of the
+            // field's 286..892) — the old «just below the card» anchor now lands on the answer plates.
+            Anchor(blockBannerImg.rectTransform, new Vector2(0.5f, 0.2784f), new Vector2(900, 110));
             var blockTxt = NewText("BlockText", _blockBanner.transform,
                 "Как жаль, у вас нет денег на это!", 40, TextAnchor.MiddleCenter, Color.white, _display);
             blockTxt.horizontalOverflow = HorizontalWrapMode.Overflow;   // single line, best-fit shrinks to width
@@ -1246,9 +1471,15 @@ namespace ThanksNoThanks
             _cardPricePlate = NewSprite("CardPricePlate", _cardRoot, Sprite("bar-track"));
             _cardPricePlate.type = Image.Type.Sliced;
             _cardPricePlate.color = Ink;                     // dark navy plate (S10 block-tag)
-            Anchor(_cardPricePlate.rectTransform, new Vector2(0.5f, -0.10f), new Vector2(360, 88));
+            // Bottom of the cream field (screen y≈850), under the block banner — the art-pack plate reaches
+            // y≈972, so the old below-the-card anchor would now sit on the answer plates.
+            Anchor(_cardPricePlate.rectTransform, new Vector2(0.5f, 0.1604f), new Vector2(360, 78));
             _cardPriceText = NewText("CardPrice", _cardRoot, "", 40, TextAnchor.MiddleCenter, Bulb, _body);
-            Anchor(_cardPriceText.rectTransform, new Vector2(0.5f, -0.10f), new Vector2(820, 88));
+            Anchor(_cardPriceText.rectTransform, new Vector2(0.5f, 0.1604f), new Vector2(820, 78));
+            // ONE line by design («цена N ₽»). ApplyPriceLabel sizes the rect to preferredWidth, and font
+            // metrics round differently at different canvas scales — with Wrap a half-pixel shortfall threw
+            // the «₽» onto a second line that hung off the dark plate. Overflow makes that unreachable.
+            _cardPriceText.horizontalOverflow = HorizontalWrapMode.Overflow;
             DisplayFx(_cardPriceText);
             _cardPricePlate.gameObject.SetActive(false);
             _cardPriceText.gameObject.SetActive(false);
@@ -1317,7 +1548,9 @@ namespace ThanksNoThanks
 
             // ---- Breakup notice: transient red «РАССТАЛИСЬ» plate (shown ~2s on a breakup) ----
             _breakupPlate = NewSolid("BreakupPlate", _gamePanel.transform, TimerRed).gameObject;
-            Anchor(_breakupPlate.GetComponent<RectTransform>(), new Vector2(0.775f, 0.70f), new Vector2(360, 96));
+            // Right under the relationships bar it reports on (the old 0.775/0.70 anchor now lands on the
+            // age badge). Transient (~2s) — drawn above the card.
+            AnchorPx(_breakupPlate.GetComponent<RectTransform>(), 674f, 215f, 360f, 96f);
             var breakupTxt = NewText("BreakupText", _breakupPlate.transform,
                 "РАССТАЛИСЬ", 40, TextAnchor.MiddleCenter, Color.white, _display);
             Stretch(breakupTxt.rectTransform);
@@ -1397,34 +1630,43 @@ namespace ThanksNoThanks
             return UnityEngine.Sprite.Create(tex, new Rect(0, 0, n, n), new Vector2(0.5f, 0.5f), 100f);
         }
 
-        // Host speech bubble (S3, yellow bubble.png 9-slice) + rubric banner (S4). Both start hidden.
+        // Host speech bubble (S3, `host-comment-v2` 9-slice) + rubric banner (S4). Both start hidden.
         private void BuildHostReactions()
         {
-            // ---- Speech bubble (S3): a corner bubble, right of the card so it never covers it ----
-            var bubbleImg = NewSprite("HostBubble", _gamePanel.transform, Sprite("bubble"));
-            bubbleImg.type = Image.Type.Sliced;   // 9-slice border 70/120/70/70 (import already set)
-            bubbleImg.color = Energy;             // saturated bulb-gold (#f8d24c) per C1/S3 — not pale cream
+            // ---- Speech bubble (S3): the art-pack megaphone plate, above-left, riding the card's corner ----
+            // `host-comment-v2` IS the explainer's bubble (cream fill, gold rim, megaphone tail), so it is
+            // drawn in its own colours at its own tilt — the old `bubble` sprite (a flat orange box with a
+            // triangular tail, tinted gold) matched the measured RECT but never the picture.
+            var bubbleImg = NewSprite("HostBubble", _gamePanel.transform, Sprite("host-comment-v2"));
+            bubbleImg.type = Image.Type.Sliced;                       // borders 340/80/80/80 (import sets them)
+            bubbleImg.pixelsPerUnitMultiplier = 1f / BubbleScale;     // borders drawn at the art's own 0.375
             _hostBubble = bubbleImg.gameObject;
-            // Taller (was 360×220 → 380×240) so a long host line has vertical room; width stays ~380 so the
-            // left edge (≈1442px) still clears the card's right edge (≈1430px) and never covers it.
-            Anchor(bubbleImg.rectTransform, new Vector2(0.85f, 0.42f), new Vector2(384, 330));
+            AnchorPx(bubbleImg.rectTransform, BubbleRect.x, BubbleRect.y, BubbleRect.z, BubbleRect.w);
+            // The plate is TILTED on the explainer — right end higher, megaphone hanging down-left. Rotating
+            // the Image rotates its text child with it, which is what the reference shows.
+            bubbleImg.rectTransform.localRotation = Quaternion.Euler(0f, 0f, BubbleTiltDeg);
             // Host replies are «комментарии» → Rubik (meeting-revisions §8), not the display face: the
             // bubble carries the Ведущий's spoken line, the same role as the necrolog/tutorial body copy.
-            _bubbleText = NewText("HostBubbleText", _hostBubble.transform, "", 34,
-                TextAnchor.MiddleCenter, Ink, _body);
-            // The «bubble» sprite is 9-slice border 70/120/70/70 — the FLAT gold fill starts ~70px inside the
-            // rect (rounded corners + outline live in that border), and the bottom 120px is the tail. So the
-            // text rect must inset PAST the border on every side, or glyphs spill onto the corners/outline
-            // (S3 playtest fix — the earlier 36/36/30 inset let the em-dash float outside the bubble).
+            _bubbleText = NewText("HostBubbleText", _hostBubble.transform, "", BubbleTextMaxSize,
+                TextAnchor.MiddleCenter, Ink, _bodyBold);
+            // The text rect insets PAST the 9-slice borders on every side, so glyphs can only ever land on the
+            // stretched CREAM middle: the left inset is the whole megaphone border (no text over the horn),
+            // the right one additionally clears the gold star baked into the plate's bottom-right corner.
             var brt = _bubbleText.rectTransform;
             brt.anchorMin = Vector2.zero; brt.anchorMax = Vector2.one;
-            brt.offsetMin = new Vector2(76, 128);   // left, bottom (clear of the tail's 120px border)
-            brt.offsetMax = new Vector2(-76, -76);   // right, top (clear of the 70px border + rounded corners)
+            brt.offsetMin = new Vector2(BubbleTextLeftPx * BubbleScale, BubbleTextVertPx * BubbleScale);
+            brt.offsetMax = new Vector2(-BubbleTextRightPx * BubbleScale, -BubbleTextVertPx * BubbleScale);
             // Best-fit honouring HEIGHT (Truncate, not the NewText default Overflow) so the loudest host
-            // exclamations (deck lines up to ~50 chars) SHRINK to sit fully inside the flat gold fill.
+            // exclamations (deck lines up to ~50 chars) SHRINK to sit fully inside the cream fill.
             _bubbleText.resizeTextForBestFit = true;
             _bubbleText.resizeTextMinSize = 15;
-            _bubbleText.resizeTextMaxSize = 34;
+            // Cap = what the EXPLAINER draws. Re-measured on «Экран - комментарий ведущего.png» by isolating
+            // the GLYPH components inside the plate (the plate's own black outline has to be dropped, or the
+            // reading doubles): «Ну ты и тип!» has a cap-height of 27.0 px and an x-height of 20.5 px once
+            // de-tilted — i.e. 27 / 0.70 ≈ 39 px of Rubik (capHeight 700/1000 em). Best-fit only honours
+            // HEIGHT when the mode is Wrap, so the cap also has to stay under the size at which the longest
+            // single WORD would run past the rect (guarded, whole pool, by HostReactionTests).
+            _bubbleText.resizeTextMaxSize = BubbleTextMaxSize;
             _bubbleText.horizontalOverflow = HorizontalWrapMode.Wrap;
             _bubbleText.verticalOverflow = VerticalWrapMode.Truncate;
             _hostBubble.SetActive(false);
@@ -1455,82 +1697,213 @@ namespace ThanksNoThanks
             _bannerRoot.SetActive(false);
         }
 
-        // White capsule (w290 h72) at INDEX anchor: bar-track = the white capsule; a coloured fill sits
-        // inside (left-inset to clear the icon-sprite badge); the caps label sits BELOW, dark-blue.
-        private GameObject BuildBar(string name, float cx, float cyTop, string label, string icon,
-            string fillSprite, out Image fill, out Text labelText)
+        // ---------------------------------------------------------------- art-pack HUD widgets
+        // Each group is a FULL-CANVAS transparent container (NewGroup stretches), so every child can be
+        // placed with AnchorPx in plain 1920×1080 reference coordinates straight out of the asset map.
+
+        // Энергия — `energy-battery-v2`. The cavity level is drawn as flat rects OVER the sprite (see the
+        // geometry block): a cream «empty» rect from the cavity top down to the level, plus a yellow top-up
+        // between the sprite's baked 75.1 % line and a higher level. Sized every frame in ReflectEnergyLevel.
+        private void BuildBattery()
         {
-            var group = NewGroup(name, _hudRow.transform);
-            var grt = group.GetComponent<RectTransform>();
-            AnchorPx(grt, cx, cyTop, 290f, 72f);
-
-            var track = NewSprite("Track", group.transform, Sprite("bar-track"));
-            track.type = Image.Type.Sliced;
-            track.color = Color.white;
-            Stretch(track.rectTransform);                    // the white capsule = the whole group
-            fill = NewSprite("Fill", track.transform, Sprite(fillSprite));
-            var fr = fill.rectTransform;
-            fr.anchorMin = Vector2.zero;
-            fr.anchorMax = Vector2.one;
-            fr.offsetMin = new Vector2(64f, 13f);            // leave room for the icon badge on the left
-            fr.offsetMax = new Vector2(-16f, -13f);
-            fill.type = Image.Type.Filled;
-            fill.fillMethod = Image.FillMethod.Horizontal;
-            fill.fillOrigin = (int)Image.OriginHorizontal.Left;
-            fill.fillAmount = 1f;
-
-            var ico = NewSprite("Icon", group.transform, Sprite(icon));
-            Anchor(ico.rectTransform, new Vector2(0.10f, 0.5f), new Vector2(56, 56));
-
-            labelText = NewText("Label", group.transform, label, 24, TextAnchor.MiddleCenter, CobaltDeep, _display);
-            Anchor(labelText.rectTransform, new Vector2(0.5f, -0.36f), new Vector2(290f, 34f));  // BELOW the capsule
-            return group;
+            _energyGroup = NewGroup("EnergyGroup", _hudRow.transform);
+            _batteryImg = NewSprite("Battery", _energyGroup.transform, Sprite("energy-battery-v2"));
+            AnchorPx(_batteryImg.rectTransform, BatteryRect.x, BatteryRect.y, BatteryRect.z, BatteryRect.w);
+            // Sibling order IS the z-order and is asserted (HudConformanceTests): baked battery sprite →
+            // cream «empty» mask → yellow top-up. Both overlays draw ABOVE the sprite (otherwise the baked
+            // 75.1 % level would show through), and the top-up draws last so the live level always wins on
+            // the level line itself.
+            _energyEmpty = NewSolid("EnergyEmpty", _energyGroup.transform, BatteryCream);
+            _energyTopUp = NewSolid("EnergyTopUp", _energyGroup.transform, BatteryYellow);
+            // The lightning is its OWN layer (founder canon §12-3): patched out of the baked fill and drawn
+            // last, so it reads WHOLE at every level instead of being half-swallowed by the cream mask. Its
+            // own cream body + INK outline is what keeps it contrasty on both cream and yellow.
+            _energyBolt = NewSprite("EnergyBolt", _energyGroup.transform, Sprite("battery-bolt-v2"));
+            AnchorPx(_energyBolt.rectTransform, BoltRect.x, BoltRect.y, BoltRect.z, BoltRect.w);
+            ReflectEnergyLevel(100f);
         }
 
-        // Relationships (w380 h72): white capsule bg + the red/yellow/green/yellow/red zone bar + up/down
-        // marker at the value; label «ОТНОШЕНИЯ» below.
-        private void BuildBalancer(float cx, float cyTop)
+        // Отношения — `rel-bar-v2` (boy…track…girl). «Сердце и есть маркер» (founder canon §12-1): the drawn
+        // heart is patched OUT of the track and re-cut as `rel-marker-heart-v2`, and THAT sprite rides the
+        // track through the non-linear map of §11-2. The end decorations (the two faces) stay put.
+        private void BuildRelBar()
         {
             _balancerGroup = NewGroup("Balancer", _hudRow.transform);
-            AnchorPx(_balancerGroup.GetComponent<RectTransform>(), cx, cyTop, 380f, 72f);
-
-            var capsule = NewSprite("Capsule", _balancerGroup.transform, Sprite("bar-track"));
-            capsule.type = Image.Type.Sliced;
-            capsule.color = Color.white;
-            Stretch(capsule.rectTransform);
-
-            _balancerTrackWidth = 320f;
-            _balancerTrackImg = NewSprite("Track", _balancerGroup.transform, Sprite("balancer-track"));
-            Anchor(_balancerTrackImg.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(_balancerTrackWidth, 40f));
-            _balancerMarkerImg = NewSprite("Marker", _balancerTrackImg.transform, Sprite("balancer-marker"));
+            _relBarImg = NewSprite("RelBar", _balancerGroup.transform, Sprite("rel-bar-v2"));
+            AnchorPx(_relBarImg.rectTransform, RelBarRect.x, RelBarRect.y, RelBarRect.z, RelBarRect.w);
+            _balancerMarkerImg = NewSprite("Marker", _balancerGroup.transform, Sprite("rel-marker-heart-v2"));
             _balancerMarker = _balancerMarkerImg.rectTransform;
-            Anchor(_balancerMarker, new Vector2(0.5f, 0.5f), new Vector2(52, 68));
+            ReflectRelationsMarker(50f, redZone: false);
+        }
 
-            _relLabel = NewText("Label", _balancerGroup.transform, "ОТНОШЕНИЯ", 24, TextAnchor.MiddleCenter, CobaltDeep, _display);
-            Anchor(_relLabel.rectTransform, new Vector2(0.5f, -0.36f), new Vector2(380f, 34f));
+        // Здоровье — `health-bar-v2` (череп…сердце). The art's own marker was BAKED at 52 % and has been
+        // patched out (asset-map §11-3); OUR marker is drawn in the same flat-black figure style and rides
+        // the §11-4 map (mechanical 20 % lands exactly on the drawn red/green border at 52 %).
+        private void BuildHealthBar()
+        {
+            _healthGroup = NewGroup("HealthGroup", _hudRow.transform);
+            _healthBarImg = NewSprite("HealthBar", _healthGroup.transform, Sprite("health-bar-v2"));
+            AnchorPx(_healthBarImg.rectTransform, HealthBarRect.x, HealthBarRect.y, HealthBarRect.z, HealthBarRect.w);
+            _healthMarkerImg = NewSprite("Marker", _healthGroup.transform, Sprite("health-marker-v2"));
+            _healthMarker = _healthMarkerImg.rectTransform;
+            ReflectHealthMarker(100f);
+        }
+
+        // Деньги — `money-jar-v2` with the sum written INTO the jar's own cream label (asset-map §8:
+        // 1709,154,92,36 — tiny, hence the compact «₽12.5к» format of §11-6 plus best-fit), and the coin
+        // resting over the throat; an income tick drops it in (DropCoin).
+        private void BuildMoneyJar()
+        {
+            _moneyGroup = NewGroup("MoneyGroup", _hudRow.transform);
+            _jarImg = NewSprite("Jar", _moneyGroup.transform, Sprite("money-jar-v2"));
+            AnchorPx(_jarImg.rectTransform, MoneyJarRect.x, MoneyJarRect.y, MoneyJarRect.z, MoneyJarRect.w);
+            _moneyText = NewText("MoneyText", _jarImg.transform, "₽0", 30, TextAnchor.MiddleCenter, Ink, _display);
+            // Label box as a fraction of the jar rect: the sprite box 292,488,440,171 of a 1024² texture.
+            Anchor(_moneyText.rectTransform, new Vector2(0.5f, 0.4399f), new Vector2(JarLabelW, JarLabelH));
+            _moneyText.resizeTextForBestFit = true;      // «автоужатие» (§11-6)
+            _moneyText.resizeTextMinSize = 14;
+            _moneyText.resizeTextMaxSize = 30;
+            _moneyText.horizontalOverflow = HorizontalWrapMode.Wrap;
+            _moneyText.verticalOverflow = VerticalWrapMode.Truncate;
+            _moneyCoin = NewSprite("Coin", _moneyGroup.transform, Sprite("coin-v2"));
+            AnchorPx(_moneyCoin.rectTransform, CoinRect.x, CoinRect.y, CoinRect.z, CoinRect.w);
+        }
+
+        // Возраст — `age-badge-v2` with the digits only. Kegl per asset-map §11-8: the reference's cap-height
+        // is 80 px → ≈112 px Arimo Bold; best-fit shrinks a three-digit age instead of overflowing the frame
+        // (this is the fix for the old «ВОЗРАСТ»-caption overlap debt — the caption is gone).
+        private void BuildAgeBadge()
+        {
+            _ageBadgeImg = NewSprite("AgeBadge", _hudRow.transform, Sprite("age-badge-v2"));
+            _ageBadge = _ageBadgeImg.gameObject;
+            AnchorPx(_ageBadgeImg.rectTransform, AgeBadgeRect.x, AgeBadgeRect.y, AgeBadgeRect.z, AgeBadgeRect.w);
+            // Digit box as a fraction of the badge rect (screen 1661,422,169,145 — the max inscribed box that
+            // clears the frame's corner stars, asset-map §5.2).
+            _ageText = NewText("AgeText", _ageBadge.transform, "0", 112, TextAnchor.MiddleCenter, Ink, _display);
+            Anchor(_ageText.rectTransform, new Vector2(0.4988f, 0.4922f), new Vector2(169f, 145f));
+            _ageText.resizeTextForBestFit = true;
+            _ageText.resizeTextMinSize = 70;
+            _ageText.resizeTextMaxSize = 112;
+            _ageText.horizontalOverflow = HorizontalWrapMode.Overflow;
+            _ageText.verticalOverflow = VerticalWrapMode.Truncate;
+        }
+
+        // ---------------------------------------------------------------- non-linear value → track maps
+        // The ART draws its zone borders in different places than the MECHANIC's thresholds (canon, not to
+        // be touched — asset-map §11-2/§11-4). So the marker rides a PIECEWISE-LINEAR map that pins each
+        // mechanical threshold onto the DRAWN border: the marker is visually honest without moving a single
+        // gameplay number. Pure functions, unit-tested knot by knot in EditMode/HudMappingTests.
+
+        // The END knots are NOT 0 and 1: they are the ends of the marker's travel window (geometry block) —
+        // the track's own ends belong to the drawn skull/heart and the two faces, and a marker parked on one
+        // of them reads as a blob. Both end knots still sit in the same DRAWN zone as the value they carry
+        // (health 0 → deep in the drawn red, health 100 → deep in the drawn green, rel 100 → past the drawn
+        // green/red border, i.e. in the red zone), so the reading stays honest; only the last ≈15 % of the
+        // rail, which the art already occupies, is off limits.
+
+        /// <summary>Relationships value (0…100) → fraction of the drawn track. Knots: 0→travel start,
+        /// 40→20.7 %, 75→81.5 % (the drawn red/green and green/red borders), 100→travel end.</summary>
+        public static float RelationsTrackFraction(float relations)
+            => PiecewiseFraction(relations, RelValueKnots, RelTrackKnots);
+
+        /// <summary>Health value (0…100) → fraction of the drawn track. Knots: 0→travel start, 20→52 % (the
+        /// drawn red/green border = the alarm threshold), 100→travel end.</summary>
+        public static float HealthTrackFraction(float health)
+            => PiecewiseFraction(health, HealthValueKnots, HealthTrackKnots);
+
+        /// <summary>Fraction of a track at which a marker centre sits at <paramref name="cx"/>.</summary>
+        private static float TrackFractionAt(float cx, float trackX, float trackW) => (cx - trackX) / trackW;
+
+        private static readonly float[] RelValueKnots = { 0f, 40f, 75f, 100f };
+        private static readonly float[] RelTrackKnots =
+        {
+            TrackFractionAt(RelMarkerMinCx, RelTrackX, RelTrackW),   // ≈0.160 — clear of the boy's face
+            0.207f, 0.815f,                                          // drawn zone borders — canon, untouched
+            TrackFractionAt(RelMarkerMaxCx, RelTrackX, RelTrackW),   // ≈0.856 — clear of the girl's face
+        };
+        private static readonly float[] HealthValueKnots = { 0f, 20f, 100f };
+        private static readonly float[] HealthTrackKnots =
+        {
+            TrackFractionAt(HealthMarkerMinCx, HealthTrackX, HealthTrackW),   // ≈0.235 — clear of the skull
+            0.52f,                                                            // drawn red/green border — canon
+            TrackFractionAt(HealthMarkerMaxCx, HealthTrackX, HealthTrackW),   // ≈0.764 — clear of the heart
+        };
+
+        private static float PiecewiseFraction(float v, float[] xs, float[] ys)
+        {
+            if (v <= xs[0]) return ys[0];
+            for (int i = 1; i < xs.Length; i++)
+            {
+                if (v > xs[i]) continue;
+                float t = (v - xs[i - 1]) / (xs[i] - xs[i - 1]);
+                return Mathf.Lerp(ys[i - 1], ys[i], t);
+            }
+            return ys[ys.Length - 1];
+        }
+
+        // Battery cavity: cream «empty» rect from the cavity top down to the level line, plus a yellow top-up
+        // between the sprite's baked level and a higher one. energy is 0…100.
+        private void ReflectEnergyLevel(float energy)
+        {
+            float p = Mathf.Clamp01(energy / 100f);
+            float levelTop = CavityTop + CavityH * (1f - p);     // screen y of the level line
+            float emptyH = Mathf.Max(0f, levelTop - CavityTop);
+            AnchorPx(_energyEmpty.rectTransform, CavityX + CavityW / 2f, CavityTop + emptyH / 2f, CavityW, emptyH);
+            float bakedTop = CavityTop + CavityH * (1f - BakedEnergyLevel);
+            float topUpH = Mathf.Max(0f, bakedTop - levelTop);   // only when the level is above the baked one
+            AnchorPx(_energyTopUp.rectTransform, CavityX + CavityW / 2f, levelTop + topUpH / 2f, CavityW, topUpH);
+        }
+
+        // Both markers keep the art's own size and the art's own height on the bar (geometry block) — only
+        // X moves, through the non-linear value→track map. That is the whole point of §12-1: what rides the
+        // bar IS the picture the artist drew there.
+        private void ReflectHealthMarker(float health)
+        {
+            float f = HealthTrackFraction(health);
+            // Belt AND braces: the map's end knots already stop inside the travel window, and this clamp
+            // keeps a future knot edit from pushing the figure back onto the skull or the heart.
+            float x = Mathf.Clamp(HealthTrackX + f * HealthTrackW, HealthMarkerMinCx, HealthMarkerMaxCx);
+            AnchorPx(_healthMarker, x, HealthMarkerCy, HealthMarkerW, HealthMarkerH);
+        }
+
+        private void ReflectRelationsMarker(float relations, bool redZone)
+        {
+            float f = RelationsTrackFraction(relations);
+            float x = Mathf.Clamp(RelTrackX + f * RelTrackW, RelMarkerMinCx, RelMarkerMaxCx);
+            AnchorPx(_balancerMarker, x, RelMarkerCy, RelMarkerW, RelMarkerH);
+            // «Красная зона» (>75 %): the drawn zones keep their own colours (tinting the bar muddied it) —
+            // the risk is flagged on the MARKER alone.
+            var tint = redZone ? TimerRed : Color.white;
+            if (_balancerMarkerImg.color != tint) _balancerMarkerImg.color = tint;
         }
 
         // Child «cabinet button» (S9): no dedicated sprite exists, so this is a placeholder built from
         // marquee-bulb.png (the round lit-bulb art) + a heart — dim/cool while idle, bright gold + pulsing
         // while the flash window is open (driven in Update off Game.ChildFlashing). Just a button, per the
         // mockup — no label, no scale stripe (a red bar there read as a foreign health/danger artifact).
-        private void BuildChildButton(float cx, float cyTop)
+        private void BuildChildButton()
         {
             _childGroup = NewGroup("Child", _hudRow.transform);
-            AnchorPx(_childGroup.GetComponent<RectTransform>(), cx, cyTop, 96f, 96f);
+            AnchorPx(_childGroup.GetComponent<RectTransform>(), ChildCx, ChildCy,
+                ChildGlowPeakSize, ChildGlowPeakSize);
 
             // Bright halo BEHIND the button (created first → lower sibling → drawn behind). Invisible at rest,
             // it flares gold and pulses while ChildFlashing so the «жми Enter по вспышке» window is unmissable
             // (founder playtest: the subtle gold-tint pulse read as «ничего не связано с ребёнком»).
+            // Sized off the free jar↔badge gap (geometry block): at the pulse PEAK it still clears the jar,
+            // the badge and the frame — the halo used to spill over the badge and off the right edge.
             _childGlow = NewSprite("ChildGlow", _childGroup.transform, Sprite("star-white"));
             _childGlow.color = new Color(Bulb.r, Bulb.g, Bulb.b, 0f);
-            Anchor(_childGlow.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(190, 190));
+            Anchor(_childGlow.rectTransform, new Vector2(0.5f, 0.5f),
+                new Vector2(ChildGlowSize, ChildGlowSize));
 
             _childButtonImg = NewSprite("Button", _childGroup.transform, Sprite("marquee-bulb"));
             _childButtonImg.color = CobaltDeep;   // idle (unlit)
-            Anchor(_childButtonImg.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(88, 88));
+            Anchor(_childButtonImg.rectTransform, new Vector2(0.5f, 0.5f),
+                new Vector2(ChildButtonSize, ChildButtonSize));
             var heart = NewSprite("Heart", _childButtonImg.transform, Sprite("icon-heart"));
-            Anchor(heart.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(48, 48));
+            Anchor(heart.rectTransform, new Vector2(0.5f, 0.5f),
+                new Vector2(ChildButtonSize * 0.52f, ChildButtonSize * 0.52f));
 
             _childGroup.SetActive(false);
         }
@@ -1781,7 +2154,7 @@ namespace ThanksNoThanks
             SyncPause();
             // Root cause of the «one card late» founder bug: the 18/25/30 crossings happen MID-CARD
             // (inside Game.Tick), but the age-gated HUD reveal only ran on card-advance/state-change.
-            // Refresh it NOW so the just-opened widget (money pill / energy / health bar) is visible
+            // Refresh it NOW so the just-opened widget (money jar / energy battery / health bar) is visible
             // and live on THIS card the moment the hint closes.
             if (_game.State == GameState.Playing)
             {
@@ -1934,6 +2307,7 @@ namespace ThanksNoThanks
             {
                 _cardPriceText.gameObject.SetActive(false);
                 _cardPricePlate.gameObject.SetActive(false);
+                ReflectCardTextBand();   // band may now be free → the question gets its full box back
                 return;
             }
             int p = Mathf.RoundToInt((float)price);
@@ -1944,23 +2318,22 @@ namespace ThanksNoThanks
             // plate always fully covers the text — never bare gold/light text on the yellow sunburst.
             float tw = _cardPriceText.preferredWidth;
             float th = _cardPriceText.preferredHeight;
-            _cardPriceText.rectTransform.sizeDelta = new Vector2(tw, th);
+            _cardPriceText.rectTransform.sizeDelta = new Vector2(tw + 4f, th);   // +4: metric rounding slack
             _cardPricePlate.rectTransform.sizeDelta = new Vector2(tw + 64f, th + 28f);
 
             _cardPricePlate.gameObject.SetActive(true);
             _cardPriceText.gameObject.SetActive(true);
+            ReflectCardTextBand();   // band occupied → the question box ends above it
         }
 
         private void UpdateHudValues()
         {
             var s = _game.Scales;
             _ageText.text = Mathf.FloorToInt(_game.Age).ToString();
-            _moneyText.text = FormatMoney(_game.Money);
-            _moneyLabel.text = FormatMoneyLabel(_game.IncomeMultiplier);
-            _healthFill.fillAmount = Mathf.Clamp01(s.Health / 100f);
-            _energyFill.fillAmount = Mathf.Clamp01(s.Energy / 100f);
-            float rel = Mathf.Clamp01(s.Relationships / 100f);
-            _balancerMarker.anchoredPosition = new Vector2((rel - 0.5f) * _balancerTrackWidth, 0f);
+            _moneyText.text = FormatMoneyJar(_game.Money);
+            ReflectEnergyLevel(s.Energy);
+            ReflectHealthMarker(s.Health);
+            ReflectRelationsMarker(s.Relationships, _game.RelationshipRedZone);
         }
 
         /// <summary>Reveal HUD widgets by age (visual only — the scales themselves stay passive).</summary>
@@ -1968,8 +2341,7 @@ namespace ThanksNoThanks
         {
             int a = Mathf.FloorToInt(age);
             _ageBadge.SetActive(true);
-            _moneyPill.SetActive(a >= MoneyAge);
-            _moneyLabel.gameObject.SetActive(a >= MoneyAge);   // caption tracks the pill (no orphan «ДЕНЬГИ»)
+            _moneyGroup.SetActive(a >= MoneyAge);
             // Balancer reveals at 20 and hides again after a breakup (partner gone — MD06 reopen deferred).
             _balancerGroup.SetActive(a >= RelationshipsAge && !_game.RelationshipsLost);
             _energyGroup.SetActive(a >= EnergyAge);
@@ -1978,29 +2350,32 @@ namespace ThanksNoThanks
 
         private void OnInputFx(GameInput input)
         {
-            // MoneyTick FX (pill pulse) is triggered from OnInput's ACCEPTED-crank branch instead —
-            // raw (capped/no-op) presses must not flash feedback for income that didn't land.
+            // MoneyTick FX (the coin drop into the jar) is triggered from OnInput's ACCEPTED-crank branch
+            // instead — raw (capped/no-op) presses must not flash feedback for income that didn't land.
             if (_game == null || _game.State != GameState.Playing || !isActiveAndEnabled) return;
             if (_tutorialShowing) return;
             if (input == GameInput.AnswerYes) StartCoroutine(PunchPlate(_yesRect, YesTilt));
             else if (input == GameInput.AnswerNo) StartCoroutine(PunchPlate(_noRect, NoTilt));
         }
 
-        // Small pill pulse on each accepted crank tick (feedback that the tick landed).
-        private IEnumerator PulseMoney()
+        // Income-tick feedback: the coin resting over the jar's lid DROPS into the throat (asset-map §8:
+        // throat centre 1753,89) and springs back to its perch — the art-pack replacement for the old pill
+        // pulse. Purely visual; the money itself already landed in Game.
+        private IEnumerator DropCoin()
         {
-            var rt = (RectTransform)_moneyPill.transform;
-            const float dur = 0.12f;
+            var rt = _moneyCoin.rectTransform;
+            float fall = ThroatCenterY - CoinRect.y;     // reference px from the perch down to the throat
+            const float dur = 0.18f;
             float t = 0f;
             while (t < dur)
             {
                 t += Time.deltaTime;
                 float k = Mathf.Clamp01(t / dur);
-                float s = 1f + 0.06f * Mathf.Sin(k * Mathf.PI);
-                rt.localScale = new Vector3(s, s, 1f);
+                float drop = Mathf.Sin(k * Mathf.PI) * fall;      // down and back in one arc
+                rt.anchoredPosition = new Vector2(0f, -drop);
                 yield return null;
             }
-            rt.localScale = Vector3.one;
+            rt.anchoredPosition = Vector2.zero;
             _moneyPulse = null;
         }
 
@@ -2051,24 +2426,20 @@ namespace ThanksNoThanks
             return s;
         }
 
-        private static string FormatThousands(int value)
+        /// <summary>
+        /// The sum written into the money jar's own cream label. That label measures just 92×36 screen px
+        /// (asset-map §8), so five-digit-and-up sums switch to the COMPACT thousands form of §11-6
+        /// («₽12.5к»); everything shorter stays literal. Floored; negative allowed («в минус», canon).
+        /// </summary>
+        public static string FormatMoneyJar(double value)
         {
-            return value.ToString("#,0", System.Globalization.CultureInfo.InvariantCulture).Replace(',', ' ');
-        }
-
-        // Live money → «₽ N» (floored; negative allowed — «в минус», canon).
-        private static string FormatMoney(double value)
-        {
-            return "₽ " + FormatThousands(Mathf.FloorToInt((float)value));
-        }
-
-        // Money caption under the pill: «ДЕНЬГИ» plus a «×N» factor when the income multiplier is not 1
-        // (startup fork / burnout). N is trimmed (×2, ×1.5, ×0.5) so it stays short under the pill.
-        private static string FormatMoneyLabel(double multiplier)
-        {
-            if (System.Math.Abs(multiplier - 1.0) < 0.01) return "ДЕНЬГИ";
-            string n = multiplier.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
-            return "ДЕНЬГИ ×" + n;
+            var inv = System.Globalization.CultureInfo.InvariantCulture;
+            int v = Mathf.FloorToInt((float)value);
+            int abs = Mathf.Abs(v);
+            if (abs < 10_000) return "₽" + v.ToString(inv);                  // ≤4 digits fit literally
+            string sign = v < 0 ? "-" : "";
+            if (abs < 10_000_000) return sign + "₽" + (abs / 1000.0).ToString("0.#", inv) + "к";
+            return sign + "₽" + (abs / 1_000_000.0).ToString("0.#", inv) + "м";
         }
 
         private Image NewSprite(string name, Transform parent, Sprite sprite)

@@ -14,6 +14,7 @@
 | `Arimo-Bold.ttf` | Arimo Bold | Bold | ✅ | **заголовки/надписи** — аналог Helvetica Bold, полная кириллица + ₽ (OFL 1.1) |
 | `Arimo-Regular.ttf` | Arimo | Regular | ✅ | доборный вес Arimo при необходимости |
 | `Rubik-VariableWght.ttf` | Rubik | вариативный, ось веса 300–900 (есть Black) | ✅ | **комментарии** — геометрия под стиль, кириллица + ₽ |
+| `Rubik-Bold-wght700.ttf` | Rubik Bold | статический инстанс wght=700, нарезан из файла выше | ✅ | **реплики Ведущего** — legacy uGUI растрирует ДЕФОЛТНЫЙ инстанс вариативного файла (300, Light), поэтому жирное начертание нужно отдельным файлом (в проекте: `Art/Resources/Fonts/Rubik-Bold.ttf`) |
 | `RussoOne-Regular.ttf` | Russo One | один тяжёлый вес | ❌ (нет ₽) | запасной блочный «ТВ-шный» |
 
 Лицензии: `Arimo-LICENSE.txt` (SIL OFL 1.1), `Rubik-OFL.txt`, `RussoOne-OFL.txt`.

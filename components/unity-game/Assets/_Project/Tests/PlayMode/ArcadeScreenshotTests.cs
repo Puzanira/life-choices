@@ -29,7 +29,35 @@ namespace ThanksNoThanks.Tests.PlayMode
             driver.Input = fake;
             yield return null;                       // Start builds/subscribes
 
-            driver.DebugPreviewArcadeShot();         // pose a representative card+scales frame, freeze driver
+            // Which frame to capture. Default = the representative card+scales pose; the others exist so the
+            // design gate can look at the states the ordinary frame cannot show (LIFECHOICES_SHOT_POSE).
+            switch ((Environment.GetEnvironmentVariable("LIFECHOICES_SHOT_POSE") ?? "arcade").ToLowerInvariant())
+            {
+                case "blocked":
+                    driver.DebugPreviewBlocked();
+                    driver.CardRect.Find("CardText").GetComponent<UnityEngine.UI.Text>().text =
+                        "Ваш ребёнок вырос и больше не нуждается в помощи. Помочь всё равно?";
+                    break;
+                case "childflash": driver.DebugPreviewChildFlash(); break;
+                case "host": driver.DebugPreviewHostComment(); break;
+                default: driver.DebugPreviewArcadeShot(); break;
+            }
+            // Optional energy override, so the design gate can look at the lightning layer against a cream,
+            // a half and a full cavity (founder canon §12-3 asks for 10/50/90).
+            var energy = Environment.GetEnvironmentVariable("LIFECHOICES_SHOT_ENERGY");
+            if (!string.IsNullOrEmpty(energy) && float.TryParse(energy, out var e))
+                driver.DebugReflectScales(e, 72f, 58f);
+            // …and the whole triple «энергия,здоровье,отношения», so the design gate can look at the bar
+            // markers at the ENDS of their scales (0 and 100) — the states an ordinary frame never shows and
+            // the ones where a marker used to collide with the bar's own end decorations.
+            var scales = Environment.GetEnvironmentVariable("LIFECHOICES_SHOT_SCALES");
+            if (!string.IsNullOrEmpty(scales))
+            {
+                var p = scales.Split(',');
+                if (p.Length == 3 && float.TryParse(p[0], out var se) && float.TryParse(p[1], out var sh)
+                    && float.TryParse(p[2], out var sr))
+                    driver.DebugReflectScales(se, sh, sr, relRedZone: sr > 75f);
+            }
             yield return null;                       // let the Canvas rebuild its meshes for the posed state
 
             // Render the ScreenSpaceOverlay HUD deterministically via an offscreen camera → RenderTexture,
@@ -48,7 +76,36 @@ namespace ThanksNoThanks.Tests.PlayMode
             canvas.renderMode = RenderMode.ScreenSpaceCamera;
             canvas.worldCamera = cam;
             canvas.planeDistance = 100f;
+
+            // The capture MUST run the canvas at exactly 1920×1080 reference px. Otherwise the CanvasScaler
+            // keeps deriving its scale from the batch game view (not 16:9 — the canvas comes out ≈1664×1248,
+            // scaleFactor ≈0.62), and uGUI rasterises every DYNAMIC-FONT glyph at that 0.62× size before the
+            // frame is blown back up to the 1920×1080 render texture: the art stays crisp (it is a texture)
+            // while all generated text goes soft — the «замылен» the design gate measured (stroke edges 6–8 px
+            // against 1–2 px for the art). The game itself is fine at 1920×1080; it was the HARNESS lying.
+            // ConstantPixelSize + scaleFactor 1 pins canvas.rect to the camera's 1920×1080 pixel rect.
+            var scaler = canvas.GetComponent<UnityEngine.UI.CanvasScaler>();
+            scaler.uiScaleMode = UnityEngine.UI.CanvasScaler.ScaleMode.ConstantPixelSize;
+            scaler.scaleFactor = 1f;
+            scaler.referencePixelsPerUnit = 100f;
             yield return null;                       // let the canvas adopt camera-space layout
+            // Changing the canvas scale does NOT by itself invalidate a Text's glyph request: the dynamic
+            // font atlas still holds the entries rasterised at the old (small) size, and the mesh would be
+            // drawn from those upscaled. Dirty every Text so each re-requests its glyphs at the new 1:1 size.
+            foreach (var t in driver.GetComponentsInChildren<UnityEngine.UI.Text>(true))
+            {
+                t.FontTextureChanged();
+                t.SetAllDirty();
+            }
+            Canvas.ForceUpdateCanvases();
+            yield return null;                       // …and let the dynamic font atlas re-raster at 1:1
+            Canvas.ForceUpdateCanvases();
+            yield return null;
+
+            Assert.AreEqual(W, driver.CanvasRect.rect.width, 1f,
+                "the capture canvas really is 1920 reference px wide (else the glyphs rasterise scaled)");
+            Assert.AreEqual(H, driver.CanvasRect.rect.height, 1f,
+                "the capture canvas really is 1080 reference px tall");
 
             cam.Render();
 

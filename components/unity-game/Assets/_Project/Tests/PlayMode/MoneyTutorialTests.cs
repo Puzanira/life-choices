@@ -115,8 +115,8 @@ namespace ThanksNoThanks.Tests.PlayMode
 
             fake.Confirm();                                // Enter dismisses
             Assert.IsFalse(driver.TutorialShowing, "hint closed");
-            Assert.IsTrue(driver.MoneyPill.activeSelf,
-                "money pill visible the MOMENT the hint closes — not one card later");
+            Assert.IsTrue(driver.MoneyJar.activeSelf,
+                "money jar visible the MOMENT the hint closes — not one card later");
 
             yield return new WaitForSeconds(0.25f);        // let the ~5/s income-cap clock breathe
             Assert.AreSame(card, driver.Game.CurrentCard, "still the SAME card (timer was frozen ≥3s)");
