@@ -64,9 +64,11 @@ namespace ThanksNoThanks.Tests.PlayMode
             AssertOnCanvas(driver, driver.YesPlateImage.rectTransform, "ДА plate");
             AssertOnCanvas(driver, driver.NoPlateImage.rectTransform, "СПАСИБО НЕ НАДО plate");
 
-            // Timer ring is a radial-filled image.
-            Assert.AreEqual(Image.Type.Filled, driver.TimerRingFill.type, "timer ring is a filled image");
-            Assert.AreEqual(Image.FillMethod.Radial360, driver.TimerRingFill.fillMethod);
+            // Купол-таймер: дуга — Radial180-заливка от плоской (верхней) грани полукруга.
+            Assert.AreEqual(Image.Type.Filled, driver.TimerDomeFill.type, "дуга купола — filled image");
+            Assert.AreEqual(Image.FillMethod.Radial180, driver.TimerDomeFill.fillMethod);
+            Assert.AreEqual((int)Image.Origin180.Top, driver.TimerDomeFill.fillOrigin,
+                "развёртка идёт от верхней грани — ось проходит через центр окружности купола");
 
             // Age badge always present during play, with a real rect.
             Assert.IsTrue(driver.AgeBadge.activeSelf, "age badge visible during play");
@@ -157,9 +159,10 @@ namespace ThanksNoThanks.Tests.PlayMode
                 (ChildImage(driver.EnergyGroup, "Battery"),          "energy-battery-v2", "battery"),
                 (ChildImage(driver.BalancerGroup, "RelBar"),         "rel-bar-v2",        "relationships bar"),
                 (ChildImage(driver.BalancerGroup, "Marker"),         "rel-marker-heart-v2", "relationships marker"),
-                (driver.TimerRingFill,                               "timer-ring",        "timer ring fill"),
-                (ChildImage(driver.TimerRingFill.transform.parent.gameObject, "RingTrack"),
-                                                                     "timer-ring-track",  "timer ring track"),
+                (driver.TimerDomeFill,                               "timer-dome",        "дуга купола"),
+                (driver.TimerDomeTrack,                              "timer-dome",        "трек купола"),
+                (driver.TimerDomeOutline,                            "timer-dome",        "обводка купола"),
+                (driver.TimerDomeHand,                               "timer-dome-hand",   "стрелка-кромка купола"),
             };
             foreach (var row in table)
                 AssertSprite(row.img, row.sprite, row.what);

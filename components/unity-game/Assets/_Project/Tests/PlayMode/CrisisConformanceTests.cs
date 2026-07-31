@@ -15,7 +15,7 @@ namespace ThanksNoThanks.Tests.PlayMode
     ///  • the «КРИЗИС… БЛИЦ!» rubric plays as a blocking BEAT — banner up + card HIDDEN — and the blitz
     ///    appears only once the beat clears (banner and card are NEVER both visible in one frame);
     ///  • the «ВСЁ НОРМАЛЬНО» plate label is FULLY inside its plate (rendered glyphs ≤ the text rect ⊆ plate);
-    ///  • the timer ring is disjoint from the counter badge and the card;
+    ///  • the dome timer is disjoint from the counter badge and the card;
     ///  • the blitz view renders EXACTLY its expected sprite set (no stray empty band / tofu);
     ///  • the S13 impulse warning carries a DRAWN mute icon (a real sprite, not a font glyph) and the
     ///    «СПАСИБО, НЕ НАДО» decline is highlighted.
@@ -207,12 +207,12 @@ namespace ThanksNoThanks.Tests.PlayMode
             Assert.AreEqual("ВСЁ\nНОРМАЛЬНО", driver.YesPlateText.text, "the ДА plate reads «ВСЁ НОРМАЛЬНО»");
             AssertLabelFits(driver.YesPlateText, driver.YesPlateImage, "«ВСЁ НОРМАЛЬНО»");
 
-            // (4) Timer ring disjoint from the counter badge and the card.
-            var timer = OwnBounds(canvas, (RectTransform)driver.TimerRingFill.transform.parent);
+            // (4) Купол-таймер disjoint from the counter badge and the card.
+            var timer = OwnBounds(canvas, driver.TimerDomeOutline.rectTransform);
             var counter = OwnBounds(canvas, (RectTransform)driver.CrisisInfo.transform);
             var card = OwnBounds(canvas, driver.CardRect);
-            Assert.IsFalse(Overlap(timer, counter), "timer ring must not overlap the counter badge");
-            Assert.IsFalse(Overlap(timer, card), "timer ring must not overlap the card");
+            Assert.IsFalse(Overlap(timer, counter), "купол не перекрывает счётчик мыслей");
+            Assert.IsFalse(Overlap(timer, card), "купол не перекрывает карточку-мысль");
 
             // (5) Exhaustive enumeration: the blitz view renders EXACTLY its expected sprites (no stray band).
             var actual = driver.GamePanel.GetComponentsInChildren<Image>(includeInactive: false)
@@ -222,7 +222,8 @@ namespace ThanksNoThanks.Tests.PlayMode
             var expected = new List<string>
             {
                 "age-badge-v2",                                     // minimal HUD (age only)
-                "timer-ring-track", "timer-ring-track", "timer-ring", "marquee-bulb",  // timer ring
+                "timer-dome", "timer-dome", "timer-dome",           // купол: обводка + трек + дуга
+                "timer-dome-hand",                                  // …и стрелка-кромка
                 "choice-plate-v2",                                  // blitz thought card (art-pack plate)
                 "plate-yes", "plate-no",                            // the two blitz buttons
                 "bar-track",                                        // the dark counter badge

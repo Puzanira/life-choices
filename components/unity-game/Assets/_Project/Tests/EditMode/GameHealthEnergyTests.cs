@@ -71,7 +71,7 @@ namespace ThanksNoThanks.Tests
             g.Tick(2.5f);                       // age → 30.0 → decay begins this frame
             Assert.IsTrue(g.HealthDecaying, "health decays from exactly 30");
             int h = g.Scales.Health;
-            g.Tick(2.0f);                       // ~1.4% more (0.7/s), still inside the 5s card timer
+            g.Tick(2.0f);                       // ~1.4% more (0.7/s), still inside the card's phase window (age 90 → 6 s)
             Assert.Less(g.Scales.Health, h, "health keeps dropping past 30");
             Assert.That(g.Scales.Health, Is.InRange(95, 99), "≈0.7%/s baseline decay (sane bound)");
         }
@@ -85,7 +85,7 @@ namespace ThanksNoThanks.Tests
             g.Tick(3f);                         // age → 31 (decay running, mult still 1 here)
             if (answerYes) Yes(g); else No(g);  // resolve mid → LT01 sets the modifier
             int h0 = g.Scales.Health;
-            g.Tick(4f);                         // measured window under the 5s timer
+            g.Tick(4f);                         // measured window under the card's phase timer (LONG в 90 → 6 s)
             return h0 - g.Scales.Health;
         }
 

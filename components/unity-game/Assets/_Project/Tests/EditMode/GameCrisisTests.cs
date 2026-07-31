@@ -7,7 +7,7 @@ using UnityEngine;
 namespace ThanksNoThanks.Tests
 {
     /// <summary>
-    /// Midlife crisis (CR00–CR08): the one-shot 45–50 trigger, the 5×2s blitz with a seeded
+    /// Midlife crisis (CR00–CR08): the one-shot 45–50 trigger, the 5×5s blitz (§3) with a seeded
     /// «ВСЁ НОРМАЛЬНО» lever, the fail counter, the ≥2-fail impulse gate, INVERT semantics
     /// (silence = ДА, рычаг НЕТ = отказ), impulse-card consequences, the scales-pause, and the restart reset.
     /// Time and the blitz lever are injected (dt / a roll seam) so nothing races the wall clock.
@@ -105,10 +105,10 @@ namespace ThanksNoThanks.Tests
             }
         }
 
-        // ---- blitz: 5 thoughts, 2s each ----
+        // ---- blitz: 5 thoughts, 5s each (§3) ----
 
         [Test]
-        public void Blitz_FiveThoughts_TwoSecondsEach()
+        public void Blitz_FiveThoughts_FiveSecondsEach()
         {
             var g = StartAndReach(Csv(), normalOnYes: () => true);
             TickToCrisis(g);
@@ -118,7 +118,7 @@ namespace ThanksNoThanks.Tests
                 Assert.AreEqual(CrisisPhase.Blitz, g.Phase, $"still in blitz at thought {n}");
                 Assert.AreEqual(n, g.BlitzThoughtNumber, "thought number advances 1..5");
                 Assert.AreEqual("CR0" + n, g.CurrentCard.Id, "the CR0N thought is up");
-                Assert.That(g.CrisisTimer, Is.EqualTo(Game.BlitzSeconds).Within(0.001f), "2s per thought");
+                Assert.That(g.CrisisTimer, Is.EqualTo(5f).Within(0.001f), "§3: 5 с на блиц-мысль (перебивает фазу)");
                 g.HandleInput(GameInput.AnswerYes);   // correct (normal on the ДА lever)
             }
             Assert.AreEqual(CrisisPhase.None, g.Phase, "blitz over after 5 thoughts");
@@ -133,7 +133,7 @@ namespace ThanksNoThanks.Tests
             Assert.AreEqual(1, g.BlitzThoughtNumber);
             Assert.AreEqual(0, g.BlitzFails);
 
-            g.Tick(Game.BlitzSeconds + 0.01f);   // let thought 1's 2s timer expire
+            g.Tick(Game.BlitzSeconds + 0.01f);   // let thought 1's 5s timer expire
             Assert.AreEqual(1, g.BlitzFails, "timeout = +1 fail");
             Assert.AreEqual(2, g.BlitzThoughtNumber, "advanced to the next thought");
         }

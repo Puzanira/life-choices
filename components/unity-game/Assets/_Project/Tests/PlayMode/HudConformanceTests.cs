@@ -750,30 +750,101 @@ namespace ThanksNoThanks.Tests.PlayMode
 
         // ============================================================ layout invariants
 
+        /// <summary>Спековый бокс купола (build-spec §2 / revisions §5a): x, yTop, w, h.</summary>
+        private const float DomeBoxX = 760f, DomeBoxTop = 0f, DomeBoxW = 400f, DomeBoxH = 130f;
+        /// <summary>Допуск на бокс купола — крупная композиция, ±15 px (решение основательницы 2026-07-31).</summary>
+        private const float DomeTol = 15f;
+        /// <summary>Минимальная видимая полоса дуги НАД барами, px (гейт «дугу видно»).</summary>
+        private const float DomeVisibleBandMin = 25f;
+
         [UnityTest]
-        public IEnumerator TimerRing_DoesNotOverlap_TheHudRow()
+        public IEnumerator DomeTimer_IsTheBigCentredDome_DrawnUnderTheBars()
         {
-            // The founder-flagged collision: the ring must live in a free gap, never over a scale. Since the
-            // art-pack card is 1093×721 the ring moved to the left gap; the invariant itself is unchanged.
+            // Инкремент «купол», решение основательницы 2026-07-31: круглое кольцо (252,590) снято, таймер —
+            // КРУПНАЯ полусфера по центру экрана, свисающая с верхнего края, и она лежит СЛОЕМ ПОД барами —
+            // «как наклейки на афише»: бары дорисованы поверх купола, а дуга читается в просветах (полоса
+            // над барами + коридор между ними). Поэтому здесь НЕ гейт «ничего не перекрывает» (он и загнал
+            // купол в 116-пиксельный коридор), а три вещи: (1) бокс = спековый 760,0,400,130 ±15;
+            // (2) z-порядок — купол НИЖЕ баров и ВЫШЕ фона-лучей; (3) просветы, в которых дугу реально видно.
             var driver = BootToAdult(out var go);
             yield return ToAdult(driver);
             var canvas = driver.CanvasRect;
 
-            // Compared in REFERENCE px (the 16:9 layout that ships), not canvas-local: a batch game view is
-            // not 16:9, so canvas-local positions compress while sizes do not — an artefact, not a collision.
-            var timer = RefBox(canvas, (RectTransform)driver.TimerRingFill.transform.parent);
+            // ---- (1) бокс купола = спек §2 -------------------------------------------------------------
+            var dome = RefBox(canvas, driver.TimerDomeOutline.rectTransform);
+            Assert.AreEqual(DomeBoxW, dome.R - dome.L, DomeTol, "ширина купола = бокс §2 (400)");
+            Assert.AreEqual(DomeBoxH, dome.B - dome.T, DomeTol, "глубина купола = бокс §2 (130)");
+            Assert.AreEqual(DomeBoxX + DomeBoxW / 2f, (dome.L + dome.R) / 2f, DomeTol,
+                "купол по центру экрана (X 960)");
+            Assert.AreEqual(960f, GameDriver.DomeCx, 0.001f, "центр купола — центр экрана (канон §5a)");
+            Assert.AreEqual(DomeBoxTop, dome.T, 1.5f, "плоская сторона купола лежит на верхнем крае экрана");
 
+            // ---- (2) z-порядок: купол ПОД барами, но НАД фоном-лучами ----------------------------------
+            // Сравниваются siblings одного родителя — поэтому от бара поднимаемся до его предка, который
+            // сам является ребёнком игровой панели (бары живут в HudRow).
+            Transform PanelChild(Transform t)
+            {
+                while (t.parent != driver.GamePanel.transform)
+                {
+                    t = t.parent;
+                    Assert.IsNotNull(t, "элемент живёт внутри игровой панели");
+                }
+                return t;
+            }
+
+            var domeChild = PanelChild(driver.TimerDome.transform);
+            foreach (var (img, what) in new[]
+            {
+                (driver.RelBarImage, "бар отношений"),
+                (driver.HealthBarImage, "бар здоровья"),
+            })
+            {
+                var barChild = PanelChild(img.transform);
+                Assert.AreNotSame(domeChild, barChild, "купол и «" + what + "» — разные ветки панели");
+                Assert.Less(domeChild.GetSiblingIndex(), barChild.GetSiblingIndex(),
+                    "купол рисуется НИЖЕ, чем «" + what + "» — бар полностью поверх купола");
+            }
+            // …и вся игровая панель (а с ней купол) — поверх фона-лучей.
+            Assert.AreSame(driver.BackgroundImage.transform.parent, driver.GamePanel.transform.parent,
+                "фон-лучи и игровая панель — siblings канваса");
+            Assert.Less(driver.BackgroundImage.transform.GetSiblingIndex(),
+                driver.GamePanel.transform.GetSiblingIndex(),
+                "купол рисуется ВЫШЕ фона-лучей");
+
+            // ---- (3) просветы, в которых дуга реально видна --------------------------------------------
+            var relDrawn = DrawnRefBox(canvas, driver.RelBarImage.rectTransform, RelBar);
+            var healthDrawn = DrawnRefBox(canvas, driver.HealthBarImage.rectTransform, HealthBar);
+
+            // (3a) полоса НАД барами: от верхнего края экрана до верхней кромки ближайшего бара.
+            float barTop = Mathf.Min(relDrawn.T, healthDrawn.T);
+            float band = barTop - dome.T;
+            Assert.GreaterOrEqual(band, DomeVisibleBandMin,
+                $"над барами торчит читаемая полоса купола (замер {band:0.0} px)");
+            Assert.Less(band, dome.B - dome.T, "полоса — это ЧАСТЬ купола, а не весь купол над HUD");
+
+            // (3b) коридор МЕЖДУ барами: купол перекрывает его целиком и уходит ниже верхней кромки баров,
+            //      т.е. в коридоре видна дуга, а не пустой фон.
+            Assert.Less(dome.L, relDrawn.R, "купол заходит левее правого края бара отношений");
+            Assert.Greater(dome.R, healthDrawn.L, "купол заходит правее левого края бара здоровья");
+            Assert.Greater(dome.B, barTop + DomeVisibleBandMin,
+                "в коридоре между барами купол читается заметным куском, а не кромкой");
+
+            // (3c) «наклейка на афише» ЯВНО: купол ДОЛЖЕН заходить под оба бара — если он снова уедет в
+            //      116-пиксельный коридор, этот ассерт упадёт.
+            Assert.IsTrue(RefOverlap(dome, relDrawn), "купол уходит ПОД бар отношений (канон-наклейка)");
+            Assert.IsTrue(RefOverlap(dome, healthDrawn), "купол уходит ПОД бар здоровья (канон-наклейка)");
+
+            // ---- (4) …и при этом не лезет на остальной HUD и на карточку -------------------------------
             foreach (var (rt, what) in new[]
             {
-                (driver.BatteryImage.rectTransform, "battery (энергия)"),
-                (driver.HealthBarImage.rectTransform, "health bar"),
-                (driver.RelBarImage.rectTransform, "relationships bar"),
                 (driver.MoneyJarImage.rectTransform, "money jar"),
                 (driver.AgeBadgeImage.rectTransform, "age badge"),
                 (driver.CardFrameImage.rectTransform, "card plate"),
+                (driver.BatteryImage.rectTransform, "battery (энергия)"),
+                (driver.MoneyCoin.rectTransform, "coin"),
             })
-                Assert.IsFalse(RefOverlap(timer, RefBox(canvas, rt)),
-                    "timer ring rect must be disjoint from the " + what + " rect");
+                Assert.IsFalse(RefOverlap(dome, RefBox(canvas, rt)),
+                    "dome rect must be disjoint from the " + what + " rect");
 
             Object.Destroy(go);
             yield return null;
@@ -804,7 +875,8 @@ namespace ThanksNoThanks.Tests.PlayMode
                 "energy-battery-v2", "<null>", "<null>", "battery-bolt-v2",  // батарея + заливка + молния
                 "rel-bar-v2", "rel-marker-heart-v2",                 // отношения: бар + сердце-маркер
                 "health-bar-v2", "health-marker-v2",                 // здоровье: бар + человечек-маркер
-                "timer-ring-track", "timer-ring-track", "timer-ring", "marquee-bulb",  // timer ring layers
+                "timer-dome", "timer-dome", "timer-dome",             // купол-таймер: обводка + трек + дуга
+                "timer-dome-hand",                                   // …и стрелка-кромка по границе заливки
                 "choice-plate-v2",                                   // карточка-вопрос
                 "btn-yes", "btn-no",                                 // answer plates (baked art, §9)
             }.OrderBy(s => s).ToList();
@@ -840,7 +912,7 @@ namespace ThanksNoThanks.Tests.PlayMode
             Inside(driver.BatteryImage.rectTransform, "battery");
             Inside(driver.HealthBarImage.rectTransform, "health bar");
             Inside(driver.RelBarImage.rectTransform, "relationships bar");
-            Inside((RectTransform)driver.TimerRingFill.transform.parent, "timer ring");
+            Inside(driver.TimerDomeOutline.rectTransform, "купол-таймер");
             Inside(driver.CardRect, "card plate");
             Inside(driver.YesPlateImage.rectTransform, "ДА plate");
             Inside(driver.NoPlateImage.rectTransform, "СПАСИБО НЕ НАДО plate");

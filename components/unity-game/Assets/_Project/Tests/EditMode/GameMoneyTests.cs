@@ -381,7 +381,8 @@ namespace ThanksNoThanks.Tests
         [Test]
         public void BlockCard_Blocked_Timeout_SkipsCleanly_NoDelta_NoNecrolog()
         {
-            // Timeout (5s expires → random auto-answer) on a blocked BLOCK$ card behaves like any answer:
+            // Timeout (the card's PHASE window expires → random auto-answer; §3: 10/8/6 s by age, здесь
+            // возраст 5 → 10 s) on a blocked BLOCK$ card behaves like any answer:
             // skip with no spend, no Δ, no necrolog line, no re-roll. MD03 at age 5 keeps money shut so
             // the timer's Tick can't drain cost-of-living — the «unchanged» assert stays exact.
             var block = Block("MD03", 5);
@@ -397,7 +398,7 @@ namespace ThanksNoThanks.Tests
             Assert.IsTrue(g.CurrentCardBlocked, "broke → blocked");
 
             int health = g.Scales.Health; double money = g.Money;
-            g.Tick(Game.CardSeconds + 0.1f);          // let the 5s timer expire → timeout auto-answer
+            g.Tick(g.CardTimerMax + 0.1f);            // let the phase timer expire → timeout auto-answer
             Assert.AreEqual("AFTER", g.CurrentCard.Id, "timeout on a blocked card just skips");
             Assert.AreEqual(money, g.Money, Eps, "blocked timeout spends nothing");
             Assert.AreEqual(health, g.Scales.Health, "no Δ on the blocked timeout skip");
@@ -449,7 +450,7 @@ namespace ThanksNoThanks.Tests
             Assert.AreEqual("MD03", g.CurrentCard.Id);
             Assert.IsTrue(g.CurrentCardBlocked, "drawn while broke → blocked");
 
-            for (int i = 0; i < 200; i++) Crank(g);  // crank during the card's 5s window
+            for (int i = 0; i < 200; i++) Crank(g);  // crank during the card's phase window (age 5 → 10 s)
             Assert.GreaterOrEqual(g.Money, 60.0, "now affordable in raw money terms");
             Assert.IsTrue(g.CurrentCardBlocked, "still blocked — affordability snapshot is at draw time");
 

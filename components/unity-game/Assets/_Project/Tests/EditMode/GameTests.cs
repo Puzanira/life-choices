@@ -77,7 +77,7 @@ namespace ThanksNoThanks.Tests
             Assert.AreEqual("B?", g.CurrentCard.Question, "advanced to next card");
         }
 
-        // ---- 5s timeout -> random answer ----
+        // ---- phase timeout -> random answer ----
 
         [Test]
         public void CardTimeout_PicksRandomAnswer_AndAdvances()
@@ -88,7 +88,7 @@ namespace ThanksNoThanks.Tests
             g.StartLife();
             Assert.AreEqual("A?", g.CurrentCard.Question);
 
-            g.Tick(Game.CardSeconds + 0.01f);           // let the 5s timer expire
+            g.Tick(g.CardTimerMax + 0.01f);             // let the phase timer expire (§3: 4 года → 10 с)
             Assert.AreEqual("B?", g.CurrentCard.Question, "timeout auto-answered and advanced");
         }
 
@@ -162,7 +162,7 @@ namespace ThanksNoThanks.Tests
             g.Tick(3f);                                   // idle on I02 well past any slow tick
             Assert.AreEqual(0f, g.Age, "age stays 0 while I02 is up");
 
-            g.Tick(Game.CardSeconds);                     // let I02 time out (random answer) -> I03
+            g.Tick(g.CardTimerMax);                       // let I02 time out (random answer) -> I03
             Assert.AreEqual("I03", g.CurrentCard.Id);
             Assert.IsFalse(g.AgeRunning, "still stopped while I03 is up (starts on resolve)");
             Assert.AreEqual(0f, g.Age);

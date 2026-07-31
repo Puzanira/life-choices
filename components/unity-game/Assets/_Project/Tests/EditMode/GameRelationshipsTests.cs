@@ -104,7 +104,7 @@ namespace ThanksNoThanks.Tests
             g.StartLife(); No(g);
             g.Tick(2f);                          // age → 21, balancer open
             Assert.IsTrue(g.RelationshipsOpen);
-            No(g);                               // A → L up (fresh 5s timer)
+            No(g);                               // A → L up (свежее окно фазы: L в 90 лет → 6 s)
             int r0 = g.Scales.Relationships;
             for (int i = 0; i < 8; i++) g.Tick(0.5f);   // 4s under the timer, no axis
             int drop = r0 - g.Scales.Relationships;

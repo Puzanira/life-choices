@@ -8,7 +8,7 @@ namespace ThanksNoThanks
 
     /// <summary>
     /// Sub-mode of <see cref="GameState.Playing"/> during the midlife crisis (CR00–CR08). <see cref="None"/>
-    /// is ordinary card play; <see cref="Blitz"/> is the 5×2s thought sprint (CR01–CR05); <see cref="Impulse"/>
+    /// is ordinary card play; <see cref="Blitz"/> is the 5×5s thought sprint (CR01–CR05); <see cref="Impulse"/>
     /// is the INVERT round (CR06–CR08) entered only after ≥2 blitz fails. The normal card loop is suspended
     /// while a crisis phase is active and resumes exactly where it left off afterwards.
     /// </summary>
@@ -16,21 +16,43 @@ namespace ThanksNoThanks
 
     /// <summary>
     /// Which way a card resolved — the semantic input to the host's speech-bubble tone.
-    /// <see cref="Timeout"/> means the 5-second timer ran out (the mechanical answer was still a coin
+    /// <see cref="Timeout"/> means the answer timer ran out (the mechanical answer was still a coin
     /// flip, but the host reacts to the silence, not the random pick).
     /// </summary>
     public enum AnswerSide { Yes, No, Timeout }
 
     /// <summary>
     /// Pure, engine-free spine of «Спасибо, не надо»: the 3-state machine
-    /// (Opener → Playing → Finale → Opener), the event-time age model, the 5-second
-    /// card timer (timeout = random answer), passive Δ application, FATAL / burnout /
-    /// natural endings, and necrolog assembly. Time is injected via <see cref="Tick"/>
-    /// so PlayMode tests drive it by API instead of racing the wall clock.
+    /// (Opener → Playing → Finale → Opener), the event-time age model, the PHASED
+    /// answer timer (§3: 10/8/6 s by age, 5 s in the blitz; timeout = random answer),
+    /// passive Δ application, FATAL / burnout / natural endings, and necrolog assembly.
+    /// Time is injected via <see cref="Tick"/> so PlayMode tests drive it by API instead
+    /// of racing the wall clock.
     /// </summary>
     public sealed class Game
     {
-        public const float CardSeconds = 5f;             // 5 sec/card
+        // ---- answer timer by age phase (meeting-revisions §3 — replaces the old single 5 s) ----
+        // Финальные числа встречи 2026-07-29: 1–19 → 10 с · 20–29 → 8 с · 30–100 → 6 с · блиц → 5 с.
+        // Таймер — ЧИСТАЯ функция возраста карточки (<see cref="AnswerSecondsFor"/>); блиц перебивает фазу.
+        public const float AnswerSecondsYouth = 10f;     // A. детство/юность 1–19
+        public const float AnswerSecondsYoung = 8f;      // B. молодость 20–29
+        public const float AnswerSecondsMature = 6f;     // C. зрелость → старость 30–100
+        public const int AnswerPhaseYoungFromAge = 20;   // граница A→B
+        public const int AnswerPhaseMatureFromAge = 30;  // граница B→C
+
+        /// <summary>
+        /// Длина таймера ответа в секундах для карточки данного возраста (meeting-revisions §3).
+        /// Приоритет: блиц &gt; фаза по возрасту. Чистая функция — ни состояния, ни движка.
+        /// </summary>
+        public static float AnswerSecondsFor(float age, bool blitz = false)
+        {
+            if (blitz) return BlitzSeconds;
+            int a = (int)Math.Floor((double)age);
+            if (a >= AnswerPhaseMatureFromAge) return AnswerSecondsMature;
+            if (a >= AnswerPhaseYoungFromAge) return AnswerSecondsYoung;
+            return AnswerSecondsYouth;
+        }
+
         public const float AgeCatchUpPerSecond = 12f;    // age "catches up" to the card's age
         public const float AgeSlowTickPerSecond = 0.4f;  // ticks slowly once caught up
 
@@ -120,10 +142,14 @@ namespace ThanksNoThanks
 
         // ---- midlife crisis: blitz + impulse (tunable; canon crisis-content.md §2) ----
         public const int CrisisTriggerAge = 45;            // кризис в 45–50: fires once when Age first reaches 45
-        public const float BlitzSeconds = 2f;              // 2 сек на кризис-мысль (не 5, как обычная карта)
+        // Блиц-мысль: 5 сек (meeting-revisions §3, «блиц с 3 до 5» — финальное число встречи). Перебивает
+        // фазу по возрасту: кризис живёт внутри фазы C (6 с), но его мысли идут по своему таймеру.
+        public const float BlitzSeconds = 5f;
         public const int ImpulseFailThreshold = 2;         // ≥2 провала в блице → раунд импульса (иначе пропуск)
         // Impulse reaction window. Canon gives no number (it's «надо срочно нажать»); tuned to 3s so the
         // INVERT warning «молчание = ДА» is readable before silence auto-accepts. #1 crisis tunable (report).
+        // meeting-revisions §3 раздаёт числа только фазам и БЛИЦУ — импульс там не оговорён, поэтому его
+        // окно НЕ трогается этим инкрементом (менять только по отдельному решению основательницы).
         public const float ImpulseSeconds = 3f;
 
         // ---- depression / «тёмная полоса» (CR09) mini-game (tunable; canon crisis-content.md §1) ----
@@ -241,6 +267,7 @@ namespace ThanksNoThanks
         private readonly Random _blitzRng = new();
         private Card _suspendedCard;            // normal card interrupted by the crisis (resumed after)
         private float _suspendedTimer;          // its remaining card timer, restored on resume
+        private float _suspendedTimerMax;       // …and that card's FULL phase length (§3), for the dome arc
         private bool _suspendedBlocked;         // its BLOCK$ state, restored on resume
 
         /// <summary>Test/tuning seam: supplies whether «ВСЁ НОРМАЛЬНО» sits on the ДА/yes LEVER for the next
@@ -264,7 +291,7 @@ namespace ThanksNoThanks
         public int ImpulseCardNumber => _phase == CrisisPhase.Impulse ? _impulseIndex + 1 : 0;
         /// <summary>Remaining time on the current crisis thought/impulse (mirrors <see cref="CardTimer"/>).</summary>
         public float CrisisTimer => _crisisTimer;
-        /// <summary>The full duration of the current crisis timer (2s blitz / 3s impulse) for the ring fill.</summary>
+        /// <summary>The full duration of the current crisis timer (5s blitz / 3s impulse) for the dome fill.</summary>
         public float CrisisTimerMax => _phase == CrisisPhase.Impulse ? ImpulseSeconds : BlitzSeconds;
 
         /// <summary>Fired the instant the crisis begins (CR00): drives the S6 «КРИЗИС… БЛИЦ!» banner.</summary>
@@ -372,6 +399,12 @@ namespace ThanksNoThanks
         /// </summary>
         public bool AgeRunning { get; private set; }
         public float CardTimer { get; private set; }
+        /// <summary>
+        /// Full length of the timer the CURRENT card was dealt (§3 phase length, or the blitz/impulse
+        /// window during a crisis). The dome-timer's arc is <see cref="CardTimer"/> / this — so the arc
+        /// always empties over exactly the phase's own seconds, never over a hardcoded 5.
+        /// </summary>
+        public float CardTimerMax { get; private set; } = AnswerSecondsYouth;
         public string Cause { get; private set; }
         public NecrologResult Necrolog { get; private set; }
 
@@ -521,6 +554,8 @@ namespace ThanksNoThanks
             _answers.Clear();
             _index = -1;
             Age = 0f;
+            CardTimer = 0f;
+            CardTimerMax = AnswerSecondsYouth;   // рестарт сбрасывает купол на полную дугу первой фазы
             AgeRunning = false;
             Cause = null;
             Necrolog = null;
@@ -684,7 +719,9 @@ namespace ThanksNoThanks
                 CurrentCardBlocked = c.IsBlockCost
                     && BlockPrices.TryGetValue(c.Id, out var price)
                     && Money < price;
-                CardTimer = CardSeconds;
+                // §3: длительность = фаза возраста ЭТОЙ карточки (блиц идёт своей веткой).
+                CardTimerMax = AnswerSecondsFor(c.Age);
+                CardTimer = CardTimerMax;
                 CardChanged?.Invoke();
                 return;
             }
@@ -914,6 +951,8 @@ namespace ThanksNoThanks
             _answers.Clear();
             _index = -1;
             Age = 0f;
+            CardTimer = 0f;
+            CardTimerMax = AnswerSecondsYouth;   // рестарт сбрасывает купол на полную дугу первой фазы
             AgeRunning = false;
             Cause = null;
             Necrolog = null;
@@ -944,6 +983,7 @@ namespace ThanksNoThanks
             _crisisTimer = 0f;
             _suspendedCard = null;
             _suspendedTimer = 0f;
+            _suspendedTimerMax = AnswerSecondsYouth;
             _suspendedBlocked = false;
         }
 
@@ -967,6 +1007,7 @@ namespace ThanksNoThanks
             _crisisDone = true;
             _suspendedCard = CurrentCard;         // resumed verbatim after the crisis
             _suspendedTimer = CardTimer;
+            _suspendedTimerMax = CardTimerMax;
             _suspendedBlocked = CurrentCardBlocked;
             _phase = CrisisPhase.Blitz;
             _blitzIndex = 0;
@@ -985,7 +1026,7 @@ namespace ThanksNoThanks
                 ? BlitzNormalOnYesRoll()
                 : _blitzRng.Next(2) == 0;
             _crisisTimer = BlitzSeconds;
-            CardTimer = BlitzSeconds;             // mirror for the driver's timer ring
+            CardTimer = CardTimerMax = BlitzSeconds;   // mirror for the driver's dome timer
             CrisisBlitzAdvanced?.Invoke();        // driver: host-nag bubble + relabel the two buttons
         }
 
@@ -1040,7 +1081,7 @@ namespace ThanksNoThanks
             CurrentCard = card;
             CurrentCardBlocked = false;
             _crisisTimer = ImpulseSeconds;
-            CardTimer = ImpulseSeconds;
+            CardTimer = CardTimerMax = ImpulseSeconds;
         }
 
         // Resolve an impulse card. INVERT: yes = поддаться (impulsive act, consequences apply); no =
@@ -1070,6 +1111,7 @@ namespace ThanksNoThanks
             _phase = CrisisPhase.None;
             CurrentCard = _suspendedCard;
             CardTimer = _suspendedTimer;
+            CardTimerMax = _suspendedTimerMax;
             CurrentCardBlocked = _suspendedBlocked;
             _suspendedCard = null;
             CrisisEnded?.Invoke();

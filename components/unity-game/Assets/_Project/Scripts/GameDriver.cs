@@ -32,8 +32,20 @@ namespace ThanksNoThanks
         private static readonly Color Bulb = new(1f, 0.847f, 0.451f);          // #ffd873
         private static readonly Color Energy = new(0.973f, 0.824f, 0.271f);    // #f8d24c
         private static readonly Color Muted = new(0.62f, 0.69f, 0.91f);        // #9fb0e8
+        // Красный «тревоги» — остался за плашкой разрыва и красной зоной балансира (купол на своих токенах).
         private static readonly Color TimerRed = new(0.910f, 0.267f, 0.227f);  // #e8443a
-        private static readonly Color TimerHot = new(1f, 0.32f, 0.18f);        // low-time shift
+        // ---- купол-таймер (§5a): токены build-spec §1.1, не выборки с PNG ----
+        private static readonly Color Cream = new(254f / 255f, 249f / 255f, 232f / 255f);   // #FEF9E8 CREAM
+        private static readonly Color DomeYellow = new(1f, 212f / 255f, 0f);                // #FFD400 YELLOW
+        private static readonly Color DomeAlarm = new(1f, 21f / 255f, 11f / 255f);          // #FF150B RED_BRIGHT
+        // Кант купола — ЧИСТО ЧЁРНЫЙ, как штрихи арт-пака: купол теперь «наклейка среди наклеек»,
+        // и токен INK (#0D0D1C) рядом с чёрными обводками баров читался как выцветший (дизайн-гейт).
+        private static readonly Color DomeInk = Color.black;                                // #000000
+        /// <summary>Токены купола, открытые тесту, чтобы связать константы с каноничными hex-ами.</summary>
+        public static Color CreamToken => Cream;
+        public static Color DomeYellowToken => DomeYellow;
+        public static Color DomeAlarmToken => DomeAlarm;
+        public static Color DomeInkToken => DomeInk;
         private static readonly Color PlateMute = new(0.62f, 0.62f, 0.64f);    // S10: muted answer plates while BLOCK$-blocked
         private static readonly Color CardBlockDim = new(0.52f, 0.54f, 0.60f); // S10: tint the card frame when unaffordable (dims to muted cobalt)
         // S1 opener, снято с эталона «Стартовый экран.png»: золото марки-рамки и тёплый крем её плашки —
@@ -147,6 +159,35 @@ namespace ThanksNoThanks
         private static readonly Vector4 CoinRect = new(1748.00f, 40.04f, 68.16f, 68.08f);
         private static readonly Vector4 AgeBadgeRect = new(1745.78f, 492.70f, 229.24f, 229.65f);
         private static readonly Vector4 CardPlateRect = new(959.50f, 590.99f, 1143.63f, 762.71f);
+
+        // ---- КУПОЛ-ТАЙМЕР (revisions §5a / build-spec §2) --------------------------------------------
+        // РЕШЕНИЕ ОСНОВАТЕЛЬНИЦЫ (2026-07-31): купол КРУПНЫЙ, по центру экрана, слоем ПОД барами — «как
+        // наклейки на афише»: бары нарисованы ПОВЕРХ купола, а дуга читается в просветах (полоса над
+        // барами y 0…35 и коридор между барами x 936…1042). Поэтому берётся бокс спека БУКВАЛЬНО:
+        //   бокс = 760, 0, 400, 130 · центр «окружности» = (DomeCx, 0) на верхнем крае экрана
+        // Форма — половина ЭЛЛИПСА (полуоси 200 × 130), а не окружности: спековый бокс 400×130 именно
+        // приплюснутый, и тот же процедурный спрайт-полукруг растягивается в него ректом.
+        //   видимая полоса дуги над барами (бары начинаются с y 35): 35 px ≥ 25 px гейта
+        //   в коридоре 936…1042 купол виден от y 35 до y ≈ 119…129 (низ эллипса на этих x)
+        // Z-порядок: Timer — ПЕРВЫЙ ребёнок _gamePanel, т.е. НИЖЕ HudRow (баров) и ВЫШЕ фона-лучей
+        // (`Background` — сосед _gamePanel и создаётся раньше него).
+        public const float DomeCx = 960f;        // центр экрана по X (бокс §2: 760…1160)
+        public const float DomeW = 400f;         // ширина купола = 2 × горизонтальной полуоси (бокс §2)
+        public const float DomeH = 130f;         // глубина купола = вертикальная полуось (бокс §2)
+        public const float DomeOutlineWidth = 7f;// обводка 6–8 px (build-spec §1.4)
+        /// <summary>Последняя секунда таймера — ВЕСЬ купол мигает RED_BRIGHT (§5a «тревожный/мигает»).</summary>
+        public const float DomeAlarmSeconds = 1f;
+        /// <summary>
+        /// Период мигания тревоги, с. Фаза берётся от ОСТАВШЕГОСЯ времени, а не от `Time.time`:
+        /// мигание получается детерминированным (кадр-харнесс и тест ловят пик точно), и на паузе
+        /// купол честно замирает вместе со своим цветом.
+        /// </summary>
+        public const float DomeAlarmPulsePeriod = 0.35f;
+        /// <summary>
+        /// «Стрелка-кромка»: тонкая чёрная линия по радиусу границы заливки — она и подчёркивает ход
+        /// времени, и закрывает лесенку `Image.Filled` (единственный несглаженный край HUD, дизайн-гейт).
+        /// </summary>
+        public const float DomeHandWidth = 3f;
 
         // Inner boxes, straight from asset-map §8 (screen px @1920×1080; x/y are LEFT/TOP edges).
         /// <summary>Battery cavity — the fill box: x, yTop, w, h.</summary>
@@ -334,10 +375,14 @@ namespace ThanksNoThanks
         private GameObject _impulseWarning;   // S13 INVERT plate: «МОЛЧАНИЕ = ДА! · ЖМИ СПАСИБО НЕ НАДО →»
         private bool _crisisUiActive;         // true while the plates/timer are in crisis mode (for restore)
 
-        // Timer ring
-        private GameObject _timerGroup;   // whole ring widget; hidden during a rubric banner beat
-        private Image _timerFill;
-        private Text _timerText;
+        // Купол-таймер (§5a) — сменил круглое кольцо (252,590)
+        private GameObject _timerGroup;   // whole dome widget; hidden during a rubric banner beat
+        private Image _domeOutline;       // INK-обводка: тот же полукруг на весь внешний бокс DomeW×DomeH
+        private Image _domeTrack;         // кремовый «истёкший» остаток под дугой
+        private Image _domeFill;          // жёлтая дуга-остаток (Radial180), краснеет в последнюю секунду
+        private Image _domeHand;          // «стрелка-кромка»: чёрная линия по границе заливки (AA, прячет лесенку)
+        private Sprite _domeSprite;       // процедурный полукруг (плоской стороной вверх), общий на 3 слоя
+        private Sprite _domeHandSprite;   // процедурная полоска с мягкими краями — тело стрелки
 
         // Finale
         private Text _finaleTitle;
@@ -499,7 +544,16 @@ namespace ThanksNoThanks
         public Image EnergyBolt => _energyBolt;
         public GameObject BalancerGroup => _balancerGroup;
         public Image RelBarImage => _relBarImg;
-        public Image TimerRingFill => _timerFill;
+        /// <summary>Жёлтая дуга-остаток купола (Radial180) — то, что реально убывает за таймер фазы.</summary>
+        public Image TimerDomeFill => _domeFill;
+        /// <summary>Кремовая «истёкшая» часть купола под дугой.</summary>
+        public Image TimerDomeTrack => _domeTrack;
+        /// <summary>Чёрная обводка купола — её rect и есть внешний бокс виджета (DomeW × DomeH).</summary>
+        public Image TimerDomeOutline => _domeOutline;
+        /// <summary>«Стрелка-кромка» купола — чёрная линия по радиусу границы заливки.</summary>
+        public Image TimerDomeHand => _domeHand;
+        /// <summary>Контейнер купола (скрывается на баннер-бите, отсутствует на опенере/финале).</summary>
+        public GameObject TimerDome => _timerGroup;
         public GameObject OpenerPanel => _openerPanel;
         /// <summary>S1: the show logo cut from the explainer (`opener-logo-v2`).</summary>
         public Image OpenerLogo => _openerLogo;
@@ -703,10 +757,55 @@ namespace ThanksNoThanks
             ReflectRelationsMarker(58f, redZone: false);
             _yesPlate.color = Color.white; _noPlate.color = Color.white;
             _yesPlateText.text = "ДА"; _noPlateText.text = "СПАСИБО,\nНЕ НАДО";
-            _timerText.text = "4";
-            _timerFill.color = TimerRed;
-            _timerFill.fillAmount = 0.62f;
+            // Купол в спокойной позе: СВЕЖАЯ карточка, таймер ПОЛНЫЙ (t=0, дизайн-гейт просил именно
+            // этот кадр), канонный YELLOW. Через ReflectDome, а не присвоением, — поза идёт тем же путём,
+            // что и живой Update, и стрелка-кромка встаёт на своё место.
+            ReflectDome(6f, 6f);
             enabled = false;
+        }
+
+        /// <summary>
+        /// Screenshot pose (дизайн-гейт §5a): та же обычная сцена, но купол в ПОСЛЕДНЕЙ секунде — весь
+        /// силуэт мигает RED_BRIGHT. Остаток 0.7 с от фазы C (6 с) — это РОВНО пик мигания
+        /// (0.7 = 2 × DomeAlarmPulsePeriod), так что кадр ловит тревогу на максимуме и воспроизводим.
+        /// Только визуал: чистый Game не трогается.
+        /// </summary>
+        public void DebugPreviewDomeLastSecond()
+        {
+            DebugPreviewArcadeShot();                 // обычный кадр, драйвер заморожен
+            ReflectDome(2f * DomeAlarmPulsePeriod, 6f);
+        }
+
+        /// <summary>
+        /// Screenshot pose: купол на ЧЕТВЕРТИ окна — граница заливки идёт ровно под 45°, т.е. это
+        /// худший случай для ступенчатого края `Image.Filled` (на половине окна граница вертикальная и
+        /// лесенки в принципе нет). Именно этот край и закрывает «стрелка-кромка», поэтому поза нужна
+        /// дизайн-гейту для проверки сглаживания на зуме — в спокойной (жёлтой) и в тревожной фазе.
+        /// Тревожный вариант ставится в ПРОВАЛ мигания, где рядом с красной дугой ещё виден крем.
+        /// </summary>
+        public void DebugPreviewDomeDiagonalEdge(bool alarm)
+        {
+            DebugPreviewArcadeShot();
+            // 1.5 / 6 и 0.525 / 2.1 — обе четверти окна; вторая при этом лежит в последней секунде.
+            if (alarm) ReflectDome(1.5f * DomeAlarmPulsePeriod, 6f * DomeAlarmPulsePeriod);
+            else ReflectDome(1.5f, 6f);
+        }
+
+        /// <summary>Layer-2 seam: нарисовать купол по произвольной паре (осталось, полная длина) —
+        /// ровно тем же путём, каким это делает Update.</summary>
+        public void DebugReflectDome(float remaining, float full) => ReflectDome(remaining, full);
+
+        /// <summary>
+        /// Layer-2 seam: продвинуть чистый Game на dt и ТУТ ЖЕ перерисовать по нему купол, не дожидаясь
+        /// кадра — так тест видит убывание дуги ровно за длину фазы, без вклада Time.deltaTime.
+        /// </summary>
+        public void DebugTick(float dt)
+        {
+            if (_game == null) return;
+            _game.Tick(dt);
+            if (_game.State != GameState.Playing) return;
+            if (_game.InCrisis) ReflectDome(Mathf.Max(0f, _game.CrisisTimer), _game.CrisisTimerMax);
+            else ReflectDome(Mathf.Max(0f, _game.CardTimer), _game.CardTimerMax);
         }
 
         // Set the three finale texts and size the story plate to its content (short story → compact plate).
@@ -991,7 +1090,7 @@ namespace ThanksNoThanks
             }
             else if (_game.State == GameState.Playing && _game.InCrisis)
             {
-                RenderCrisis();   // S6 blitz / S13 impulse — reuses the plates + timer ring, freezes normal HUD
+                RenderCrisis();   // S6 blitz / S13 impulse — reuses the plates + dome timer, freezes normal HUD
             }
             else if (_game.State == GameState.Playing)
             {
@@ -1015,15 +1114,9 @@ namespace ThanksNoThanks
                 // of waiting for the next card resolution (founder Gate-2 bug, uniform fix).
                 ApplyAgeGates(_game.Age);
 
-                float remaining = Mathf.Max(0f, _game.CardTimer);
-                _timerText.text = Mathf.CeilToInt(remaining).ToString();
-                float t = Mathf.Clamp01(remaining / Game.CardSeconds);
-                _timerFill.fillAmount = t;
-                bool low = remaining <= 1.5f;
-                _timerFill.color = low ? TimerHot : TimerRed;
-                _timerText.transform.localScale = low
-                    ? Vector3.one * (1f + 0.08f * Mathf.Sin(Time.time * 12f))
-                    : Vector3.one;
+                // Купол-таймер: дуга-остаток убывает ровно за длину ТЕКУЩЕЙ фазы (§3), не за фикс. 5 с.
+                // На паузе (туториал/баннер-бит) Game.Tick не двигает CardTimer → купол сам заморожен.
+                ReflectDome(Mathf.Max(0f, _game.CardTimer), _game.CardTimerMax);
             }
             ReflectHostReveals(_game.State == GameState.Playing);   // advances the banner-beat clock + pause
             ReflectBannerBeat();                                    // hide the card/plates while the beat is up
@@ -1033,7 +1126,7 @@ namespace ThanksNoThanks
         }
 
         // Midlife-crisis render (S6 blitz / S13 impulse). Reuses the card marquee (thought/impulse text),
-        // the two answer plates (relabelled), and the timer ring (on the fast crisis clock). The normal HUD
+        // the two answer plates (relabelled), and the dome timer (on the fast crisis clock). The normal HUD
         // (bars/money/balancer) is intentionally frozen — the 5 scales are paused in Game during the crisis.
         private void RenderCrisis()
         {
@@ -1095,12 +1188,8 @@ namespace ThanksNoThanks
             if (!_crisisInfo.activeSelf) _crisisInfo.SetActive(true);
             if (_impulseWarning.activeSelf == blitz) _impulseWarning.SetActive(!blitz);
 
-            // Fast crisis timer on the ring (2s blitz / 3s impulse).
-            float remaining = Mathf.Max(0f, _game.CrisisTimer);
-            _timerText.text = Mathf.CeilToInt(remaining).ToString();
-            _timerFill.fillAmount = Mathf.Clamp01(remaining / Mathf.Max(0.0001f, _game.CrisisTimerMax));
-            _timerFill.color = TimerHot;
-            _timerText.transform.localScale = Vector3.one * (1f + 0.08f * Mathf.Sin(Time.time * 14f));
+            // Купол на кризисном таймере (5с блиц / 3с импульс) — тот же виджет, та же дуга.
+            ReflectDome(Mathf.Max(0f, _game.CrisisTimer), _game.CrisisTimerMax);
         }
 
         // Restore the plates + hide the crisis widgets when ordinary play resumes (called once on the
@@ -1195,8 +1284,8 @@ namespace ThanksNoThanks
             _game.Paused = _tutorialShowing || _bannerTimer.Visible;
         }
 
-        // While a rubric banner beat is up (S4/S6), the card marquee, the two answer plates and the timer
-        // ring are HIDDEN so the banner is its own beat and can never overlap a card (the founder bug).
+        // While a rubric banner beat is up (S4/S6), the card marquee, the two answer plates and the dome
+        // timer are HIDDEN so the banner is its own beat and can never overlap a card (the founder bug).
         // Restored the instant the beat clears. Idempotent — safe to call every frame.
         private void ReflectBannerBeat()
         {
@@ -1512,6 +1601,58 @@ namespace ThanksNoThanks
         {
             _gamePanel = NewGroup("Game", parent);
 
+            // ---- Купол-таймер (§5a) — ПЕРВЫМ ребёнком панели, т.е. ПОД всем HUD ------------------------
+            // Сменил круглое кольцо (252,590) целиком: слоёв кольца, его рефлектов и цифры секунд больше
+            // нет. Цифры в куполе НЕТ по спеку («купол = только дуга»): read-out — сама дуга + тревожный
+            // цвет в последнюю секунду.
+            // Решение основательницы: купол крупный (бокс §2 760,0,400,130), по центру, и лежит СЛОЕМ
+            // НИЖЕ баров — бары дорисованы поверх него, дуга читается в просветах (полоса над барами и
+            // коридор между ними). Отсюда порядок: Timer создаётся ДО HudRow (ниже по siblingIndex), но
+            // после фона-лучей (тот — сосед _gamePanel).
+            // Полукруг рисуется ПРОЦЕДУРНО (MakeDomeSprite), как остальной сгенерённый арт; один спрайт
+            // на три слоя, соосных по центру «окружности» (DomeCx, 0):
+            //   DomeOutline (внешний бокс, чёрный) · DomeTrack (вложен на толщину обводки, CREAM) ·
+            //   DomeFill (тот же вложенный бокс, Radial180 от плоской верхней грани, YELLOW →
+            //   RED_BRIGHT в последнюю секунду) · DomeHand («стрелка-кромка» по границе заливки).
+            var domeGroup = NewGroup("Timer", _gamePanel.transform);
+            _timerGroup = domeGroup;
+            _domeSprite = MakeDomeSprite();
+            _domeOutline = NewSprite("DomeOutline", domeGroup.transform, _domeSprite);
+            AnchorPx(_domeOutline.rectTransform, DomeCx, DomeH / 2f, DomeW, DomeH);
+            _domeOutline.color = DomeInk;
+            // Внутренний бокс: обводка INK торчит из-под трека на DomeOutlineWidth со всех КРИВЫХ сторон
+            // (сверху плоская грань лежит на крае экрана, там обводки нет — купол «врезан» в верхний край).
+            float inW = DomeW - 2f * DomeOutlineWidth;
+            float inH = DomeH - DomeOutlineWidth;
+            _domeTrack = NewSprite("DomeTrack", domeGroup.transform, _domeSprite);
+            AnchorPx(_domeTrack.rectTransform, DomeCx, inH / 2f, inW, inH);
+            _domeTrack.color = Cream;                              // «истёкшая» часть купола
+            _domeFill = NewSprite("DomeFill", domeGroup.transform, _domeSprite);
+            AnchorPx(_domeFill.rectTransform, DomeCx, inH / 2f, inW, inH);
+            // Radial180 с origin на ВЕРХНЕЙ (плоской) грани: ось развёртки проходит через центр
+            // купола, поэтому дуга-остаток убывает вдоль самого купола, а не по хорде. Направление
+            // (какой край тает первым) зафиксировано пиксельно в DomeTimerTests.
+            _domeFill.type = Image.Type.Filled;
+            _domeFill.fillMethod = Image.FillMethod.Radial180;
+            _domeFill.fillOrigin = (int)Image.Origin180.Top;
+            _domeFill.fillClockwise = true;
+            _domeFill.fillAmount = 1f;
+            _domeFill.color = DomeYellow;
+
+            // «Стрелка-кромка» — ПОСЛЕДНИМ слоем купола, поверх заливки: тонкая чёрная линия из центра
+            // купола вдоль радиуса, на котором стоит граница заливки. Её задача двойная — читаемый
+            // «ход времени» и маскировка ступенчатого (без AA) края `Image.Filled`. Пивот — в ВЕРХНЕЙ
+            // точке линии, т.е. в центре купола: поворот вокруг него и есть ход стрелки.
+            _domeHandSprite = MakeDomeHandSprite();
+            _domeHand = NewSprite("DomeHand", domeGroup.transform, _domeHandSprite);
+            _domeHand.color = DomeInk;
+            var handRt = _domeHand.rectTransform;
+            handRt.anchorMin = handRt.anchorMax = new Vector2(DomeCx / 1920f, 1f);
+            handRt.pivot = new Vector2(0.5f, 1f);
+            handRt.anchoredPosition = Vector2.zero;
+            handRt.sizeDelta = new Vector2(DomeHandWidth, inH);
+            ReflectDomeHand(1f);
+
             // ---- HUD row — the art pack, pixel-placed off «Экран спокойный обычный.png» (asset-map §2) ----
             // A dedicated container so the row can be enumerated (no stray/placeholder Image) and so the
             // whole row hides as one on a rubric beat. Rects come from the geometry block above.
@@ -1527,34 +1668,6 @@ namespace ThanksNoThanks
             // owns the old 1850,88 corner. Lives in the free gap BETWEEN the jar and the age badge; its
             // size comes from that gap (geometry block, ChildCx/ChildCy/ChildGlowSize).
             BuildChildButton();
-
-            // ---- Timer ring (инкремент «купол» переделает) — parked low in the LEFT column: the art-pack
-            // card owns the centre, and at the old 252,430 spot the host-bubble HORN (ends y≈455, x≤300)
-            // covered the ring. 252,590 clears the horn by ~45 px and the НЕ НАДО plate (top ≈725) by ~45 px.
-            // Layered as before: white outline · cobalt base ring · red arc · disc · digit.
-            var ringGroup = NewGroup("Timer", _gamePanel.transform);
-            _timerGroup = ringGroup;
-            AnchorPx(ringGroup.GetComponent<RectTransform>(), 252f, 590f, 180f, 180f);
-            var ringOutline = NewSprite("RingOutline", ringGroup.transform, Sprite("timer-ring-track"));
-            Stretch(ringOutline.rectTransform);
-            ringOutline.color = Color.white;                       // white outer outline
-            var ringTrack = NewSprite("RingTrack", ringGroup.transform, Sprite("timer-ring-track"));
-            Anchor(ringTrack.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(162, 162));
-            ringTrack.color = Cobalt;                              // blue base ring inside the outline
-            _timerFill = NewSprite("RingFill", ringGroup.transform, Sprite("timer-ring"));
-            Anchor(_timerFill.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(162, 162));
-            _timerFill.type = Image.Type.Filled;
-            _timerFill.fillMethod = Image.FillMethod.Radial360;
-            _timerFill.fillOrigin = (int)Image.Origin360.Top;
-            _timerFill.fillClockwise = false;
-            _timerFill.fillAmount = 1f;
-            _timerFill.color = TimerRed;                           // red arc = remaining time
-            var ringCenter = NewSprite("RingCenter", ringGroup.transform, Sprite("marquee-bulb"));
-            Anchor(ringCenter.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(112, 112));
-            ringCenter.color = Cobalt;                             // cobalt centre disc behind the number
-            _timerText = NewText("TimerText", ringGroup.transform, "5", 56, TextAnchor.MiddleCenter, Color.white, _display);
-            Stretch(_timerText.rectTransform);
-            DisplayFx(_timerText);
 
             // ---- Card — the art-pack cream plate (`choice-plate-v2`), INK question on the cream field ----
             // Image.Type.Simple, never 9-slice: the plate's tabs sit at the middle of each side and its stars
@@ -1699,7 +1812,7 @@ namespace ThanksNoThanks
 
         // Midlife-crisis HUD: a top readout (blitz progress + fail count / impulse index) and the S13 INVERT
         // warning plate. Both start hidden and are shown by RenderCrisis only while Game.InCrisis. The blitz's
-        // two buttons and the fast timer REUSE the existing answer plates + timer ring (relabelled in-place).
+        // two buttons and the fast timer REUSE the existing answer plates + dome timer (relabelled in-place).
         private void BuildCrisisHud()
         {
             // ---- Counter badge (S6): top-right DARK rounded badge — «МЫСЛЬ N/5» + «ПРОВАЛОВ: K» ----
@@ -1733,6 +1846,125 @@ namespace ThanksNoThanks
             wrt.offsetMax = new Vector2(-18f, -8f);
             DisplayFx(warn);
             _impulseWarning.SetActive(false);
+        }
+
+        // ---- КУПОЛ: процедурный полукруг --------------------------------------------------------------
+        // Отдельного спрайта купола в assets_new нет (build-spec §2), поэтому форма генерится кодом, как
+        // остальной рисованный-в-рантайме арт (mute-иконка, зерно депрессии). Плоская сторона — СВЕРХУ,
+        // т.е. центр окружности лежит на верхней грани спрайта; ровно это и даёт «свисает с верхнего края».
+        // Белый RGB + альфа-маска: цвет каждого слоя задаёт Image.color (INK / CREAM / YELLOW).
+        // Текстура генерится с большим запасом (512×256) — тот же спрайт растягивается и на внешний бокс,
+        // и на внутренний, а на 4K-канвасе не мылится. В приплюснутый бокс купола (DomeW×DomeH, спек §2)
+        // ректы растягивают полукруг в ПОЛУЭЛЛИПС — это и есть канонная форма купола.
+        private static UnityEngine.Sprite MakeDomeSprite()
+        {
+            const int w = 512, h = 256;            // h = радиус, w = диаметр
+            var tex = new Texture2D(w, h, TextureFormat.RGBA32, false)
+                { filterMode = FilterMode.Bilinear, wrapMode = TextureWrapMode.Clamp };
+            var px = new Color32[w * h];
+            const float r = h;                     // радиус в пикселях текстуры
+            for (int y = 0; y < h; y++)
+            {
+                // Текстурный y растёт ВВЕРХ, а центр окружности сидит на верхней грани (y = h),
+                // поэтому расстояние вниз от центра = h − (y + 0.5).
+                float dy = h - (y + 0.5f);
+                for (int x = 0; x < w; x++)
+                {
+                    float dx = (x + 0.5f) - w / 2f;
+                    float d = Mathf.Sqrt(dx * dx + dy * dy);
+                    // Мягкий 1-пиксельный край: без него полукруг лесенкой на масштабе канваса.
+                    byte a = (byte)Mathf.RoundToInt(255f * Mathf.Clamp01(r - d + 0.5f));
+                    px[y * w + x] = new Color32(255, 255, 255, a);
+                }
+            }
+            tex.SetPixels32(px);
+            tex.Apply();
+            var s = UnityEngine.Sprite.Create(tex, new Rect(0, 0, w, h), new Vector2(0.5f, 1f), 100f);
+            s.name = "timer-dome";                 // имя видно в спрайт-переписи HUD-конформанса
+            return s;
+        }
+
+        // Тело «стрелки-кромки»: вертикальная полоска с МЯГКИМИ боковыми краями. Именно мягкость и даёт
+        // сглаживание — линия рисуется повёрнутой на произвольный угол, и без альфа-рампы её собственный
+        // край был бы такой же лесенкой, какую она пришла прятать. По высоте текстура однородна, так что
+        // растяжение по длине стрелки ничего не искажает.
+        private static UnityEngine.Sprite MakeDomeHandSprite()
+        {
+            const int w = 16, h = 4;
+            var tex = new Texture2D(w, h, TextureFormat.RGBA32, false)
+                { filterMode = FilterMode.Bilinear, wrapMode = TextureWrapMode.Clamp };
+            var px = new Color32[w * h];
+            const float edge = 2.5f;               // ширина мягкой каймы в текселях
+            for (int x = 0; x < w; x++)
+            {
+                float d = Mathf.Min(x + 0.5f, w - (x + 0.5f));          // расстояние до ближайшего края
+                byte alpha = (byte)Mathf.RoundToInt(255f * Mathf.Clamp01(d / edge));
+                for (int y = 0; y < h; y++) px[y * w + x] = new Color32(255, 255, 255, alpha);
+            }
+            tex.SetPixels32(px);
+            tex.Apply();
+            var s = UnityEngine.Sprite.Create(tex, new Rect(0, 0, w, h), new Vector2(0.5f, 1f), 100f);
+            s.name = "timer-dome-hand";            // имя видно в спрайт-переписи HUD-конформанса
+            return s;
+        }
+
+        // Отрисовать купол из (осталось, полная длина фазы). Единственная точка, где дуга и её цвет
+        // получают значения — и живой Update, и кризис, и скриншот-позы идут через неё.
+        private void ReflectDome(float remaining, float full)
+        {
+            if (_domeFill == null) return;
+            float amount = Mathf.Clamp01(remaining / Mathf.Max(0.0001f, full));
+            _domeFill.fillAmount = amount;
+            ReflectDomeHand(amount);
+            if (remaining <= DomeAlarmSeconds)
+            {
+                // ПОСЛЕДНЯЯ СЕКУНДА (§5a «тревожный / мигает»): краснеет и МИГАЕТ ВЕСЬ купол — не только
+                // куцый остаток дуги. На 10 % остатка красное иначе живёт лишь узкой кромкой у верхнего
+                // края (≈0.2 % экрана) и семантически слипается с красной зоной бара здоровья
+                // (дизайн-гейт). Теперь тревогу несёт весь силуэт 400×130, включая коридор между барами:
+                // остаток дуги = чистый RED_BRIGHT, а «истёкший» трек пульсирует CREAM ⇄ RED_BRIGHT.
+                // Фаза считается от ОСТАВШЕГОСЯ времени → это честное мигание (≈3 вспышки за секунду),
+                // детерминированное для кадра и теста; масштаб купола не трогаем.
+                float p = 0.5f + 0.5f * Mathf.Cos(remaining / DomeAlarmPulsePeriod * 2f * Mathf.PI);
+                _domeFill.color = DomeAlarm;
+                _domeTrack.color = Color.Lerp(Cream, DomeAlarm, p);
+            }
+            else
+            {
+                _domeFill.color = DomeYellow;
+                _domeTrack.color = Cream;
+            }
+        }
+
+        // Поставить «стрелку-кромку» ровно на границу радиальной заливки.
+        //
+        // Граница `Radial180` (origin = Top) — ПРЯМОЙ отрезок из центра купола в точку внутреннего
+        // эллипса: uGUI режет квадрант, лерпая x и y независимо, и конец реза при параметре θ = 90°·val
+        // приходится ровно в (±a·cos θ, b·sin θ) — параметрическую точку эллипса с полуосями
+        // a = ширина/2, b = глубина. Отсюда и длина стрелки, и её угол — без подгонки.
+        //   fill ≤ ½ (гаснет правая половина): val = 2·fill, знак x = +
+        //   fill > ½ (ещё тает левая):        val = 2 − 2·fill, знак x = −
+        private void ReflectDomeHand(float fillAmount)
+        {
+            if (_domeHand == null) return;
+            float a = (DomeW - 2f * DomeOutlineWidth) / 2f;    // полуоси ВНУТРЕННЕГО (залитого) эллипса
+            float b = DomeH - DomeOutlineWidth;
+            float sign = fillAmount <= 0.5f ? 1f : -1f;
+            float val = fillAmount <= 0.5f ? 2f * fillAmount : 2f - 2f * fillAmount;
+            float theta = Mathf.Clamp01(val) * 90f * Mathf.Deg2Rad;
+            float dx = sign * a * Mathf.Cos(theta);            // вправо
+            float dy = b * Mathf.Sin(theta);                   // ВНИЗ по экрану
+            float len = Mathf.Sqrt(dx * dx + dy * dy);
+            // На самых краях окна границы заливки внутри купола НЕТ (она совпадает с его собственным
+            // кантом), и стрелка выродилась бы в чёрточку вдоль верхнего края — артефакт на чистом
+            // полном/пустом куполе. В этих двух точках она просто не рисуется.
+            bool inside = fillAmount > 0.005f && fillAmount < 0.995f;
+            _domeHand.color = inside ? DomeInk : new Color(0f, 0f, 0f, 0f);
+            var rt = _domeHand.rectTransform;
+            rt.sizeDelta = new Vector2(DomeHandWidth, len);
+            // Спрайт нарисован «сверху вниз» (пивот в верхней точке), поэтому базовое направление —
+            // (0,−1) в локальных осях канваса (y вверх); экранный «вниз» dy → локальный −dy.
+            rt.localRotation = Quaternion.Euler(0f, 0f, Mathf.Atan2(-dy, dx) * Mathf.Rad2Deg + 90f);
         }
 
         // A small DRAWN «mute» icon (crossed speaker) baked to a runtime texture — a real sprite, never a

@@ -93,7 +93,7 @@ namespace ThanksNoThanks.Tests.PlayMode
         {
             // Afforded path: bank ≥ 60₽, then the SAME real BLOCK$ card is drawn affordable → «СТОИТ 60 ₽»
             // and no block banner. All steps are synchronous (no yields) so the driver's own Update never
-            // ticks mid-sequence — money stays banked and the 5s timer never fires.
+            // ticks mid-sequence — money stays banked and the card's phase timer (§3: 10/8/6 s) never fires.
             var driver = Boot(out var go, out var fake);
             yield return null;
             var g = BlockDeck();
