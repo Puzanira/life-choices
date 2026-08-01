@@ -262,6 +262,10 @@ namespace ThanksNoThanks.Tests.PlayMode
                 "маркер здоровья = ОРИГИНАЛЬНЫЙ чёрный человечек арт-пака (канон §12-1)");
             Assert.AreEqual("battery-bolt-v2", driver.EnergyBolt.sprite.name,
                 "молния батареи — отдельный слой (канон §12-3)");
+            Assert.AreEqual("energy-battery-alarm-v2", driver.BatteryAlarmImage.sprite.name,
+                "§4-тревога = ОФЛАЙН-перекрас той же батареи (палитра эталона), не тинт");
+            Assert.IsNotNull(Resources.Load<Sprite>("Sprites/star-burst-v2"),
+                "§6 салют рисуется звездой арт-пака (`v3_stars_flat` → star-burst-v2)");
             // The plate carries tabs mid-side and stars in the corners — a 9-slice would stretch both.
             Assert.AreEqual(Image.Type.Simple, driver.CardFrameImage.type,
                 "the choice plate draws Simple — NEVER 9-sliced (asset-map §1.1/§5)");
@@ -687,6 +691,23 @@ namespace ThanksNoThanks.Tests.PlayMode
                 Assert.AreEqual(Color.white, img.color,
                     what + " рисуется СВОИМИ цветами из спрайта (никакой тонировки под эталон)");
 
+            // …и это правило держится ИМЕННО В СПОКОЙНОМ ходе. §4-тревога — единственное исключение, и она
+            // красит ТОЛЬКО свои слои: банка/монета тонируются RED_BRIGHT, батарея получает отдельную
+            // красную копию, а ПЛАШКИ БАРОВ остаются нетронутыми (их тревога — кант вокруг).
+            driver.enabled = false;                       // дальше время подаём вручную
+            driver.DebugApplyAgeGates(34f);
+            driver.Game.Scales.Energy = 10;
+            driver.Game.Scales.Health = 10;
+            driver.Game.Scales.Relationships = 20;
+            driver.DebugPumpAlarms(0.02f);
+            Assert.IsTrue(driver.AlarmActive(AlarmScale.Energy), "энергия ушла в тревогу");
+            Assert.AreEqual(Color.white, driver.BatteryImage.color,
+                "спокойная батарея НЕ тонируется даже в тревоге — красное несёт отдельный слой");
+            Assert.IsTrue(driver.BatteryAlarmImage.gameObject.activeSelf, "…а он на экране");
+            Assert.AreEqual(Color.white, driver.HealthBarImage.color, "плашка бара здоровья не тонируется");
+            Assert.AreEqual(Color.white, driver.RelBarImage.color, "плашка бара отношений не тонируется");
+            Assert.AreEqual(Color.white, driver.EnergyBolt.color, "молния не тонируется (читаемость §4)");
+
             // INK = #0B0F1A from the tokens (asset-map §12-4), and it is what the dark copy actually uses.
             Assert.AreEqual(11f / 255f, GameDriver.InkToken.r, 0.002f, "INK.r = 0x0B");
             Assert.AreEqual(15f / 255f, GameDriver.InkToken.g, 0.002f, "INK.g = 0x0F");
@@ -1051,13 +1072,31 @@ namespace ThanksNoThanks.Tests.PlayMode
                 Assert.Less(lower.GetSiblingIndex(), upper.GetSiblingIndex(), what);
             }
 
-            // (1) battery: baked sprite → cream «empty» mask → yellow top-up (both overlays ABOVE the art).
-            Below(driver.BatteryImage.transform, driver.EnergyEmpty.transform,
+            // (1) battery: baked sprite → §4 alarm repaint → cream «empty» mask → yellow top-up → §4 charge
+            // band (все накладки ВЫШЕ арта), а молния — последней.
+            Below(driver.BatteryImage.transform, driver.BatteryAlarmImage.transform,
+                "§4: красная копия батареи рисуется ПОВЕРХ спокойной (иначе тревоги не видно)");
+            Below(driver.BatteryAlarmImage.transform, driver.EnergyEmpty.transform,
                 "кремовая маска рисуется ПОВЕРХ спрайта батареи (иначе виден запечённый уровень)");
             Below(driver.EnergyEmpty.transform, driver.EnergyTopUp.transform,
                 "жёлтый добор рисуется поверх кремовой маски");
-            Below(driver.EnergyTopUp.transform, driver.EnergyBolt.transform,
-                "молния рисуется ПОСЛЕДНЕЙ — целиком, на любом уровне заливки (канон §12-3)");
+            Below(driver.EnergyTopUp.transform, driver.EnergyCharge.transform,
+                "§4: тревожная полоса остатка заряда — поверх заливки, иначе из-под красного торчала бы "
+                + "жёлтая запечённая заливка спрайта");
+            Below(driver.EnergyCharge.transform, driver.EnergyBolt.transform,
+                "молния рисуется ПОСЛЕДНЕЙ — целиком, на любом уровне заливки (канон §12-3), "
+                + "и поэтому читается на красной батарее");
+
+            // (1b) §4 канты баров лежат ПОЗАДИ своих плашек — тревога торчит рамкой ВОКРУГ виджета,
+            // а не тонирует бар (иначе она читалась бы как «маркер в нарисованной красной зоне»).
+            Below(driver.HealthAlarmKantInk.transform, driver.HealthAlarmKant.transform,
+                "§4: чёрная обводка канта здоровья — ПОД красным (видна кольцом снаружи)");
+            Below(driver.HealthAlarmKant.transform, driver.HealthBarImage.transform,
+                "§4: кант тревоги здоровья — под баром");
+            Below(driver.RelAlarmKantInk.transform, driver.RelAlarmKant.transform,
+                "§4: чёрная обводка канта отношений — ПОД красным");
+            Below(driver.RelAlarmKant.transform, driver.RelBarImage.transform,
+                "§4: кант тревоги отношений — под баром");
 
             // (2) card: frame → question → BLOCK$ banner → price plate → price text.
             var card = driver.CardRect;

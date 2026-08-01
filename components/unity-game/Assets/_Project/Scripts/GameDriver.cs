@@ -6,6 +6,22 @@ using UnityEngine.UI;
 namespace ThanksNoThanks
 {
     /// <summary>
+    /// Шкалы, у которых есть КРАСНАЯ ТРЕВОГА (meeting-revisions §4 / build-spec §F). Чисто визуальный
+    /// перечень — механика этих шкал живёт в <see cref="Game"/> и тревогой не меняется.
+    /// </summary>
+    public enum AlarmScale
+    {
+        /// <summary>Энергия &lt; 20 % — батарея краснеет целиком (эталон «Экран подсвечена красным шкала.png»).</summary>
+        Energy,
+        /// <summary>Здоровье &lt; 20 % — красный кант вокруг бара.</summary>
+        Health,
+        /// <summary>Отношения вне механической зоны 40–75 % — красный кант вокруг бара.</summary>
+        Relations,
+        /// <summary>Денег не хватает на BLOCK$-карточку — банка и её лейбл краснеют.</summary>
+        Money,
+    }
+
+    /// <summary>
     /// MonoBehaviour driver for «Спасибо, не надо». Owns the pure <see cref="Game"/>, wires an
     /// <see cref="IInputSource"/> (an <see cref="ArcadeInputSource"/> reading the shared arcade-controls
     /// layer by default; a fake can be injected for tests), and
@@ -124,11 +140,21 @@ namespace ThanksNoThanks
         // cavity (the lightning bolt) survives untouched.
         private Image _energyEmpty;
         private Image _energyTopUp;
+        // §4-тревога: «заряд» — полоса от живого уровня до ДНА полости. В спокойном ходе она не нужна
+        // (там ниже уровня видна запечённая жёлтая заливка спрайта) и держится прозрачной; в тревоге
+        // именно она красит остаток заряда в #FF0506, а `_energyEmpty` — пустоту в #FF3736.
+        private Image _energyCharge;
+        private Image _batteryAlarm;       // §4: красная копия батареи, кроссфейдится поверх спокойной
         private Image _energyBolt;         // the art's lightning, its own layer above the fill (§12-3)
+        private float _energyShown = 100f; // последнее НАРИСОВАННОЕ значение энергии (позы = живой ход)
         // Bar markers: the art's own health marker was a BAKED silhouette (patched out, asset-map §11-3), so
         // both bars carry OUR marker, drawn in the same flat-black figure style, positioned through the
         // non-linear value→track map (§11-2/4).
         private Image _relBarImg, _healthBarImg;
+        // §4-тревога баров: НЕ тонировка плашки, а КРАСНЫЙ КАНТ вокруг всего виджета (см. ReflectAlarms).
+        private Image _relKant, _healthKant;
+        // …и чёрное кольцо СНАРУЖИ красного — тот же keyline, что несёт весь арт-пак (полиш дизайн-гейта).
+        private Image _relKantInk, _healthKantInk;
         private RectTransform _balancerMarker;
         private Image _balancerMarkerImg;  // tinted red in the >75 % «красная зона»
         private RectTransform _healthMarker;
@@ -188,6 +214,76 @@ namespace ThanksNoThanks
         /// времени, и закрывает лесенку `Image.Filled` (единственный несглаженный край HUD, дизайн-гейт).
         /// </summary>
         public const float DomeHandWidth = 3f;
+
+        // ---- КРАСНЫЕ ТРЕВОГИ ШКАЛ (revisions §4 / build-spec §F) ------------------------------------
+        // Пороги — ДЕФОЛТ ИЗ СПЕКА, тюнятся. Механика не трогается: Game ничего про тревогу не знает,
+        // это чистое отображение поверх тех же чисел.
+        //
+        // ГИСТЕРЕЗИС. Порог «сырьём» дребезжит: энергия/здоровье тают долями процента в секунду и на
+        // границе 20 шкала за секунду успевает перейти её несколько раз (а отношения на 40 ещё и
+        // тянутся рычагом вверх-вниз). Поэтому тревога ВКЛЮЧАЕТСЯ на спековом пороге и ВЫКЛЮЧАЕТСЯ
+        // на пороге, отодвинутом внутрь нормы на <see cref="AlarmHysteresis"/> — числа тюнимые.
+        /// <summary>Энергия/здоровье: тревога ВКЛЮЧАЕТСЯ ниже этого (спек §4, тюнится).</summary>
+        public const float AlarmScaleOnBelow = 20f;
+        /// <summary>Ширина гистерезиса, п.п.: выключение — на «порог ± столько» внутрь нормы (тюнится).</summary>
+        public const float AlarmHysteresis = 2f;
+        /// <summary>Период пульса яркости, с (спек §4/§6: синус ~0.7 с).</summary>
+        public const float AlarmPulsePeriod = 0.7f;
+        /// <summary>Яркость в ПРОВАЛЕ пульса (1.0 = полная) — тревога «дышит», а не мигает выключателем.</summary>
+        public const float AlarmPulseMin = 0.72f;
+        /// <summary>Возврат в норму: подсветка гаснет плавным фейдом за столько секунд (спек §4: ~0.2 с).</summary>
+        public const float AlarmFadeSeconds = 0.2f;
+        /// <summary>
+        /// Окно «живого ввода по шкале», с (тюнится). Салют (§6) даётся только за КАЛИБРОВКУ игроком:
+        /// шкала вышла из тревоги, и по ЭТОЙ шкале был ввод игрока за последние столько секунд. Отсюда
+        /// же и различение «не на рестарте / не на смене карточки» — там ввода по шкале не было.
+        /// </summary>
+        public const float AlarmRecentInputSeconds = 2f;
+        // Палитра тревожной батареи снята ИНСТРУМЕНТАЛЬНО с пары эталонов (спокойный ↔ тревожный,
+        // одна и та же батарея): крем полости → #FF3736, жёлтая заливка → #FF0506, синяя рамка →
+        // #CE183B. Рамку тинтом не получить (uGUI умножает, синее под красным множителем чернеет),
+        // поэтому тревожная батарея — отдельный ОФЛАЙН-перекрашенный спрайт `energy-battery-alarm-v2`
+        // той же геометрии (scratchpad/make_battery_alarm.py), а полость дорисовывается этими двумя.
+        private static readonly Color AlarmCavityEmpty = new(255f / 255f, 55f / 255f, 54f / 255f);  // #FF3736
+        private static readonly Color AlarmCavityCharge = new(255f / 255f, 5f / 255f, 6f / 255f);   // #FF0506
+        /// <summary>Токены тревожной полости, открытые тесту (эталон «Экран подсвечена красным шкала.png»).</summary>
+        public static Color AlarmCavityEmptyToken => AlarmCavityEmpty;
+        public static Color AlarmCavityChargeToken => AlarmCavityCharge;
+        /// <summary>Толщина красного канта вокруг бара, реф-px (кант выходит за нарисованный бокс бара).</summary>
+        public const float AlarmKantPad = 13f;
+        /// <summary>Толщина ЧЁРНОЙ обводки СНАРУЖИ красного канта, реф-px (полиш дизайн-гейта). Весь
+        /// арт-пак несёт чёрный keyline, и кант был единственной фигурой на экране без него — голый
+        /// красный упирался прямо в лучи фона. 4 px — верх запрошенного дизайном коридора 3–4: у спрайта
+        /// `bar-track` край мягкий (~1 px AA с каждой стороны), и на 3 px в кадре оставалась ОДНА
+        /// сплошная чёрная строка — вдвое тоньше собственного keyline баров; на 4 их две, ровно как у
+        /// арта. Углы соосны (тот же спрайт, тот же радиус); на диагонали кольцо шире в √2 — это
+        /// геометрия раздутия скруглённого прямоугольника с постоянным радиусом, а не рассинхрон.</summary>
+        public const float AlarmKantInk = 4f;
+        // НАРИСОВАННЫЕ боксы баров (asset-map §2) — кант строится от них, а не от рект-боксов: у спрайтов
+        // прозрачные поля, и кант от ректа висел бы в воздухе, не касаясь плашки.
+        public const float RelBarDrawnCx = 674.5f, RelBarDrawnCy = 101f, RelBarDrawnW = 523f, RelBarDrawnH = 132f;
+        public const float HealthBarDrawnCx = 1294f, HealthBarDrawnCy = 101.5f, HealthBarDrawnW = 504f, HealthBarDrawnH = 127f;
+
+        // ---- САЛЮТ ЗВЁЗД (revisions §6 / build-spec §6, слой 7 — поверх всего) -----------------------
+        /// <summary>База сида: сид бёрста = база + номер бёрста, т.е. разлёт ДЕТЕРМИНИРОВАН и повторим в тесте.</summary>
+        public const int StarBurstSeedBase = 20260731;
+        /// <summary>Сколько звёзд в бёрсте (спек §6: 4–5).</summary>
+        public const int StarBurstMin = 4, StarBurstMax = 5;
+        /// <summary>Базовый кегль звезды, реф-px; множители — спековые 0.6/0.8/1.0/1.2×.</summary>
+        public const float StarBaseSize = 130f;
+        private static readonly float[] StarSizeScales = { 1.0f, 0.6f, 1.2f, 0.8f, 1.0f };
+        /// <summary>Разлёт из центра экрана, реф-px. Верх подобран так, чтобы звезда доходила до края
+        /// кадра (полукадр 540 по высоте) уже ПОЧТИ прозрачной — обрезанных краем звёзд в кадре нет.</summary>
+        public const float StarTravelMin = 380f, StarTravelMax = 560f;
+        /// <summary>Длительность разлёта, с (спек §6: 0.6–0.9 с).</summary>
+        public const float StarFlightMin = 0.6f, StarFlightMax = 0.9f;
+        /// <summary>Лёгкое вращение за полёт, град.</summary>
+        public const float StarSpinMin = 40f, StarSpinMax = 150f;
+        /// <summary>До этой доли полёта звезда держит ПОЛНУЮ альфу, дальше — затухание в ноль. Держим
+        /// больше половины: на 0.35 салют уже в середине разлёта выцветал в бледные пятна (свой кадр).</summary>
+        public const float StarHoldFraction = 0.55f;
+        /// <summary>Поза для кадра дизайн-гейта: середина разлёта (все звёзды ещё в воздухе и в полную силу).</summary>
+        public const float StarPreviewSeconds = 0.3f;
 
         // Inner boxes, straight from asset-map §8 (screen px @1920×1080; x/y are LEFT/TOP edges).
         /// <summary>Battery cavity — the fill box: x, yTop, w, h.</summary>
@@ -338,6 +434,9 @@ namespace ThanksNoThanks
         // Baked cavity colours, sampled off `energy-battery-v2`: cream «empty», saturated yellow «full».
         private static readonly Color BatteryCream = new(253f / 255f, 249f / 255f, 230f / 255f);
         private static readonly Color BatteryYellow = new(254f / 255f, 210f / 255f, 1f / 255f);
+        /// <summary>Спокойные цвета полости, открытые тесту: тревога обязана ВЕРНУТЬ ровно их.</summary>
+        public static Color BatteryCreamToken => BatteryCream;
+        public static Color BatteryYellowToken => BatteryYellow;
 
         // ---- child button (opens on MD02=ДА, not age-gated; flashes on the signal-response window) ----
         private GameObject _childGroup;    // whole widget; shown while Game.ChildOpen, hidden after LT04
@@ -450,6 +549,39 @@ namespace ThanksNoThanks
         // Breath rhythm validator (E in a calm cadence → valid pulse → +energy). Clock advanced in Update.
         private readonly BreathRhythm _breath = new();
 
+        // ---- §4 тревоги: состояние на 4 шкалы (индекс = (int)AlarmScale) -----------------------------
+        private const int AlarmCount = 4;
+        private readonly bool[] _alarmOn = new bool[AlarmCount];
+        /// <summary>Время В ТРЕВОГЕ, с — от него берётся фаза пульса. НЕ Time.time: на паузе часы стоят,
+        /// поэтому пульс детерминирован для кадра/теста и честно замирает вместе с игрой (как купол §5a).</summary>
+        private readonly float[] _alarmClock = new float[AlarmCount];
+        /// <summary>Вес подсветки: 1 в тревоге, гаснет до 0 за <see cref="AlarmFadeSeconds"/> (плавный фейд).</summary>
+        private readonly float[] _alarmWeight = new float[AlarmCount];
+        /// <summary>Секунд с последнего ввода игрока ПО ЭТОЙ шкале — окно §6-триггера салюта.</summary>
+        private readonly float[] _sinceScaleInput = new float[AlarmCount];
+        /// <summary>Карточка, которую видел ПРЕДЫДУЩИЙ такт <see cref="ReflectAlarms"/>. Смена карточки —
+        /// это «тревога денег погасла сама», а не починка игроком (см. ReflectAlarms).</summary>
+        private Card _lastReflectCard;
+
+        // ---- §6 салют звёзд ---------------------------------------------------------------------------
+        private GameObject _fxLayer;      // слой 7 — поверх всего (build-spec §1.3)
+        private Sprite _starSprite;
+        private int _burstCount;          // счётчик бёрстов = сид (детерминированный разлёт)
+        private readonly List<Star> _stars = new();
+
+        /// <summary>Одна летящая звезда салюта. Продвигается ШАГОМ ВРЕМЕНИ (AdvanceStars), не корутиной:
+        /// так бёрст детерминирован, позируется для кадра и переживает заморозку драйвера.</summary>
+        private struct Star
+        {
+            public RectTransform Rt;
+            public Image Img;
+            public Vector2 Dir;     // единичное направление разлёта
+            public float Dist;      // сколько реф-px пролетит
+            public float Dur;       // за сколько секунд
+            public float Spin;      // поворот за полёт, град (знак — сторона)
+            public float T;         // прожито, с
+        }
+
         // ---- Host (Ведущий): speech bubble (S3) + rubric banner (S4) ----
         // Tunables (defaults; noted in the report). Both clocks are injected real-time via Update.
         public const float BubbleSeconds = 2f;   // speech bubble auto-hide (~2s)
@@ -540,10 +672,36 @@ namespace ThanksNoThanks
         /// <summary>Cream «empty» rect over the battery cavity — its BOTTOM edge is the energy reading.</summary>
         public Image EnergyEmpty => _energyEmpty;
         public Image EnergyTopUp => _energyTopUp;
+        /// <summary>§4: полоса «остаток заряда» от живого уровня до дна полости — красная только в тревоге.</summary>
+        public Image EnergyCharge => _energyCharge;
+        /// <summary>§4: тревожная (красная) копия батареи — кроссфейдится поверх спокойной по весу тревоги.</summary>
+        public Image BatteryAlarmImage => _batteryAlarm;
         /// <summary>The lightning layer — drawn whole above the mask and the top-up at every level.</summary>
         public Image EnergyBolt => _energyBolt;
         public GameObject BalancerGroup => _balancerGroup;
         public Image RelBarImage => _relBarImg;
+        /// <summary>§4: красный кант вокруг бара отношений (альфа = вес тревоги).</summary>
+        public Image RelAlarmKant => _relKant;
+        /// <summary>§4: красный кант вокруг бара здоровья.</summary>
+        public Image HealthAlarmKant => _healthKant;
+        /// <summary>§4: чёрное кольцо СНАРУЖИ красного канта отношений (keyline арт-пака).</summary>
+        public Image RelAlarmKantInk => _relKantInk;
+        /// <summary>§4: чёрное кольцо СНАРУЖИ красного канта здоровья.</summary>
+        public Image HealthAlarmKantInk => _healthKantInk;
+        /// <summary>§4: шкала СЕЙЧАС в тревоге (после гистерезиса).</summary>
+        public bool AlarmActive(AlarmScale s) => _alarmOn[(int)s];
+        /// <summary>§4: вес подсветки 0…1 — 1 в тревоге, гаснет за <see cref="AlarmFadeSeconds"/>.</summary>
+        public float AlarmWeight(AlarmScale s) => _alarmWeight[(int)s];
+        /// <summary>§4: часы «сколько шкала в тревоге» — источник ДЕТЕРМИНИРОВАННОЙ фазы пульса.</summary>
+        public float AlarmClock(AlarmScale s) => _alarmClock[(int)s];
+        /// <summary>§4: текущая яркость пульса 0.72…1.0 (функция от <see cref="AlarmClock"/>, не от Time.time).</summary>
+        public float AlarmPulseBrightness(AlarmScale s) => AlarmBrightness((int)s);
+        /// <summary>§6: сколько бёрстов салюта уже отстреляно (он же сид следующего).</summary>
+        public int StarBurstCount => _burstCount;
+        /// <summary>§6: сколько звёзд ЛЕТИТ прямо сейчас (0 = салют самоочистился).</summary>
+        public int ActiveStarCount => _stars.Count;
+        /// <summary>§6: слой FX (build-spec §1.3 — слой 7, поверх всего).</summary>
+        public GameObject StarLayer => _fxLayer;
         /// <summary>Жёлтая дуга-остаток купола (Radial180) — то, что реально убывает за таймер фазы.</summary>
         public Image TimerDomeFill => _domeFill;
         /// <summary>Кремовая «истёкшая» часть купола под дугой.</summary>
@@ -791,6 +949,48 @@ namespace ThanksNoThanks
             else ReflectDome(1.5f, 6f);
         }
 
+        /// <summary>
+        /// Screenshot pose (§4): обычный кадр, но ВСЕ ЧЕТЫРЕ шкалы в тревоге и пульс стоит на ПИКЕ
+        /// (фаза 0 — детерминированно и воспроизводимо). Энергия 12 % — та самая поза эталона
+        /// «Экран подсвечена красным шкала.png»: красная батарея с тонкой полосой остатка внизу.
+        /// Деньги в тревоге бывают только на BLOCK$-карточке, поэтому пришлось поднять и её баннер.
+        /// Только визуал: чистый Game не трогается.
+        /// </summary>
+        public void DebugPreviewAlarms()
+        {
+            DebugPreviewArcadeShot();                  // обычный кадр, драйвер заморожен
+            ReflectEnergyLevel(12f);
+            ReflectHealthMarker(14f);
+            ReflectRelationsMarker(28f, redZone: false);
+            _moneyText.text = FormatMoneyJar(0);
+            _cardText.text = "Пора подлечиться!";
+            SetCardBlockedDim(true);
+            _blockBanner.SetActive(true);
+            ApplyPriceLabel(true, 100, blocked: true);
+            _yesPlate.color = PlateMute; _noPlate.color = PlateMute;
+            for (int i = 0; i < AlarmCount; i++)
+            {
+                _alarmOn[i] = true;
+                _alarmWeight[i] = 1f;
+                _alarmClock[i] = 0f;                   // пик пульса
+                PaintAlarm((AlarmScale)i, 1f, AlarmBrightness(i));
+            }
+            enabled = false;
+        }
+
+        /// <summary>
+        /// Screenshot pose (§6): обычный кадр + бёрст салюта, отмотанный на СЕРЕДИНУ разлёта
+        /// (<see cref="StarPreviewSeconds"/>) — все 4–5 звёзд ещё в воздухе, видно калибры и разлёт.
+        /// Разлёт детерминирован сидом, поэтому кадр воспроизводим.
+        /// </summary>
+        public void DebugPreviewStarBurst()
+        {
+            DebugPreviewArcadeShot();
+            StarBurst();
+            AdvanceStars(StarPreviewSeconds);
+            enabled = false;
+        }
+
         /// <summary>Layer-2 seam: нарисовать купол по произвольной паре (осталось, полная длина) —
         /// ровно тем же путём, каким это делает Update.</summary>
         public void DebugReflectDome(float remaining, float full) => ReflectDome(remaining, full);
@@ -806,7 +1006,36 @@ namespace ThanksNoThanks
             if (_game.State != GameState.Playing) return;
             if (_game.InCrisis) ReflectDome(Mathf.Max(0f, _game.CrisisTimer), _game.CrisisTimerMax);
             else ReflectDome(Mathf.Max(0f, _game.CardTimer), _game.CardTimerMax);
+            UpdateHudValues();      // живые шкалы на HUD — тот же путь, что у Update
+            ReflectAlarms(dt);      // …и §4/§6 поверх них
         }
+
+        /// <summary>Layer-2 seam: продвинуть §4-тревоги и §6-салют на dt для замороженного драйвера
+        /// (позы/кадры), где Update не крутится. Живые шкалы перерисовываются тем же вызовом, что в
+        /// Update, — иначе тревожная заливка строилась бы от УСТАРЕВШЕГО уровня.</summary>
+        public void DebugPumpAlarms(float dt)
+        {
+            if (_game != null && _game.State == GameState.Playing) UpdateHudValues();
+            ReflectAlarms(dt);
+        }
+
+        /// <summary>Layer-2 seam: отметить «ввод игрока по этой шкале был прямо сейчас» (окно §6).</summary>
+        public void DebugNoteScaleInput(AlarmScale s) => NoteScaleInput(s);
+
+        /// <summary>Layer-2 seam: сколько секунд прошло с последнего ЗАСЧИТАННОГО ввода по шкале (окно §6).
+        /// Тест смотрит именно на него, чтобы отличить «нажал» от «механика приняла».</summary>
+        public float SinceScaleInput(AlarmScale s) => _sinceScaleInput[(int)s];
+
+        /// <summary>Layer-2 seam: продвинуть ДЕТЕРМИНИРОВАННЫЕ часы гейтов ввода (кэп дохода крутилки и
+        /// ритм дыхания) — ровно тем же вызовом, что и Update, для замороженного драйвера.</summary>
+        public void DebugAdvanceInputClocks(float dt)
+        {
+            _crankCap.Advance(dt);
+            _breath.Advance(dt);
+        }
+
+        /// <summary>Layer-2 seam: продвинуть летящие звёзды на dt (проверка самоочистки).</summary>
+        public void DebugAdvanceStars(float dt) => AdvanceStars(dt);
 
         // Set the three finale texts and size the story plate to its content (short story → compact plate).
         private void RenderFinaleTexts(NecrologResult n)
@@ -981,6 +1210,13 @@ namespace ThanksNoThanks
                                              // during Playing, so GREEN (ДА) is the catch — otherwise the
                                              // depression mini-game would be unwinnable on the cabinet.
 
+            // §6-окно: запомнить, что игрок ТОЛЬКО ЧТО работал по этой шкале. Здесь — только вводы БЕЗ
+            // механического гейта (рычаг отношений, ответ на карточку). Крутилка и дыхание отмечаются
+            // НЕ здесь, а в своих ветках ниже — ровно на ПРИНЯТОМ механикой событии (после кэпа дохода /
+            // после ритм-гейта): салют даётся за КАЛИБРОВКУ, а «нажал, но механика отвергла» калибровкой
+            // не является и окно §6 открывать не должно (иначе мэшинг ручкой/дыханием выпрашивает салют).
+            if (_game.State == GameState.Playing && !_tutorialShowing) NoteScaleInput(input);
+
             if (_tutorialShowing)
             {
                 // FOUNDER DECISION (Gate-2 playtest, re-mapped by 99fab3c): a hint dismisses on the
@@ -1001,6 +1237,8 @@ namespace ThanksNoThanks
                 if (_game.State != GameState.Playing) return;
                 if (!_crankCap.TryAccept()) return;         // income cap (anti-mashgun) — gameplay only
                 _game.HandleInput(GameInput.MoneyTick);     // Game sees only the semantic crank event
+                NoteScaleInput(AlarmScale.Money);           // §6-окно — ровно по ПРИНЯТОМУ тику (тем же
+                                                            // путём, каким тик уходит в Game.Crank)
                 if (_game.MoneyOpen && isActiveAndEnabled)  // coin drops into the jar on each PAYING tick
                 {
                     if (_moneyPulse != null) StopCoroutine(_moneyPulse);
@@ -1014,7 +1252,13 @@ namespace ThanksNoThanks
                 // Rhythm gate lives HERE (pure BreathRhythm): Game receives the pulse only on a valid
                 // cadence, so mashing / sparse taps never restore energy. Inert outside live gameplay.
                 if (_game.State != GameState.Playing) return;
-                if (_breath.Pulse()) _game.HandleInput(GameInput.EnergyPulse);
+                if (_breath.Pulse())
+                {
+                    _game.HandleInput(GameInput.EnergyPulse);
+                    NoteScaleInput(AlarmScale.Energy);      // §6-окно — только по ПРОПУЩЕННОМУ ритм-гейтом
+                                                            // импульсу: мэшинг ничего не восстанавливает и
+                                                            // салют выпрашивать не должен
+                }
                 return;
             }
 
@@ -1121,6 +1365,10 @@ namespace ThanksNoThanks
             ReflectHostReveals(_game.State == GameState.Playing);   // advances the banner-beat clock + pause
             ReflectBannerBeat();                                    // hide the card/plates while the beat is up
             ReflectBreakupPlate(_game.State == GameState.Playing);
+            // §4/§6 — ПОСЛЕ ReflectBannerBeat (тот прячет ряд HUD, а спрятанная шкала тревогу не несёт)
+            // и до вейлей: депрессия/выгорание/яркость рисуются выше и накрывают подсветку, как и просит
+            // спек («вейлы поверх»).
+            ReflectAlarms(Time.deltaTime);
             UpdateBrightness();
             ReflectDepression();   // B&W wash + grain + pulse while Game.InDepression (above the show veil)
         }
@@ -1436,7 +1684,11 @@ namespace ThanksNoThanks
 
             BuildDepressionOverlay(canvasGo.transform);  // B&W wash + grain + pulse (above the show veil)
 
-            BuildTutorialOverlay(canvasGo.transform);   // top-most: dims every screen when up
+            BuildTutorialOverlay(canvasGo.transform);   // dims every screen when up
+
+            // §6 салют — build-spec §1.3 слой 7, ПОВЕРХ ВСЕГО (включая модалку туториала: та поднимает
+            // себя в конец на показе, поэтому бёрст тоже поднимает свой слой на каждом выстреле).
+            BuildStarLayer(canvasGo.transform);
         }
 
         // ---- S1 opener geometry, MEASURED off `explainers/Стартовый экран.png` -------------------------
@@ -2077,12 +2329,25 @@ namespace ThanksNoThanks
             _energyGroup = NewGroup("EnergyGroup", _hudRow.transform);
             _batteryImg = NewSprite("Battery", _energyGroup.transform, Sprite("energy-battery-v2"));
             AnchorPx(_batteryImg.rectTransform, BatteryRect.x, BatteryRect.y, BatteryRect.z, BatteryRect.w);
+            // §4-ТРЕВОГА: та же батарея, ОФЛАЙН перекрашенная в палитру эталона (`energy-battery-alarm-v2`,
+            // scratchpad/make_battery_alarm.py). Тот же спрайтовый размер и тот же рект → кроссфейд по альфе
+            // не двигает ни пикселя, а синяя рамка честно становится красной (тинтом это недостижимо:
+            // uGUI умножает, и синее под красным множителем уходит в чёрный). Прозрачна вне тревоги.
+            _batteryAlarm = NewSprite("BatteryAlarm", _energyGroup.transform, Sprite("energy-battery-alarm-v2"));
+            AnchorPx(_batteryAlarm.rectTransform, BatteryRect.x, BatteryRect.y, BatteryRect.z, BatteryRect.w);
+            _batteryAlarm.color = new Color(1f, 1f, 1f, 0f);
+            _batteryAlarm.gameObject.SetActive(false);
             // Sibling order IS the z-order and is asserted (HudConformanceTests): baked battery sprite →
-            // cream «empty» mask → yellow top-up. Both overlays draw ABOVE the sprite (otherwise the baked
-            // 75.1 % level would show through), and the top-up draws last so the live level always wins on
-            // the level line itself.
+            // alarm repaint → cream «empty» mask → yellow top-up → alarm charge band. Every overlay draws
+            // ABOVE the sprite (otherwise the baked 75.1 % level would show through), and the top-up draws
+            // after the mask so the live level always wins on the level line itself.
             _energyEmpty = NewSolid("EnergyEmpty", _energyGroup.transform, BatteryCream);
             _energyTopUp = NewSolid("EnergyTopUp", _energyGroup.transform, BatteryYellow);
+            // «Остаток заряда» — от живого уровня до ДНА полости. В спокойном ходе прозрачна (там всё уже
+            // нарисовано запечённой заливкой спрайта); в тревоге это она красит заряд в #FF0506, иначе под
+            // красной батареей осталась бы жёлтая полоска запечённой заливки (эталон её не знает).
+            _energyCharge = NewSolid("EnergyCharge", _energyGroup.transform, BatteryYellow);
+            _energyCharge.gameObject.SetActive(false);
             // The lightning is its OWN layer (founder canon §12-3): patched out of the baked fill and drawn
             // last, so it reads WHOLE at every level instead of being half-swallowed by the cream mask. Its
             // own cream body + INK outline is what keeps it contrasty on both cream and yellow.
@@ -2097,6 +2362,8 @@ namespace ThanksNoThanks
         private void BuildRelBar()
         {
             _balancerGroup = NewGroup("Balancer", _hudRow.transform);
+            _relKant = NewAlarmKant("RelAlarmKant", _balancerGroup.transform,
+                RelBarDrawnCx, RelBarDrawnCy, RelBarDrawnW, RelBarDrawnH, out _relKantInk);
             _relBarImg = NewSprite("RelBar", _balancerGroup.transform, Sprite("rel-bar-v2"));
             AnchorPx(_relBarImg.rectTransform, RelBarRect.x, RelBarRect.y, RelBarRect.z, RelBarRect.w);
             _balancerMarkerImg = NewSprite("Marker", _balancerGroup.transform, Sprite("rel-marker-heart-v2"));
@@ -2110,6 +2377,8 @@ namespace ThanksNoThanks
         private void BuildHealthBar()
         {
             _healthGroup = NewGroup("HealthGroup", _hudRow.transform);
+            _healthKant = NewAlarmKant("HealthAlarmKant", _healthGroup.transform,
+                HealthBarDrawnCx, HealthBarDrawnCy, HealthBarDrawnW, HealthBarDrawnH, out _healthKantInk);
             _healthBarImg = NewSprite("HealthBar", _healthGroup.transform, Sprite("health-bar-v2"));
             AnchorPx(_healthBarImg.rectTransform, HealthBarRect.x, HealthBarRect.y, HealthBarRect.z, HealthBarRect.w);
             _healthMarkerImg = NewSprite("Marker", _healthGroup.transform, Sprite("health-marker-v2"));
@@ -2213,6 +2482,7 @@ namespace ThanksNoThanks
         // between the sprite's baked level and a higher one. energy is 0…100.
         private void ReflectEnergyLevel(float energy)
         {
+            _energyShown = energy;               // §4: тревожная полоса заряда строится от ТОГО ЖЕ уровня
             float p = Mathf.Clamp01(energy / 100f);
             float levelTop = CavityTop + CavityH * (1f - p);     // screen y of the level line
             float emptyH = Mathf.Max(0f, levelTop - CavityTop);
@@ -2243,6 +2513,342 @@ namespace ThanksNoThanks
             // the risk is flagged on the MARKER alone.
             var tint = redZone ? TimerRed : Color.white;
             if (_balancerMarkerImg.color != tint) _balancerMarkerImg.color = tint;
+        }
+
+        // ================================================================ §4 · КРАСНЫЕ ТРЕВОГИ ШКАЛ
+        //
+        // ВЫБРАННЫЕ СПОСОБЫ ПОДСВЕТКИ (решение владельца инкремента, задача §1):
+        //   • ЭНЕРГИЯ — ПЕРЕКРАС. Батарея краснеет ЦЕЛИКОМ, ровно как на эталоне «Экран подсвечена
+        //     красным шкала.png»: офлайн-перекрашенная копия спрайта кроссфейдится поверх спокойной
+        //     (рамка #CE183B), а полость дорисовывается кодом — пустота #FF3736, остаток заряда #FF0506.
+        //     Молния остаётся СВОИМ кремовым слоем поверх всего: на красном она читается лучше, чем
+        //     красная-на-красной эталона, и задача просит именно читаемости.
+        //   • ЗДОРОВЬЕ и ОТНОШЕНИЯ — КРАСНЫЙ КАНТ вокруг виджета, НЕ тонировка плашки. Причина —
+        //     различимость: у обоих баров есть СВОИ нарисованные красные зоны (#FF150B у здоровья,
+        //     #F02120 у отношений), и тонировка плашки читалась бы как «маркер заехал в красное», то
+        //     есть как ПОЗИЦИЯ. Кант обводит ВЕСЬ виджет снаружи чёрной обводки — это структурно другая
+        //     фигура, её нельзя спутать с зоной внутри бара, и она читается как СОСТОЯНИЕ.
+        //   • ДЕНЬГИ — ПЕРЕКРАС банки и её лейбла (спек §4 «банка/лейбл краснеет»): банка и монета
+        //     тонируются RED_BRIGHT. Кремовый лейбл — часть спрайта банки, поэтому краснеет вместе с
+        //     ней; сумма на нём остаётся INK и читается.
+        //
+        // ПУЛЬС: яркость = синус периода 0.7 с, фаза берётся от `_alarmClock` — времени В ТРЕВОГЕ, а не
+        // от Time.time. Часы стоят на паузе (туториал/баннер-бит), поэтому пульс замирает вместе с игрой
+        // и полностью детерминирован для кадра и теста — тот же приём, что у купола §5a.
+        //
+        // ГИСТЕРЕЗИС: включение на спековом пороге, выключение — на пороге, отодвинутом внутрь нормы на
+        // AlarmHysteresis (2 п.п.). Без него шкала, ползущая по границе, мигала бы каждые пол-секунды.
+
+        /// <summary>Красный кант тревоги: скруглённая плашка `bar-track` ПОЗАДИ бара, раздутая на
+        /// <see cref="AlarmKantPad"/> вокруг НАРИСОВАННОГО бокса бара. Невидима вне тревоги (альфа 0).
+        /// Собирается ПАРОЙ: сначала чёрное кольцо (та же плашка, ещё на <see cref="AlarmKantInk"/> шире,
+        /// тонированная в INK), поверх — красное. Так у канта появляется тот же чёрный keyline, что несёт
+        /// весь арт-пак, и красное не упирается голым краем в лучи фона (полиш дизайн-гейта).</summary>
+        private Image NewAlarmKant(string name, Transform parent, float cx, float cy, float w, float h,
+                                   out Image ink)
+        {
+            ink = NewSprite(name + "Ink", parent, Sprite("bar-track"));
+            ink.type = Image.Type.Sliced;
+            AnchorPx(ink.rectTransform, cx, cy,
+                w + 2f * (AlarmKantPad + AlarmKantInk), h + 2f * (AlarmKantPad + AlarmKantInk));
+            ink.color = new Color(1f, 1f, 1f, 0f);
+            ink.gameObject.SetActive(false);
+
+            var img = NewSprite(name, parent, Sprite("bar-track"));
+            img.type = Image.Type.Sliced;
+            AnchorPx(img.rectTransform, cx, cy, w + 2f * AlarmKantPad, h + 2f * AlarmKantPad);
+            img.color = new Color(1f, 1f, 1f, 0f);
+            img.gameObject.SetActive(false);
+            return img;
+        }
+
+        /// <summary>Множитель яркости, гасящий цвет и НЕ трогающий альфу.</summary>
+        private static Color Dim(Color c, float k) => new(c.r * k, c.g * k, c.b * k, c.a);
+
+        /// <summary>Пульс яркости шкалы: 0.72…1.0, фаза от времени в тревоге (детерминированно, стоит на паузе).</summary>
+        private float AlarmBrightness(int i)
+            => Mathf.Lerp(AlarmPulseMin, 1f,
+                0.5f + 0.5f * Mathf.Cos(_alarmClock[i] / AlarmPulsePeriod * 2f * Mathf.PI));
+
+        /// <summary>Виджет шкалы СЕЙЧАС на экране и может нести тревогу: живая игра, не кризис (там ряд
+        /// HUD спрятан), виджет открыт по возрасту и не скрыт баннер-битом. На опенере/финале — false.</summary>
+        private bool AlarmLive(AlarmScale s)
+        {
+            if (_game == null || _game.State != GameState.Playing || _game.InCrisis) return false;
+            var group = s switch
+            {
+                AlarmScale.Energy => _energyGroup,
+                AlarmScale.Health => _healthGroup,
+                AlarmScale.Relations => _balancerGroup,
+                _ => _moneyGroup,
+            };
+            return group != null && group.activeInHierarchy;
+        }
+
+        /// <summary>Порог тревоги с гистерезисом: <paramref name="on"/> — состояние ПРЕДЫДУЩЕГО кадра.</summary>
+        private bool AlarmRaised(AlarmScale s, bool on)
+        {
+            var sc = _game.Scales;
+            switch (s)
+            {
+                case AlarmScale.Energy:
+                    return on ? sc.Energy < AlarmScaleOnBelow + AlarmHysteresis : sc.Energy < AlarmScaleOnBelow;
+                case AlarmScale.Health:
+                    return on ? sc.Health < AlarmScaleOnBelow + AlarmHysteresis : sc.Health < AlarmScaleOnBelow;
+                case AlarmScale.Relations:
+                    // Зона 40–75 — МЕХАНИЧЕСКАЯ (Game.RelZoneMin/Max), тревога только отображает её.
+                    float lo = ThanksNoThanks.Game.RelZoneMin + (on ? AlarmHysteresis : 0f);
+                    float hi = ThanksNoThanks.Game.RelZoneMax - (on ? AlarmHysteresis : 0f);
+                    return sc.Relationships < lo || sc.Relationships > hi;
+                default:
+                    // Деньги: тревога РОВНО по существующему сигналу блокировки — карточка BLOCK$ и денег
+                    // не хватает. Сигнал дискретный (меняется только со сменой карточки/платежом), так что
+                    // дребезжать нечему и гистерезис ему не нужен.
+                    return _game.CurrentCardBlocked;
+            }
+        }
+
+        /// <summary>Продвинуть тревоги на dt и перерисовать подсветку. Единственная точка, где §4 живёт:
+        /// её зовут и Update, и синхронный DebugTick, и скриншот-позы.</summary>
+        private void ReflectAlarms(float dt)
+        {
+            if (_game == null) return;
+            bool frozen = _game.Paused;
+            // Сменилась ли карточка В ЭТОМ такте. Тревога ДЕНЕГ — это CurrentCardBlocked, а он фиксируется
+            // на ВЫДАЧЕ карточки, поэтому гаснуть он умеет ровно двумя способами: игрок довёл сумму до
+            // цены (починка) ИЛИ пришла другая карточка (не заслуга игрока). Второе не должно давать
+            // салют НИКОГДА — даже если крутилку крутили секунду назад на заблокированной карточке.
+            bool cardChanged = !ReferenceEquals(_game.CurrentCard, _lastReflectCard);
+            _lastReflectCard = _game.CurrentCard;
+            for (int i = 0; i < AlarmCount; i++)
+            {
+                _sinceScaleInput[i] = Mathf.Min(_sinceScaleInput[i] + dt, 999f);
+                var scale = (AlarmScale)i;
+                if (!AlarmLive(scale))
+                {
+                    // Шкала ушла с экрана (опенер/финал/кризис/баннер-бит/ещё не открыта по возрасту) —
+                    // тревога снимается МОЛЧА: это не «игрок починил», салют тут не положен.
+                    _alarmOn[i] = false;
+                    _alarmWeight[i] = 0f;
+                    _alarmClock[i] = 0f;
+                }
+                else
+                {
+                    bool on = AlarmRaised(scale, _alarmOn[i]);
+                    if (on && !_alarmOn[i]) _alarmClock[i] = 0f;      // вход в тревогу — фаза с пика
+                    // §6: салют — только за КАЛИБРОВКУ. Свежий ввод по шкале + выход из тревоги, И (для
+                    // денег) причина выхода не «пришла другая карточка».
+                    bool byCardSwap = scale == AlarmScale.Money && cardChanged;
+                    if (!on && _alarmOn[i] && _sinceScaleInput[i] <= AlarmRecentInputSeconds && !byCardSwap)
+                        StarBurst();
+                    _alarmOn[i] = on;
+                    if (on)
+                    {
+                        if (!frozen) _alarmClock[i] += dt;            // на паузе пульс замирает
+                        _alarmWeight[i] = 1f;
+                    }
+                    else _alarmWeight[i] = Mathf.MoveTowards(_alarmWeight[i], 0f, dt / AlarmFadeSeconds);
+                }
+                PaintAlarm(scale, _alarmWeight[i], AlarmBrightness(i));
+            }
+            AdvanceStars(dt);
+        }
+
+        /// <summary>Нарисовать подсветку одной шкалы: <paramref name="w"/> — вес 0…1, <paramref name="b"/> —
+        /// яркость пульса. w = 0 обязано вернуть РОВНО спокойный вид (иначе тревога «залипает»).</summary>
+        private void PaintAlarm(AlarmScale s, float w, float b)
+        {
+            switch (s)
+            {
+                case AlarmScale.Energy:
+                {
+                    if (_batteryAlarm == null) return;
+                    // Кроссфейд красной копии + пульс её ЯРКОСТИ (тинт по серому: 0.72…1.0).
+                    _batteryAlarm.color = new Color(b, b, b, w);
+                    _energyEmpty.color = Color.Lerp(BatteryCream, Dim(AlarmCavityEmpty, b), w);
+                    _energyTopUp.color = Color.Lerp(BatteryYellow, Dim(AlarmCavityCharge, b), w);
+                    // Полоса остатка заряда нужна ТОЛЬКО в тревоге (в спокойном ходе её роль играет
+                    // запечённая заливка спрайта) — вне тревоги оба тревожных слоя выключены целиком,
+                    // так что спокойная перепись спрайтов игровой панели остаётся прежней.
+                    ShowAlarmPart(_batteryAlarm, w);
+                    ShowAlarmPart(_energyCharge, w);
+                    if (w > 0f)
+                    {
+                        _energyCharge.color = Color.Lerp(BatteryYellow, Dim(AlarmCavityCharge, b), w);
+                        float p = Mathf.Clamp01(_energyShown / 100f);
+                        float levelTop = CavityTop + CavityH * (1f - p);
+                        float hgt = Mathf.Max(0f, CavityTop + CavityH - levelTop);
+                        AnchorPx(_energyCharge.rectTransform,
+                            CavityX + CavityW / 2f, levelTop + hgt / 2f, CavityW, hgt);
+                    }
+                    return;
+                }
+                case AlarmScale.Health:
+                    PaintKant(_healthKantInk, _healthKant, w, b);
+                    return;
+                case AlarmScale.Relations:
+                    PaintKant(_relKantInk, _relKant, w, b);
+                    return;
+                default:
+                {
+                    if (_jarImg == null) return;
+                    var tint = Color.Lerp(Color.white, Dim(DomeAlarm, b), w);
+                    if (_jarImg.color != tint) _jarImg.color = tint;
+                    if (_moneyCoin != null && _moneyCoin.color != tint) _moneyCoin.color = tint;
+                    return;
+                }
+            }
+        }
+
+        /// <summary>Тревожный слой существует только пока горит тревога: вне её он ВЫКЛЮЧЕН, а не просто
+        /// прозрачен — спокойный кадр остаётся ровно тем же набором картинок, что и до инкремента.</summary>
+        private static void ShowAlarmPart(Image img, float w)
+        {
+            bool show = w > 0f;
+            if (img.gameObject.activeSelf != show) img.gameObject.SetActive(show);
+        }
+
+        // Кант рисуется на `bar-track`, а у неё СВОЯ заливка #E7E9F5 и uGUI на неё УМНОЖАЕТ, поэтому
+        // токен пропускается через OnBarTrack — иначе «красный» вышел бы на ~10 % грязнее.
+        private static Color KantColor(float w, float b)
+        {
+            var c = OnBarTrack(Dim(DomeAlarm, b));
+            return new Color(c.r, c.g, c.b, w);
+        }
+
+        // Чёрное кольцо канта: тот же путь через OnBarTrack, но токеном INK — и БЕЗ пульса. Keyline в
+        // арт-паке всегда одинаково чёрный, «дышит» только красное; за фейдом кольцо идёт альфой, чтобы
+        // тревога уходила с экрана одной фигурой, а не оставляла висеть чёрную рамку.
+        private static Color KantInkColor(float w)
+        {
+            var c = OnBarTrack(Ink);
+            return new Color(c.r, c.g, c.b, w);
+        }
+
+        /// <summary>Нарисовать пару «чёрное кольцо + красный кант» одной шкалы (вес <paramref name="w"/>,
+        /// яркость пульса <paramref name="b"/>). w = 0 снимает обе фигуры с экрана.</summary>
+        private void PaintKant(Image ink, Image kant, float w, float b)
+        {
+            if (kant == null) return;
+            if (ink != null) { ink.color = KantInkColor(w); ShowAlarmPart(ink, w); }
+            kant.color = KantColor(w, b);
+            ShowAlarmPart(kant, w);
+        }
+
+        /// <summary>Снять все тревоги и подсветку без салюта (рестарт / уход из игры).</summary>
+        private void ResetAlarms()
+        {
+            for (int i = 0; i < AlarmCount; i++)
+            {
+                _alarmOn[i] = false;
+                _alarmWeight[i] = 0f;
+                _alarmClock[i] = 0f;
+                _sinceScaleInput[i] = 999f;
+                PaintAlarm((AlarmScale)i, 0f, 1f);
+            }
+            _lastReflectCard = _game != null ? _game.CurrentCard : null;
+        }
+
+        /// <summary>Отметить ввод игрока ПО ШКАЛЕ — окно §6-триггера салюта. Разводка вводов по шкалам:
+        /// дыхание → энергия, рычаг отношений → отношения, крутилка → деньги, ответ на карточку →
+        /// здоровье (лечиться можно только выбором). Именно эта разводка и отличает «игрок починил» от
+        /// «просто сменилась карточка».
+        /// ЗДЕСЬ — только вводы БЕЗ механического гейта. Крутилка (кэп дохода) и дыхание (ритм-гейт)
+        /// отмечаются в своих ветках <see cref="OnInput"/> перегрузкой по шкале — ровно на ПРИНЯТОМ
+        /// событии, иначе окно открывал бы и отвергнутый механикой мэшинг.</summary>
+        private void NoteScaleInput(GameInput input)
+        {
+            switch (input)
+            {
+                case GameInput.RelationUp:
+                case GameInput.RelationDown: NoteScaleInput(AlarmScale.Relations); break;
+                case GameInput.AnswerYes:
+                case GameInput.AnswerNo: NoteScaleInput(AlarmScale.Health); break;
+            }
+        }
+
+        /// <summary>Открыть окно §6 по КОНКРЕТНОЙ шкале — точка, куда отмечаются гейтованные вводы
+        /// (принятый тик крутилки, пропущенный ритм-гейтом импульс дыхания).</summary>
+        private void NoteScaleInput(AlarmScale s) => _sinceScaleInput[(int)s] = 0f;
+
+        // ================================================================ §6 · САЛЮТ ЗВЁЗД
+        // Слой 7 (build-spec §1.3): создаётся ПОСЛЕДНИМ ребёнком канваса и на каждом бёрсте поднимается
+        // в конец — салют рисуется поверх всего, включая модалку туториала (которая тоже поднимает себя).
+
+        private void BuildStarLayer(Transform parent)
+        {
+            _fxLayer = NewGroup("StarFx", parent);
+            _starSprite = Sprite("star-burst-v2");
+        }
+
+        /// <summary>
+        /// §6 «всё сделано верно»: разовый бёрст 4–5 звёзд разного калибра из ЦЕНТРА экрана наружу.
+        /// ПУБЛИЧНЫЙ и без аргументов — инкременты 5 (удачный звонок) и 6 (закрытие туториала шкалы)
+        /// подключаются к этой же точке. Разлёт детерминирован: сид = <see cref="StarBurstSeedBase"/> +
+        /// номер бёрста, поэтому тест и кадр видят один и тот же салют.
+        /// </summary>
+        public void StarBurst()
+        {
+            if (_fxLayer == null || _starSprite == null) return;
+            var rnd = new System.Random(StarBurstSeedBase + _burstCount);
+            _burstCount++;
+            _fxLayer.transform.SetAsLastSibling();
+            int n = StarBurstMin + rnd.Next(StarBurstMax - StarBurstMin + 1);
+            float baseAngle = (float)rnd.NextDouble() * 360f;
+            for (int k = 0; k < n; k++)
+            {
+                // Углы «вразнобой, но веером»: равномерный сектор на звезду + джиттер в половину сектора —
+                // случайно, но без слипшегося комка в одну сторону.
+                float sector = 360f / n;
+                float ang = baseAngle + sector * k + ((float)rnd.NextDouble() - 0.5f) * sector * 0.6f;
+                float rad = ang * Mathf.Deg2Rad;
+                var img = NewSprite("Star", _fxLayer.transform, _starSprite);
+                float size = StarBaseSize * StarSizeScales[k % StarSizeScales.Length];
+                AnchorPx(img.rectTransform, 960f, 540f, size, size);
+                _stars.Add(new Star
+                {
+                    Rt = img.rectTransform,
+                    Img = img,
+                    Dir = new Vector2(Mathf.Cos(rad), Mathf.Sin(rad)),
+                    Dist = StarTravelMin + (float)rnd.NextDouble() * (StarTravelMax - StarTravelMin),
+                    Dur = StarFlightMin + (float)rnd.NextDouble() * (StarFlightMax - StarFlightMin),
+                    Spin = (rnd.Next(2) == 0 ? -1f : 1f)
+                           * (StarSpinMin + (float)rnd.NextDouble() * (StarSpinMax - StarSpinMin)),
+                    T = 0f,
+                });
+            }
+        }
+
+        /// <summary>Продвинуть летящие звёзды на dt: разлёт с замедлением, затухание альфы, лёгкое
+        /// вращение — и САМООЧИСТКА (объект уничтожается, как только долетел).</summary>
+        private void AdvanceStars(float dt)
+        {
+            for (int i = _stars.Count - 1; i >= 0; i--)
+            {
+                var s = _stars[i];
+                s.T += dt;
+                float u = Mathf.Clamp01(s.T / s.Dur);
+                float ease = 1f - (1f - u) * (1f - u);          // out-quad: резкий выброс, мягкий доезд
+                s.Rt.anchoredPosition = s.Dir * (s.Dist * ease);
+                s.Rt.localRotation = Quaternion.Euler(0f, 0f, s.Spin * ease);
+                float a = u <= StarHoldFraction ? 1f : 1f - (u - StarHoldFraction) / (1f - StarHoldFraction);
+                s.Img.color = new Color(1f, 1f, 1f, Mathf.Clamp01(a));
+                if (u >= 1f)
+                {
+                    if (s.Rt != null) Destroy(s.Rt.gameObject);
+                    _stars.RemoveAt(i);
+                    continue;
+                }
+                _stars[i] = s;
+            }
+        }
+
+        /// <summary>Убрать салют без анимации (рестарт / уход из игры).</summary>
+        private void ClearStars()
+        {
+            for (int i = 0; i < _stars.Count; i++)
+                if (_stars[i].Rt != null) Destroy(_stars[i].Rt.gameObject);
+            _stars.Clear();
         }
 
         // Child «cabinet button» (S9): no dedicated sprite exists, so this is a placeholder built from
@@ -2582,7 +3188,13 @@ namespace ThanksNoThanks
                 _bannerTimer.Hide();
                 _hostBubble.SetActive(false);
                 _bannerRoot.SetActive(false);
+                // §4/§6: свежая жизнь начинается без единой тревоги и без звёзд в воздухе. Сброс МОЛЧАЛИВЫЙ
+                // (ResetAlarms не стреляет салютом) — иначе рестарт из тревожного состояния давал бы салют.
+                ResetAlarms();
+                ClearStars();
             }
+            // Опенер/финал: тревог там нет по спеку, и подсветка не должна пережить уход из игры.
+            if (!playing) { ResetAlarms(); ClearStars(); }
             if (!playing && _tutorialShowing) DismissTutorial();
             if (!playing) { _bannerTimer.Hide(); _bannerRoot.SetActive(false); SyncPause(); }
             _wasPlaying = playing;

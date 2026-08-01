@@ -59,6 +59,11 @@ namespace ThanksNoThanks.Tests.PlayMode
                 // позах гейт смотрит сглаживание края (стрелка-кромка) на зуме, в жёлтой и в красной фазе.
                 case "domediag": driver.DebugPreviewDomeDiagonalEdge(alarm: false); break;
                 case "domediagalarm": driver.DebugPreviewDomeDiagonalEdge(alarm: true); break;
+                // §4: все четыре шкалы в КРАСНОЙ ТРЕВОГЕ, пульс на пике — кадр сверяется с эталоном
+                // «Экран подсвечена красным шкала.png» (батарея целиком красная).
+                case "alarm": driver.DebugPreviewAlarms(); break;
+                // §6: салют звёзд, пойманный на середине разлёта.
+                case "stars": driver.DebugPreviewStarBurst(); break;
                 case "host": driver.DebugPreviewHostComment(); break;
                 case "opener":
                     // S1 as the player meets it: the driver already boots into the opener, so the pose is
