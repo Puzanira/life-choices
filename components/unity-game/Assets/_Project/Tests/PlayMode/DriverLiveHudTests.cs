@@ -208,6 +208,18 @@ namespace ThanksNoThanks.Tests.PlayMode
             yield return null;
         }
 
+        // Deterministic age-walk deck: a neutral filler card for every year, so the money(18) / energy(25) /
+        // health(30) age gates fire on a KNOWN schedule. The driver's own deck is sampled from the CSV with
+        // `new System.Random()` on every boot (GameDriver.LoadGame), so a run that must reach the age-30
+        // health hint was not guaranteed to get there — that is the flake this replaces. Same shape as the
+        // other DebugReplaceGame decks in this suite (Starter → fillers).
+        private static Game AgeWalkDeck()
+        {
+            var deck = new System.Collections.Generic.List<Card> { Starter() };
+            for (int a = 2; a <= 60; a++) deck.Add(Plain("F" + a, a));
+            return new Game(deck, coin: () => false);
+        }
+
         [UnityTest]
         public IEnumerator HealthHint_Dismiss_SameFrameChord_DoesNotLeak_Crank_Or_EnergyPulse()
         {
@@ -215,6 +227,7 @@ namespace ThanksNoThanks.Tests.PlayMode
             // where energy is open and money is bankable — so a leaked crank/pulse would be observable.
             var driver = Boot(out var go, out var fake);
             yield return null;
+            driver.DebugReplaceGame(AgeWalkDeck());      // seeded/deterministic walk to 30 (no CSV sampling)
             fake.Confirm();                              // → playing
 
             // Drive to the HEALTH hint (age 30), dismissing the money(18) + energy(25) hints on the way.

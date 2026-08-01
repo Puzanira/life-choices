@@ -276,7 +276,7 @@ namespace ThanksNoThanks.Tests.PlayMode
         }
 
         [UnityTest]
-        public IEnumerator ChildFlash_LitButton_DoesNotOverlap_SpasiboNeNado_Plate()
+        public IEnumerator ChildCall_RingingPhone_StaysInItsLeftBand_AndLeaksNoOtherOverlay()
         {
             var driver = Boot(out var go, out var fake);
             yield return null;
@@ -288,36 +288,39 @@ namespace ThanksNoThanks.Tests.PlayMode
             if (driver.TutorialShowing) fake.Confirm();  // dismiss the child hint
             yield return null;
 
-            // Drive to an open flash window (dismissing age-gate hints along the way).
+            // Drive to an open CALL window (dismissing age-gate hints along the way). DebugTick is the
+            // Update path, so the handset really slides/wobbles instead of only flipping a flag in Game.
             int guard = 0;
             while (!driver.Game.ChildFlashing && driver.Game.State == GameState.Playing && guard++ < 600)
             {
                 if (driver.TutorialShowing) fake.Confirm();
-                else driver.Game.Tick(0.1f);
+                else driver.DebugTick(0.1f);
             }
-            Assert.IsTrue(driver.Game.ChildFlashing, "the flash window is open");
+            Assert.IsTrue(driver.Game.ChildFlashing, "the call window is open");
+            for (int i = 0; i < 8; i++) driver.DebugTick(0.05f);   // let the 0.3 s slide finish
 
-            yield return null;                           // ReflectChildButton lights + pulse-scales the button
-            Color lit = driver.ChildButtonImage.color;
-            Assert.Greater(lit.r, 0.8f, "the child button is actually LIT (bright) for the guard");
+            // §5b: the RINGING pose is the arcs sprite, fully slid in, and it lives in the screen's LEFT
+            // band — it must never wander onto the answer plates / the question card (the founder-visible
+            // failure mode of the widget it replaced).
+            Assert.AreEqual("phone-ring-v2", driver.ChildPhoneImage.sprite.name, "ringing pose = arcs sprite");
+            Assert.AreEqual(1f, driver.ChildPhoneOut, 1e-3f, "the handset finished sliding in");
 
-            // (founder complaint) the LIT/scaled child button must NOT reach the bottom answer plate.
-            var childAabb = WorldAabb(driver.ChildButtonImage.rectTransform);
-            var noAabb = WorldAabb(driver.NoPlateImage.rectTransform);
-            Assert.IsFalse(Overlap(childAabb, noAabb),
-                "the lit child button (" + childAabb + ") is DISJOINT from the «СПАСИБО, НЕ НАДО» plate (" + noAabb + ")");
+            var phone = WorldAabb(driver.ChildPhoneImage.rectTransform);
+            var card = WorldAabb(driver.CardRect);
+            var yes = WorldAabb(driver.YesPlateImage.rectTransform);
+            var jar = WorldAabb(driver.MoneyJarImage.rectTransform);
+            Assert.IsFalse(Overlap(phone, yes), "the ringing handset never reaches the ДА plate");
+            Assert.IsFalse(Overlap(phone, jar), "…nor the money jar in the right column");
+            Assert.Less(phone.center.x, card.xMin,
+                "the handset rings from the LEFT band — its centre stays left of the question card");
 
-            // It stays strictly in its top-right HUD zone: fully above the plate's top edge.
-            Assert.Greater(childAabb.yMin, noAabb.yMax,
-                "the child button sits entirely above the answer plate (its HUD zone)");
-
-            // No OTHER state overlay may leak into the child-flash state (the whole-HUD stray-Image guard lives
+            // No OTHER state overlay may leak into the child-call state (the whole-HUD stray-Image guard lives
             // in HudConformanceTests; here we bound the state-specific strays: a stuck burnout/depression/
             // finale/opener panel over live gameplay would be a stray and must fail).
-            Assert.IsFalse(driver.BurnoutPlate.activeInHierarchy, "no burnout overlay during child flash");
-            Assert.IsFalse(driver.DepressionOverlay.activeInHierarchy, "no depression overlay during child flash");
-            Assert.IsFalse(driver.FinalePanel.activeInHierarchy, "no finale panel during child flash");
-            Assert.IsFalse(driver.OpenerPanel.activeInHierarchy, "no opener panel during child flash");
+            Assert.IsFalse(driver.BurnoutPlate.activeInHierarchy, "no burnout overlay during a child call");
+            Assert.IsFalse(driver.DepressionOverlay.activeInHierarchy, "no depression overlay during a child call");
+            Assert.IsFalse(driver.FinalePanel.activeInHierarchy, "no finale panel during a child call");
+            Assert.IsFalse(driver.OpenerPanel.activeInHierarchy, "no opener panel during a child call");
 
             Object.Destroy(go);
             yield return null;

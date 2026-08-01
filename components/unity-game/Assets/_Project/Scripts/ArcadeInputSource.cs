@@ -19,7 +19,7 @@ namespace ThanksNoThanks
     ///                        can never skip the necrolog — this overrides the old «рестарт = красная»)
     ///   MenuButton  ✔ → выход (Exit — clean end-of-run, arcade contract §5)
     ///   Crank         → крутилка денег (accumulated degrees → discrete MoneyTick — a literal money crank)
-    ///   BangButton    → «жми по вспышке» кнопка ребёнка (ChildPress)
+    ///   BangButton    → «поднять трубку» звонящего ребёнка (ChildPress, revisions §5b)
     ///   HeightA       → дыхание: one EnergyPulse per up-stroke through mid-travel (breathing lever)
     ///   Joystick.y    → балансир отношений (held RelationUp/RelationDown, spring-return = drift)
     ///
@@ -67,7 +67,7 @@ namespace ThanksNoThanks
 
             if (green && !_prevGreen) Emit(GameInput.AnswerYes);   // ДА  ✔
             if (red && !_prevRed) Emit(GameInput.AnswerNo);        // НЕТ ✔
-            if (bang && !_prevBang) Emit(GameInput.ChildPress);    // «жми по вспышке»
+            if (bang && !_prevBang) Emit(GameInput.ChildPress);    // «поднять трубку»
             if (menu && !_prevMenu) Emit(GameInput.Exit);          // выход ✔
             _prevGreen = green; _prevRed = red; _prevBang = bang; _prevMenu = menu;
 

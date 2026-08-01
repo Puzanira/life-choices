@@ -48,8 +48,8 @@ namespace ThanksNoThanks
         RelationDown,
 
         /// <summary>
-        /// CHILD_PRESS — «жать по вспышке» кнопки-тамагочи ребёнка (keyboard: Enter, only meaningful in
-        /// gameplay; later a lit button on the cabinet). Enter is CONFIRM everywhere else, so the DRIVER
+        /// CHILD_PRESS — «поднять трубку» звонящего ребёнка (кабинет: кнопка «!» / BangButton, dev-клавиша
+        /// Enter; имеет смысл только в геймплее). Enter is CONFIRM everywhere else, so the DRIVER
         /// decides context: an Enter/CONFIRM becomes CHILD_PRESS ONLY while Playing with the child scale
         /// open and no tutorial up; otherwise it stays <see cref="Confirm"/> (start/restart/dismiss). A
         /// discrete keydown — <see cref="Game"/> honours it only inside the open flash window (else it

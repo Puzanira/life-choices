@@ -411,25 +411,46 @@ namespace ThanksNoThanks
         /// <summary>Bottom of the question box while the reserved band is occupied.</summary>
         public const float CardTextShortBottom = CardBandTop - CardTextBandGap;
 
-        // ---- child «cabinet button» placeholder (инкремент «звонок» переделает) -----------------------
-        // Free slot in the art row's right column: the gap BETWEEN the money jar (drawn box 1674,74,161,174
-        // → bottom 248) and the age badge (1639,392,212,207 → top 392), right of the card plate (drawn right
-        // edge 1506). The whole cluster — including the halo at its PULSE PEAK — has to fit that 144 px gap
-        // and stay in frame, so the sizes below are derived from it, not picked by eye (skeptic MAJOR-2).
-        /// <summary>Centre of the child button cluster, 1920×1080 reference px (x from LEFT, y from TOP).</summary>
-        public const float ChildCx = 1840f, ChildCy = 320f;
-        /// <summary>Halo (ChildGlow) rect size at rest; it pulse-scales while the flash window is open.</summary>
-        public const float ChildGlowSize = 106f;
-        /// <summary>Halo flash pulse: scale = mid ± amp. Peak size = ChildGlowSize × (mid + amp) ≈ 130 px.</summary>
-        public const float ChildGlowPulseMid = 1.05f, ChildGlowPulseAmp = 0.18f;
-        /// <summary>Button rect size at rest; sized so the halo stays bigger even at the pulse TROUGH.</summary>
-        public const float ChildButtonSize = 66f;
-        /// <summary>Button flash pulse: scale = mid ± amp.</summary>
-        public const float ChildButtonPulseMid = 1.28f, ChildButtonPulseAmp = 0.10f;
-        /// <summary>Halo size at the pulse PEAK — the worst case a layout guard has to clear.</summary>
-        public const float ChildGlowPeakSize = ChildGlowSize * (ChildGlowPulseMid + ChildGlowPulseAmp);
-        /// <summary>Button size at the pulse PEAK.</summary>
-        public const float ChildButtonPeakSize = ChildButtonSize * (ChildButtonPulseMid + ChildButtonPulseAmp);
+        // ---- ТРУБКА РЕБЁНКА (revisions §5b / build-spec §E) ------------------------------------------
+        // ЗАМЕНИЛА старую «вспышку кнопки-ребёнка» (жёлтая лампочка + halo в правой колонке ряда): механика
+        // счёта в Game та же (ChildOpen/ChildFlashing/ChildPress/пропуски), сменился ВИД и окно (5 с).
+        // Две ПОЗЫ ОДНОГО спрайта (asset-map §1/§5.7): покой — `phone-rest-v2` (`hf_phone copy.png`, БЕЗ
+        // дуг), звонок — `phone-ring-v2` (`hf_phone.png`, красные дуги-вибрация ЗАПЕЧЕНЫ вместе с корпусом).
+        // Поэтому «пульс альфы дуг» (build-spec §6) физически невозможен и заменён КАЧАНИЕМ всей трубки
+        // (asset-map §12-7).
+        // Оба бокса СНЯТЫ С ЭТАЛОНОВ ИНСТРУМЕНТАЛЬНО (IoU-подгонка залитой маски корпуса трубки):
+        //   покой  — «Экран спокойный обычный.png», IoU 0.65: scale 0.550, rot −13.5°  (asset-map §5.7
+        //            независимо дала ровно 0.550 / +14° по часовой → сходится);
+        //   звонок — «Экран звонит телефон.png»,   IoU 0.92: scale 0.621, rot −46.5°.
+        // Спековые «rot ≈ −14°» для звонка (build-spec §4-E) эталону НЕ соответствуют — asset-map §4.2 сама
+        // пометила угол как ненадёжный («домерить»), а нарисованный корпус на эталоне лежит под −46.5°.
+        // Формат — как у остального арт-пака: cx, cyTop, w, h реф-px на ВЕСЬ спрайт (662×715); поворот —
+        // вокруг центра ректа (центр текстуры совпадает с центром рисунка, так что бокс не уезжает).
+        /// <summary>Покой: трубка торчит из-за левого края (нарисованный AABB = asset-map §2 −62,394,191,349).</summary>
+        public static readonly Vector4 PhoneRestRect = new(39.5f, 567.0f, 364.1f, 393.3f);
+        /// <summary>Звонок: трубка выехала внутрь (корпус на эталоне = asset-map §4.2 14,351,258,384).
+        /// Центр сдвинут на 4 px влево и 2 px вверх от чистой IoU-подгонки (152,544): в той позе кончик
+        /// нижней дуги наезжал на плашку «СПАСИБО НЕ НАДО» (замер: 47 px чернил дуги на чернилах плашки).
+        /// 4/2 — максимум, который гасит наезд в 0 px, оставаясь в допуске IoU корпуса ≥0.9 (0.902).</summary>
+        public static readonly Vector4 PhoneRingRect = new(144.0f, 540.0f, 411.3f, 444.2f);
+        /// <summary>Наклон позы покоя, град (Unity z; минус = по часовой).</summary>
+        public const float PhoneRestTilt = -13.5f;
+        /// <summary>Наклон позы звонка, град (Unity z).</summary>
+        public const float PhoneRingTilt = -46.5f;
+        /// <summary>Выезд из-за края и уезд обратно, с (build-spec §6).</summary>
+        public const float PhoneSlideSeconds = 0.3f;
+        /// <summary>Качание звонящей трубки: rot ±6° с периодом ~0.12 с (build-spec §6).</summary>
+        public const float PhoneWobbleDegrees = 6f, PhoneWobblePeriod = 0.12f;
+        /// <summary>
+        /// Тинт-множитель ПОЗЫ ПОКОЯ: эталон «Экран спокойный обычный.png» намеренно ГАСИТ спящую трубку,
+        /// чтобы она не тянула глаз, а наш спрайт горит той же полной яркостью, что и на звонке. Множитель
+        /// подобран ИНСТРУМЕНТАЛЬНО по кадру (зоны корпуса earpiece x[5,40] y[420,470] и shaft x[2,22]
+        /// y[500,620], среднее по не-фоновым пикселям): G/B сводятся к эталонным (Δ≤8 на канал), R зажат
+        /// в 1.0 — эталонная спящая трубка не просто темнее, она ОБЕСЦВЕЧЕНА (её R ВЫШЕ нашего), а умножение
+        /// канал поднять не может, и любой R&lt;1 только уводит дальше. На звонке тинт снимается (Color.white)
+        /// и лерпается вместе с позой за <see cref="PhoneSlideSeconds"/> — выезд «разгорается», уезд гаснет.
+        /// </summary>
+        public static readonly Color PhoneRestTint = new(1f, 0.830f, 0.745f, 1f);
 
         // Baked cavity colours, sampled off `energy-battery-v2`: cream «empty», saturated yellow «full».
         private static readonly Color BatteryCream = new(253f / 255f, 249f / 255f, 230f / 255f);
@@ -438,10 +459,13 @@ namespace ThanksNoThanks
         public static Color BatteryCreamToken => BatteryCream;
         public static Color BatteryYellowToken => BatteryYellow;
 
-        // ---- child button (opens on MD02=ДА, not age-gated; flashes on the signal-response window) ----
-        private GameObject _childGroup;    // whole widget; shown while Game.ChildOpen, hidden after LT04
-        private Image _childButtonImg;     // the «lit» bulb — bright while ChildFlashing, dim otherwise
-        private Image _childGlow;          // bright pulsing halo behind the button — only while ChildFlashing (visibility fix)
+        // ---- трубка ребёнка (открывается на MD02=ДА, не по возрасту; звонит по окну Game.ChildFlashing) ----
+        private GameObject _childGroup;    // весь виджет; показан пока Game.ChildOpen, гаснет после LT04
+        private Image _phoneImg;           // ОДНА картинка, две позы: покой (без дуг) / звонок (с дугами)
+        private Sprite _phoneRestSprite, _phoneRingSprite;
+        private float _phoneOut;           // 0 = за левым краем (покой), 1 = выехала внутрь (звонок)
+        private float _phoneRingClock;     // часы ТЕКУЩЕГО звонка — детерминированная фаза качания
+        private bool _phoneRinging;        // прошлый Game.ChildFlashing (ловим ФРОНТ звонка)
 
         // Card
         private RectTransform _cardRoot;
@@ -641,10 +665,12 @@ namespace ThanksNoThanks
 
         // Child S5 hint. Must NOT contain «УСТАЛОСТЬ»/«ТАЯТЬ»/«ОТНОШЕНИЙ» — the PlayMode hint-walkers key
         // off those substrings to identify the energy/health/relationships hints; a collision misids this.
+        // Канон host-content §4 («Когда телефон слева зазвонит — жми «!», чтобы поднять трубку»); про
+        // старую вспышку/кнопку-лампочку здесь больше ничего нет (revisions §5b).
         private const string ChildTutorialText =
             "ПОПОЛНЕНИЕ!\n\n" +
-            "Появился РЕБЁНОК — кнопка на пульте загорается время от времени.\n" +
-            "Жмите кнопку «!», пока она горит — по вспышке.\n\n" +
+            "Появился РЕБЁНОК — теперь он будет звонить.\n" +
+            "Когда телефон слева зазвонит — жмите «!», чтобы поднять трубку.\n\n" +
             "Пропустите подряд — станете плохим родителем.";
 
         // ---- public inspection accessors (visual-assembly PlayMode tests) ----
@@ -736,10 +762,14 @@ namespace ThanksNoThanks
         public GameObject BurnoutPlate => _burnoutPlate;
         public GameObject BreakupPlate => _breakupPlate;
         public GameObject BalancerMarker => _balancerMarker != null ? _balancerMarker.gameObject : null;
+        /// <summary>§5b: контейнер трубки — активен ровно пока механика ребёнка открыта.</summary>
         public GameObject ChildGroup => _childGroup;
-        public Image ChildButtonImage => _childButtonImg;
-        /// <summary>The pulsing halo BEHIND the child button — the widget's true visible extent.</summary>
-        public Image ChildGlow => _childGlow;
+        /// <summary>§5b: сама трубка (один Image, две позы — покой без дуг / звонок с дугами).</summary>
+        public Image ChildPhoneImage => _phoneImg;
+        /// <summary>§5b: 0 = трубка за левым краем (покой), 1 = выехала внутрь (звонок).</summary>
+        public float ChildPhoneOut => _phoneOut;
+        /// <summary>§5b: часы ТЕКУЩЕГО звонка — ДЕТЕРМИНИРОВАННАЯ фаза качания (не Time.time).</summary>
+        public float ChildPhoneRingClock => _phoneRingClock;
         public Image BrightnessVeil => _brightness;
         public Text TutorialText => _tutorialText;
         public GameObject HostBubble => _hostBubble;
@@ -823,20 +853,35 @@ namespace ThanksNoThanks
             enabled = false;
         }
 
-        public void DebugPreviewChildFlash()
+        /// <summary>
+        /// Screenshot pose (§5b): обычный кадр + трубка в позе ЗВОНКА — выехала целиком (out = 1), спрайт
+        /// с запечёнными дугами, качание в фазе 0 (детерминированно и воспроизводимо). Сверяется с
+        /// эталоном «Экран звонит телефон.png».
+        /// </summary>
+        public void DebugPreviewChildCall()
         {
-            _openerPanel.SetActive(false); _finalePanel.SetActive(false); _gamePanel.SetActive(true);
-            ApplyAgeGates(40f);
-            _cardText.text = "Обычная жизнь идёт…";
+            DebugPreviewArcadeShot();                 // обычный кадр, драйвер заморожен
             _childGroup.SetActive(true);
-            _childButtonImg.color = Bulb;                                  // lit gold
-            // Pose the flash at its PEAK — the same constants the layout guard clears.
-            _childButtonImg.rectTransform.localScale =
-                Vector3.one * (ChildButtonPulseMid + ChildButtonPulseAmp);
-            _childGlow.color = new Color(Bulb.r, Bulb.g, Bulb.b, 0.85f);
-            _childGlow.rectTransform.localScale = Vector3.one * (ChildGlowPulseMid + ChildGlowPulseAmp);
-            _bubbleText.text = "Скорее!"; _hostBubble.SetActive(true);
-            enabled = false;
+            _phoneRinging = true;
+            _phoneOut = 1f;
+            _phoneRingClock = 0f;
+            _phoneImg.sprite = _phoneRingSprite;
+            ApplyPhonePose(1f, 0f);
+        }
+
+        /// <summary>
+        /// Screenshot pose (§5b): обычный кадр + трубка в ПОКОЕ — за левым краем, спрайт БЕЗ дуг.
+        /// Сверяется с эталоном «Экран спокойный обычный.png».
+        /// </summary>
+        public void DebugPreviewChildPhoneRest()
+        {
+            DebugPreviewArcadeShot();
+            _childGroup.SetActive(true);
+            _phoneRinging = false;
+            _phoneOut = 0f;
+            _phoneRingClock = 0f;
+            _phoneImg.sprite = _phoneRestSprite;
+            ApplyPhonePose(0f, 0f);
         }
 
         // S10 dim: tint the card's own marquee sprite (fill + bulbs + border) toward muted cobalt so the
@@ -1007,6 +1052,7 @@ namespace ThanksNoThanks
             if (_game.InCrisis) ReflectDome(Mathf.Max(0f, _game.CrisisTimer), _game.CrisisTimerMax);
             else ReflectDome(Mathf.Max(0f, _game.CardTimer), _game.CardTimerMax);
             UpdateHudValues();      // живые шкалы на HUD — тот же путь, что у Update
+            ReflectChildPhone(dt);  // …и §5b-трубка: выезд/уезд/качание на ТОМ ЖЕ dt, без Time.deltaTime
             ReflectAlarms(dt);      // …и §4/§6 поверх них
         }
 
@@ -1262,17 +1308,25 @@ namespace ThanksNoThanks
                 return;
             }
 
+            // Кнопка «!» (BangButton → CHILD_PRESS): поднять трубку. Идёт через ChildPress-хелпер, чтобы
+            // УДАЧНОЕ поднятие отстрелило салют звёзд (revisions §5b/§6).
+            if (input == GameInput.ChildPress)
+            {
+                PressChildPhone();
+                return;
+            }
+
             // Enter double-duty: during gameplay with the child scale open (and no tutorial up — that case
-            // returned above), Enter/CONFIRM means «жать по вспышке» → CHILD_PRESS. Everywhere else it stays
+            // returned above), Enter/CONFIRM means «поднять трубку» → CHILD_PRESS. Everywhere else it stays
             // CONFIRM (start the game / restart from the finale / dismiss a hint), so the child mechanic
-            // never steals those. Game itself only honours the press inside the open flash window. NOT during
+            // never steals those. Game itself only honours the press inside the open call window. NOT during
             // depression: there CONFIRM is the pulse catch (Game routes it), so the child press must defer.
             if (input == GameInput.Confirm
                 && _game.State == GameState.Playing
                 && _game.ChildOpen
                 && !_game.InDepression)
             {
-                _game.HandleInput(GameInput.ChildPress);
+                PressChildPhone();
                 return;
             }
 
@@ -1352,7 +1406,7 @@ namespace ThanksNoThanks
                 var plateTint = _game.CurrentCardBlocked ? PlateMute : Color.white;
                 if (_yesPlate.color != plateTint) _yesPlate.color = plateTint;
                 if (_noPlate.color != plateTint) _noPlate.color = plateTint;
-                ReflectChildButton();               // reveal on MD02=ДА, light the bulb while flashing
+                ReflectChildPhone(Time.deltaTime);  // reveal on MD02=ДА; slide/wobble the handset on a call
                 // Age-gated reveals run every frame (SetActive is a no-op on same value): a widget
                 // opening MID-CARD (18/25/30 crossings) appears the moment its age is crossed instead
                 // of waiting for the next card resolution (founder Gate-2 bug, uniform fix).
@@ -1388,6 +1442,8 @@ namespace ThanksNoThanks
             _healthGroup.SetActive(false);
             _energyGroup.SetActive(false);
             _balancerGroup.SetActive(false);
+            // …и трубка ребёнка: кризис её убирает с экрана (ReflectChildPhone вернёт её сразу, как
+            // только игра выйдет из кризиса и Game.ChildOpen снова будет живым).
             if (_childGroup != null) _childGroup.SetActive(false);
 
             // BLOCK$ visuals never apply during a crisis.
@@ -1546,6 +1602,8 @@ namespace ThanksNoThanks
             if (_timerGroup != null && _timerGroup.activeSelf != show) _timerGroup.SetActive(show);
             // S4: the banner is a clean beat — the whole HUD row is hidden too (re-shown, age-gated, after).
             if (_hudRow != null && _hudRow.activeSelf != show) _hudRow.SetActive(show);
+            // …и трубка вместе с рядом: она живёт на слое оверлеев (не в _hudRow), поэтому прячется явно.
+            if (beat && _childGroup != null && _childGroup.activeSelf) _childGroup.SetActive(false);
             if (beat)
             {
                 if (_crisisInfo != null && _crisisInfo.activeSelf) _crisisInfo.SetActive(false);
@@ -1582,35 +1640,75 @@ namespace ThanksNoThanks
         // Impulse round opened: the S13 warning plate reveals via RenderCrisis; nothing else needed here.
         private void OnCrisisImpulseStarted() { }
 
-        // Child button: reveal off Game.ChildOpen (not age-gated — opens on MD02=ДА, hides after LT04), and
-        // light the bulb bright gold + pulse while the flash window is open (Game.ChildFlashing), dim else.
-        // The scale bar tracks Scales.Child so a bad-parent drop reads. NO brightness coupling (canon —
-        // child flows into the show tone only via the relationships penalty, already folded in elsewhere).
-        private void ReflectChildButton()
+        // Поза трубки по «выезду» p ∈ 0…1 (0 = покой за краем, 1 = звонок): лерпятся И бокс, И наклон —
+        // на эталонах звонящая трубка не просто сдвинута, она крупнее и повёрнута сильнее (см. геоблок).
+        // `wobble` — качание звонка, добавка к углу.
+        private void ApplyPhonePose(float p, float wobble = 0f)
+        {
+            if (_phoneImg == null) return;
+            var r = Vector4.Lerp(PhoneRestRect, PhoneRingRect, p);
+            AnchorPx(_phoneImg.rectTransform, r.x, r.y, r.z, r.w);
+            _phoneImg.rectTransform.localRotation =
+                Quaternion.Euler(0f, 0f, Mathf.Lerp(PhoneRestTilt, PhoneRingTilt, p) + wobble);
+            // …и ЯРКОСТЬ по тому же p: спящая трубка притушена (PhoneRestTint), звонящая горит в полную
+            // (Color.white). Один и тот же лерп, поэтому выезд/уезд плавно разгорается и гаснет за 0.3 с.
+            _phoneImg.color = Color.Lerp(PhoneRestTint, Color.white, p);
+        }
+
+        // Трубка ребёнка (§5b): виджет показан ровно пока Game.ChildOpen (не по возрасту — открывается на
+        // MD02=ДА, гаснет после LT04). Звонок = Game.ChildFlashing: трубка выезжает из-за левого края за
+        // PhoneSlideSeconds, встаёт в позу звонка (спрайт с запечёнными дугами) и КАЧАЕТСЯ ±6° (замена
+        // невозможного «пульса альфы дуг», asset-map §12-7). Окно закрылось — поднял или проспал — трубка
+        // сразу «успокаивается» (спрайт покоя, без дуг) и тем же 0.3 с уезжает за край. Фаза качания идёт
+        // от СОБСТВЕННЫХ часов звонка, а не от Time.time: поза детерминирована и воспроизводима в тесте.
+        private void ReflectChildPhone(float dt)
         {
             if (_childGroup == null) return;
-            if (_childGroup.activeSelf != _game.ChildOpen) _childGroup.SetActive(_game.ChildOpen);
-            if (!_game.ChildOpen) return;
-
-            bool lit = _game.ChildFlashing;
-            var tint = lit ? Bulb : CobaltDeep;
-            if (_childButtonImg.color != tint) _childButtonImg.color = tint;
-            // Unmissable flash: the button flares gold and jumps ~1.3× (was a barely-there 1.1× tint pulse),
-            // and the halo behind it flares bright and breathes. At rest the halo is fully transparent and the
-            // button sits at its idle size — so the «жми Enter по вспышке» beat is impossible to miss.
-            // Both pulses stay within their PEAK constants — the layout guard clears the peak, so the live
-            // rects can never leave the jar↔badge gap.
-            _childButtonImg.rectTransform.localScale = lit
-                ? Vector3.one * (ChildButtonPulseMid + ChildButtonPulseAmp * Mathf.Sin(Time.time * 11f))
-                : Vector3.one;
-            if (_childGlow != null)
+            bool open = _game.ChildOpen;
+            // ВЫГОРАНИЕ (S7): плашка — полноэкранный захват, нарисованный ПОВЕРХ трубки, поэтому на время
+            // выгорания трубку прячем совсем (как кризис прячет её в RenderCrisis). Game на то же время
+            // морозит окно звонка (Game.ChildCallFrozen), так что пропусков «вслепую» не набегает; поза и
+            // фаза качания НЕ сбрасываются — по выходу трубка возвращается ровно там, где замерла, и
+            // звонок доигрывает свой остаток.
+            bool visible = open && !_game.Burnout;
+            if (_childGroup.activeSelf != visible) _childGroup.SetActive(visible);
+            if (!open)
             {
-                float a = lit ? 0.55f + 0.30f * Mathf.Sin(Time.time * 11f) : 0f;
-                _childGlow.color = new Color(Bulb.r, Bulb.g, Bulb.b, a);
-                _childGlow.rectTransform.localScale = lit
-                    ? Vector3.one * (ChildGlowPulseMid + ChildGlowPulseAmp * Mathf.Sin(Time.time * 11f))
-                    : Vector3.one;
+                _phoneOut = 0f; _phoneRingClock = 0f; _phoneRinging = false;
+                return;
             }
+            if (!visible) return;   // выгорание: состояние звонка сохраняется как есть, часы трубки стоят
+
+            bool ringing = _game.ChildFlashing;
+            if (ringing && !_phoneRinging) _phoneRingClock = 0f;   // ФРОНТ звонка → фаза качания с нуля
+            _phoneRinging = ringing;
+
+            var want = ringing ? _phoneRingSprite : _phoneRestSprite;
+            if (_phoneImg.sprite != want) _phoneImg.sprite = want;
+
+            float step = _game.Paused ? 0f : dt;                   // на паузе (туториал) трубка замирает
+            _phoneOut = Mathf.MoveTowards(_phoneOut, ringing ? 1f : 0f, step / PhoneSlideSeconds);
+            float wobble = 0f;
+            if (ringing)
+            {
+                _phoneRingClock += step;
+                wobble = PhoneWobbleDegrees
+                         * Mathf.Sin(_phoneRingClock * 2f * Mathf.PI / PhoneWobblePeriod);
+            }
+            ApplyPhonePose(_phoneOut, wobble);
+        }
+
+        /// <summary>
+        /// «Поднять трубку» (кнопка «!» / dev-Enter). Механика счёта живёт в Game (ChildPress закрывает
+        /// окно и обнуляет серию пропусков); драйвер добавляет ФИДБЕК: окно было открыто и закрылось этим
+        /// нажатием → звонок ПОДНЯТ → салют звёзд (revisions §5b + §6). Пре-нажатие/локаут окно не
+        /// закрывают, поэтому салют за них не выдаётся.
+        /// </summary>
+        private void PressChildPhone()
+        {
+            bool wasRinging = _game.ChildFlashing;
+            _game.HandleInput(GameInput.ChildPress);
+            if (wasRinging && !_game.ChildFlashing) StarBurst();
         }
 
         // Transient «РАССТАЛИСЬ» plate: advance its own ~2s clock and mirror visibility (only while
@@ -1916,11 +2014,6 @@ namespace ThanksNoThanks
             BuildMoneyJar();      // деньги    — банка + сумма в лейбле + монета
             BuildAgeBadge();      // возраст   — бейдж + цифра ~112 px, без подписи
 
-            // Кнопка-ребёнок (заглушка, инкремент «звонок»): moved out of the art row's way — the jar now
-            // owns the old 1850,88 corner. Lives in the free gap BETWEEN the jar and the age badge; its
-            // size comes from that gap (geometry block, ChildCx/ChildCy/ChildGlowSize).
-            BuildChildButton();
-
             // ---- Card — the art-pack cream plate (`choice-plate-v2`), INK question on the cream field ----
             // Image.Type.Simple, never 9-slice: the plate's tabs sit at the middle of each side and its stars
             // sit in the corners, so a sliced draw would stretch both (asset-map §1.1/§5).
@@ -2024,6 +2117,9 @@ namespace ThanksNoThanks
             DisplayFx(noText);
             _noPlateText = noText;
             UseBakedPlates();   // hides both overlay labels — ordinary play shows the baked art alone
+
+            // ---- Трубка ребёнка (§5b): слой 5 «оверлеи» — создаётся ПОСЛЕ карточки и плашек ответа ----
+            BuildChildPhone();
 
             // ---- Burnout state (S7): full-screen dim-cobalt sunburst takeover, shown while Game.Burnout ----
             // An OPAQUE deep-cobalt backing hides the show; a cobalt-tinted sunburst sprite over it paints the
@@ -2851,34 +2947,18 @@ namespace ThanksNoThanks
             _stars.Clear();
         }
 
-        // Child «cabinet button» (S9): no dedicated sprite exists, so this is a placeholder built from
-        // marquee-bulb.png (the round lit-bulb art) + a heart — dim/cool while idle, bright gold + pulsing
-        // while the flash window is open (driven in Update off Game.ChildFlashing). Just a button, per the
-        // mockup — no label, no scale stripe (a red bar there read as a foreign health/danger artifact).
-        private void BuildChildButton()
+        // Трубка ребёнка (§5b, экран E). ОДИН Image с двумя позами одного рисунка: покой — `phone-rest-v2`
+        // (без дуг, торчит из-за левого края), звонок — `phone-ring-v2` (дуги-вибрация запечены), выехавшая
+        // внутрь и качающаяся. Группа — ребёнок _gamePanel, созданный ПОСЛЕ карточки и плашек ответа: по
+        // build-spec §1.3 звонящая трубка живёт на слое 5 (оверлеи), выше карточки.
+        private void BuildChildPhone()
         {
-            _childGroup = NewGroup("Child", _hudRow.transform);
-            AnchorPx(_childGroup.GetComponent<RectTransform>(), ChildCx, ChildCy,
-                ChildGlowPeakSize, ChildGlowPeakSize);
-
-            // Bright halo BEHIND the button (created first → lower sibling → drawn behind). Invisible at rest,
-            // it flares gold and pulses while ChildFlashing so the «жми Enter по вспышке» window is unmissable
-            // (founder playtest: the subtle gold-tint pulse read as «ничего не связано с ребёнком»).
-            // Sized off the free jar↔badge gap (geometry block): at the pulse PEAK it still clears the jar,
-            // the badge and the frame — the halo used to spill over the badge and off the right edge.
-            _childGlow = NewSprite("ChildGlow", _childGroup.transform, Sprite("star-white"));
-            _childGlow.color = new Color(Bulb.r, Bulb.g, Bulb.b, 0f);
-            Anchor(_childGlow.rectTransform, new Vector2(0.5f, 0.5f),
-                new Vector2(ChildGlowSize, ChildGlowSize));
-
-            _childButtonImg = NewSprite("Button", _childGroup.transform, Sprite("marquee-bulb"));
-            _childButtonImg.color = CobaltDeep;   // idle (unlit)
-            Anchor(_childButtonImg.rectTransform, new Vector2(0.5f, 0.5f),
-                new Vector2(ChildButtonSize, ChildButtonSize));
-            var heart = NewSprite("Heart", _childButtonImg.transform, Sprite("icon-heart"));
-            Anchor(heart.rectTransform, new Vector2(0.5f, 0.5f),
-                new Vector2(ChildButtonSize * 0.52f, ChildButtonSize * 0.52f));
-
+            _childGroup = NewGroup("ChildPhone", _gamePanel.transform);
+            _phoneRestSprite = Sprite("phone-rest-v2");
+            _phoneRingSprite = Sprite("phone-ring-v2");
+            _phoneImg = NewSprite("Phone", _childGroup.transform, _phoneRestSprite);
+            _phoneImg.type = Image.Type.Simple;   // never 9-slice: это цельный рисунок, а не плашка
+            ApplyPhonePose(0f);
             _childGroup.SetActive(false);
         }
 
@@ -3170,7 +3250,14 @@ namespace ThanksNoThanks
                 _healthTutorialSeen = false;
                 _burnoutHintSeen = false;
                 _childTutorialSeen = false;
+                // §5b: свежая жизнь начинается БЕЗ трубки на экране, и любой звонок оборван — поза
+                // сбрасывается в покой (иначе выехавшая трубка пережила бы рестарт).
                 _childGroup.SetActive(false);
+                _phoneOut = 0f;
+                _phoneRingClock = 0f;
+                _phoneRinging = false;
+                if (_phoneImg != null) _phoneImg.sprite = _phoneRestSprite;
+                ApplyPhonePose(0f);
                 _tutorialShowing = false;
                 _tutorialOverlay.SetActive(false);
                 _game.Paused = false;

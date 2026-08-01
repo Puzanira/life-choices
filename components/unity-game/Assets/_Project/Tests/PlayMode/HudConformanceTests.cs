@@ -150,6 +150,28 @@ namespace ThanksNoThanks.Tests.PlayMode
         }
 
         /// <summary>
+        /// AABB нарисованного КОРПУСА трубки в реф-px. Корпус в обоих спрайтах пиксельно один и тот же
+        /// (asset-map §1: `hf_phone.png` и `hf_phone copy.png` — две позы одного рисунка), его alpha-tight
+        /// подпрямоугольник в текстуре 662×715 — `113,53,434,608`. Считается как повёрнутый вместе с
+        /// ректом прямоугольник: центры мапятся через канвас, габариты берутся из ректа (реф-px).
+        /// </summary>
+        private static (float L, float T, float R, float B) PhoneBodyBox(RectTransform canvas, RectTransform rt)
+        {
+            const float bx = 113f, by = 53f, bw = 434f, bh = 608f, tw = 662f, th = 715f;
+            float w = rt.rect.width * bw / tw, h = rt.rect.height * bh / th;
+            float ox = ((bx + bw / 2f) / tw - 0.5f) * rt.rect.width;
+            float oy = ((by + bh / 2f) / th - 0.5f) * rt.rect.height;
+            float ang = rt.localEulerAngles.z * Mathf.Deg2Rad;
+            float ca = Mathf.Cos(ang), sa = Mathf.Sin(ang);
+            var c = RefCentre(canvas, rt);
+            float cx = c.x + ox * ca + oy * sa;      // реф-система: y вниз, поэтому знак у sa зеркальный
+            float cy = c.y - ox * sa + oy * ca;
+            float hw = (Mathf.Abs(w * ca) + Mathf.Abs(h * sa)) / 2f;
+            float hh = (Mathf.Abs(w * sa) + Mathf.Abs(h * ca)) / 2f;
+            return (cx - hw, cy - hh, cx + hw, cy + hh);
+        }
+
+        /// <summary>
         /// Centre of a CARD CHILD in reference px. The card itself is canvas-anchored (so its own centre
         /// maps exactly), and inside it every offset is in the card's local units — which ARE reference px,
         /// because the card's rect is sized in them. Plain <see cref="RefCentre"/> would route the child's
@@ -942,45 +964,19 @@ namespace ThanksNoThanks.Tests.PlayMode
             yield return null;
         }
 
-        // The child «cabinet button» placeholder is a HALO plus a bulb, and the halo — not the bulb — is its
-        // real visible extent: at the flash peak it is ~2× the button. Guarding only ChildButtonImage let the
-        // halo spill over the age badge and off the right edge. This asserts the WORST CASE (pulse peak).
+        // §5b: трубка ребёнка сменила старую «вспышку кнопки-ребёнка» (halo + лампочка в правой колонке).
+        // Обе позы сняты с эталонов, поэтому геометрию сторожим ИМЕННО по ним: покой — за левым краем,
+        // звонок — выехал внутрь; и в ОБЕИХ позах трубка не наезжает на карточку-вопрос и на правую
+        // колонку HUD (банка/бейдж/монета), т.е. читаемость доски сохраняется.
         [UnityTest]
-        public IEnumerator ChildHalo_AtPulsePeak_StaysInFrame_AndClearsTheArtRow()
+        public IEnumerator ChildPhone_BothPoses_MatchTheExplainers_AndClearTheBoard()
         {
             var driver = BootToAdult(out var go);
             yield return ToAdult(driver);
             var canvas = driver.CanvasRect;
             driver.ChildGroup.SetActive(true);   // revealed by MD02=ДА in play; posed here for the geometry
+            var rt = driver.ChildPhoneImage.rectTransform;
 
-            // The peak constants the guard clears must be the ones the widget is really built from.
-            Assert.AreEqual(GameDriver.ChildGlowSize, driver.ChildGlow.rectTransform.rect.width, 0.01f,
-                "halo rect = ChildGlowSize (the constant the peak is derived from)");
-            Assert.AreEqual(GameDriver.ChildButtonSize, driver.ChildButtonImage.rectTransform.rect.width, 0.01f,
-                "button rect = ChildButtonSize");
-            Assert.Greater(GameDriver.ChildGlowPeakSize, GameDriver.ChildButtonPeakSize,
-                "the halo stays the outer element even at the peak (it IS the visible extent)");
-
-            (float L, float T, float R, float B) PeakBox(RectTransform rt, float peak)
-            {
-                var c = RefCentre(canvas, rt);
-                return (c.x - peak / 2f, c.y - peak / 2f, c.x + peak / 2f, c.y + peak / 2f);
-            }
-
-            var halo = PeakBox(driver.ChildGlow.rectTransform, GameDriver.ChildGlowPeakSize);
-            var bulb = PeakBox(driver.ChildButtonImage.rectTransform, GameDriver.ChildButtonPeakSize);
-
-            // (1) fully inside the 1920×1080 frame at the flash peak — the halo used to run off the right edge
-            foreach (var (box, what) in new[] { (halo, "halo кнопки-ребёнка"), (bulb, "кнопка-ребёнок") })
-            {
-                Assert.GreaterOrEqual(box.L, 0f, what + " не срезан левым краем кадра");
-                Assert.LessOrEqual(box.R, 1920f, what + " не срезан ПРАВЫМ краем кадра");
-                Assert.GreaterOrEqual(box.T, 0f, what + " не срезан верхним краем кадра");
-                Assert.LessOrEqual(box.B, 1080f, what + " не срезан нижним краем кадра");
-            }
-
-            // (2) disjoint from every art-row neighbour it could cover (asset-map §2 drawn boxes + the
-            // tilted ДА plate's true extent). The halo covering the age digits is the founder-visible bug.
             var neighbours = new[]
             {
                 (DrawnRefBox(canvas, driver.AgeBadgeImage.rectTransform, AgeBadge), "бейдж возраста"),
@@ -989,13 +985,38 @@ namespace ThanksNoThanks.Tests.PlayMode
                 (DrawnRefBox(canvas, driver.CardFrameImage.rectTransform, CardPlate), "карточка-вопрос"),
                 (RefAabb(canvas, driver.YesPlateImage.rectTransform), "кнопка ДА"),
             };
-            foreach (var (box, what) in neighbours)
+
+            void AssertPose(Vector4 want, float tilt, string what)
             {
-                Assert.IsFalse(RefOverlap(halo, box),
-                    "halo кнопки-ребёнка на пике вспышки не пересекает " + what);
-                Assert.IsFalse(RefOverlap(bulb, box),
-                    "кнопка-ребёнок на пике вспышки не пересекает " + what);
+                var c = RefCentre(canvas, rt);
+                Assert.AreEqual(want.x, c.x, MapTol, what + ": центр по X = замер эталона");
+                Assert.AreEqual(want.y, c.y, MapTol, what + ": центр по Y = замер эталона");
+                Assert.AreEqual(want.z, rt.rect.width, MapTol, what + ": ширина ректа");
+                Assert.AreEqual(want.w, rt.rect.height, MapTol, what + ": высота ректа");
+                Assert.AreEqual(tilt, Mathf.DeltaAngle(0f, rt.localRotation.eulerAngles.z), 0.5f,
+                    what + ": наклон");
+                // Габарит НАРИСОВАННОГО корпуса (а не всего ректа: у спрайта звонка треть площади —
+                // прозрачные поля вокруг дуг), повёрнутый вместе с ректом.
+                var box = PhoneBodyBox(canvas, rt);
+                foreach (var (n, who) in neighbours)
+                    Assert.IsFalse(RefOverlap(box, n), what + ": трубка не наезжает на " + who);
             }
+
+            // (1) Покой: спрайт без дуг, торчит из-за ЛЕВОГО края (asset-map §2 — центр 34,569).
+            driver.DebugPreviewChildPhoneRest();
+            Assert.AreEqual("phone-rest-v2", driver.ChildPhoneImage.sprite.name,
+                "поза покоя — трубка БЕЗ красных дуг");
+            AssertPose(GameDriver.PhoneRestRect, GameDriver.PhoneRestTilt, "покой");
+            Assert.Less(RefCentre(canvas, rt).x - rt.rect.width / 2f, 0f,
+                "покой: трубка реально уходит за левый край кадра");
+
+            // (2) Звонок: спрайт с запечёнными дугами, выехал внутрь (asset-map §4.2 — корпус 14,351,258,384).
+            driver.DebugPreviewChildCall();
+            Assert.AreEqual("phone-ring-v2", driver.ChildPhoneImage.sprite.name,
+                "поза звонка — трубка С запечёнными дугами");
+            AssertPose(GameDriver.PhoneRingRect, GameDriver.PhoneRingTilt, "звонок");
+            Assert.Greater(RefCentre(canvas, rt).x, GameDriver.PhoneRestRect.x,
+                "звонок: трубка выехала ВНУТРЬ кадра относительно покоя");
 
             Object.Destroy(go);
             yield return null;
@@ -1105,12 +1126,12 @@ namespace ThanksNoThanks.Tests.PlayMode
             Below(card.Find("BlockBanner"), card.Find("CardPricePlate"), "плашка цены — поверх баннера");
             Below(card.Find("CardPricePlate"), card.Find("CardPrice"), "текст цены — поверх своей плашки");
 
-            // (3) HUD row: the child halo flares over the row's right column, so it must be ABOVE the badge;
-            // inside the child group the halo stays BEHIND its own bulb.
-            Below(driver.AgeBadge.transform, driver.ChildGroup.transform,
-                "halo кнопки-ребёнка рисуется поверх бейджа возраста (а не под ним)");
-            Below(driver.ChildGlow.transform, driver.ChildButtonImage.transform,
-                "halo рисуется ПОЗАДИ кнопки-ребёнка");
+            // (3) §5b: звонящая трубка — слой 5 «оверлеи» (build-spec §1.3), т.е. ВЫШЕ ряда HUD и выше
+            // карточки-вопроса; иначе выехавшая трубка ныряла бы под плашку и звонок читался бы как баг.
+            Below(driver.HudRow.transform, driver.ChildGroup.transform,
+                "трубка ребёнка рисуется ПОВЕРХ ряда HUD");
+            Below(driver.CardRect.transform, driver.ChildGroup.transform,
+                "трубка ребёнка рисуется ПОВЕРХ карточки-вопроса (слой оверлеев)");
 
             Object.Destroy(go);
             yield return null;

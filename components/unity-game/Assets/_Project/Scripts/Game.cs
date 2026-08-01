@@ -123,15 +123,18 @@ namespace ThanksNoThanks
         public const float RelBreakupSeconds = 10f;        // суммарно ~10 сек ниже зоны → разрыв
         public const int RelBreakupValue = 20;             // после разрыва шкала падает сюда (одиноко)
 
-        // ---- live child (signal-response tamagotchi button; tunable; canon §Ребёнок) ----
+        // ---- live child (signal-response; tunable; canon §Ребёнок) ----
         // Opens on MD02=ДА (which the deck places at «свадьба +2», gated CHAIN→MD01=ДА, so it can only
-        // resolve ≥2 game-years after the wedding). Signal-response: the button FLASHES on a random
-        // interval; a CHILD_PRESS inside the open window is good parenting; missing 2+ flashes in a row is
-        // «плохой родитель» (relationships −10% + child scale drop). NO death — it only bends relationships
-        // (which fold into the show tone/brightness) and the child scale. Numbers are the #1 feel-tunables.
-        public const float ChildFlashIntervalMin = 15f;   // вспышка каждые ~15–25с (нижняя граница)
+        // resolve ≥2 game-years after the wedding). Signal-response: the PHONE RINGS on a random interval
+        // (the driver slides the handset in from the left edge — revisions §5b); a CHILD_PRESS inside the
+        // open window is «поднял трубку»; missing 2+ calls in a row is «плохой родитель» (relationships
+        // −10% + child scale drop). NO death — it only bends relationships (which fold into the show
+        // tone/brightness) and the child scale. Numbers are the #1 feel-tunables.
+        public const float ChildFlashIntervalMin = 15f;   // звонок каждые ~15–25с (нижняя граница)
         public const float ChildFlashIntervalMax = 25f;   // …верхняя граница (seeded/injectable roll)
-        public const float ChildFlashWindow = 2f;         // окно нажатия ~2с, пока кнопка горит
+        // Окно поднятия — РОВНО 5 с (meeting-revisions §5b, спековое число; было 2 с у старой «вспышки
+        // кнопки-ребёнка», которую трубка заменила).
+        public const float ChildFlashWindow = 5f;         // окно поднятия трубки, пока она звонит
         public const float ChildPressMinDelay = 1f;       // мин. задержка ~1с: пре-нажатие в этом окне
                                                            // перед вспышкой блокирует засчёт (анти-заспам)
         public const int ChildBadParentMisses = 2;        // пропуск 2+ вспышек подряд → «плохой родитель»
@@ -249,6 +252,21 @@ namespace ThanksNoThanks
         /// <summary>True while the flash window is OPEN (button lit) — a CHILD_PRESS now is good parenting.
         /// Read by the driver for the lit/flashing button state (S9).</summary>
         public bool ChildFlashing { get; private set; }
+
+        /// <summary>
+        /// The child call is FROZEN: the 5s window stops counting down and a press is not scored. Two cases,
+        /// one rule — «the player can't see the handset, so the clock must not run»:
+        /// <list type="bullet">
+        /// <item><see cref="Paused"/> — a hint / rubric banner beat is up over the board;</item>
+        /// <item><see cref="Burnout"/> — the S7 «ВЫГОРАНИЕ» plate is a FULL-SCREEN takeover drawn ON TOP of
+        /// the handset, so a running window would bank INVISIBLE misses (two of them = «плохой родитель»
+        /// for a call the player never saw).</item>
+        /// </list>
+        /// Nothing is reset: the remaining window and the miss streak survive the freeze and continue from
+        /// the same point the moment it lifts. (Crisis and depression freeze the call even earlier — there
+        /// <see cref="Tick"/> never reaches <see cref="IntegrateChild"/> at all.)
+        /// </summary>
+        public bool ChildCallFrozen => Paused || Burnout;
 
         /// <summary>Fired the instant the child scale opens (MD02=ДА, «свадьба+2») — drives the S5
         /// «ПОПОЛНЕНИЕ! жмите Enter по вспышке» hint + pause, one-shot per life.</summary>
@@ -1459,12 +1477,13 @@ namespace ThanksNoThanks
                    + (float)(_childRng.NextDouble() * (ChildFlashIntervalMax - ChildFlashIntervalMin));
         }
 
-        // Signal-response integration (real-time, dt-injected): count down to the next flash, hold the ~2s
-        // open window, and register a MISS when the window closes unpressed. NO death path — a lapse only
+        // Signal-response integration (real-time, dt-injected): count down to the next call, hold the 5s
+        // open window (STOPPED while ChildCallFrozen — a window the player can't see must not run out), and
+        // register a MISS when the window closes unpressed. NO death path — a lapse only
         // bends relationships (which fold into the show tone) and the child scale.
         private void IntegrateChild(float dt)
         {
-            if (!ChildOpen) return;
+            if (!ChildOpen || ChildCallFrozen) return;
 
             // Anti-pre-spam lockout always winds down (so a press >1s before a flash is harmless again).
             if (_childPressLockout > 0f)
@@ -1498,7 +1517,7 @@ namespace ThanksNoThanks
         // is discarded AND (re)arms the ~1s lockout, so mashing ahead of the flash can't bank a success.
         private void ChildPress()
         {
-            if (!ChildOpen || Paused) return;
+            if (!ChildOpen || ChildCallFrozen) return;
             if (ChildFlashing && _childPressLockout <= 0f)
             {
                 ChildFlashing = false;

@@ -51,7 +51,9 @@ namespace ThanksNoThanks.Tests.PlayMode
                     driver.CardRect.Find("CardText").GetComponent<UnityEngine.UI.Text>().text =
                         "Ваш ребёнок вырос и больше не нуждается в помощи. Помочь всё равно?";
                     break;
-                case "childflash": driver.DebugPreviewChildFlash(); break;
+                // §5b: трубка ребёнка — поза ЗВОНКА (выехала, дуги запечены) и поза ПОКОЯ (за левым краем).
+                case "phonering": driver.DebugPreviewChildCall(); break;
+                case "phonerest": driver.DebugPreviewChildPhoneRest(); break;
                 // §5a: тот же обычный кадр, но купол-таймер в ПОСЛЕДНЕЙ секунде — дуга почти истекла
                 // и горит RED_BRIGHT (состояние, которого спокойный кадр не показывает).
                 case "domelast": driver.DebugPreviewDomeLastSecond(); break;
