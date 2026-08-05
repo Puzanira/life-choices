@@ -2,6 +2,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
+using AiGameStudio.ArcadeControls;
 using System.Text.RegularExpressions;
 using NUnit.Framework;
 using ThanksNoThanks;
@@ -20,8 +21,19 @@ namespace ThanksNoThanks.Tests.PlayMode
     ///  • the dev CONFIRM key (Enter) survives as a HIDDEN emulation — it still restarts;
     ///  • no string the player can read names a dev key («Enter», «ПРОБЕЛ», a bare «E», «стрелки», ↑/↓ …)
     ///    — every on-screen hint names a PHYSICAL cabinet control instead. The sweep covers the static
-    ///    copy of GameDriver + HostContent (banners, nags, mutterings AND the fallback bubble pool) +
+    ///    copy of GameDriver + HostContent (announces, nags, mutterings AND the fallback bubble pool) +
     ///    Necrolog, every Text built into the HUD, and the whole authored deck in scenes.csv.
+    ///
+    /// ⚠ ТОЧЕЧНОЕ ОСЛАБЛЕНИЕ (плейтест основательницы 2026-08-05, пункт 2). Ровно ДВЕ строки —
+    /// служебные подсказки клавиш (<c>TaskKeyHint</c> на §D-экране и <c>TutKeyHint</c> на S5-подсказке) —
+    /// выведены из свипа рендеренных Text. Причина: их содержимое ЗАКОННО называет клавишу эмуляции
+    /// («эмуляция: Q», «эмуляция: ↑ / ↓»), потому что основательница играет без плат и без имени клавиши
+    /// играть не может. Ослабление узкое и обвешано условиями, которые проверяются ЗДЕСЬ же
+    /// (<see cref="KeyHintLines_AreTheOnlyDevKeyStrings_AndOnlyUnderEmulation"/>):
+    ///   • это ДИНАМИЧЕСКИЕ строки — они собираются из конфига пакета в рантайме, ни одной статической
+    ///     константы с именем клавиши в игре нет (свип (1) по константам НЕ ослаблен и ловит такое);
+    ///   • при живых платах строка ПУСТА, т.е. на стойке игрок дев-клавиш по-прежнему не видит;
+    ///   • никакой ДРУГОЙ Text освобождения не получает — исключение по точному имени объекта.
     /// </summary>
     public class ControlLanguageTests
     {
@@ -41,9 +53,6 @@ namespace ThanksNoThanks.Tests.PlayMode
             int guard = 0;
             while (driver.Game.State == GameState.Playing && guard++ < 8000)
             {
-                // A TIMELINE milestone plays a blocking banner beat that swallows input — pump its clock
-                // synchronously, exactly as the other driver tests do, so the run never stalls on it.
-                if (driver.HostBannerVisible) { driver.DebugPumpHost(GameDriver.BannerSeconds + 0.1f); continue; }
                 // §D: открытия четырёх шкал поднимают МОДАЛКУ, которая кнопкой не снимается — её
                 // проходят реальным контролом шкалы (NewScaleTut), остальные подсказки — как раньше.
                 if (driver.NewScaleShowing) { NewScaleTut.Clear(driver, fake); continue; }
@@ -141,6 +150,9 @@ namespace ThanksNoThanks.Tests.PlayMode
             ("клавиша E", new Regex(@"(?<![0-9A-Za-z\p{IsCyrillic}_])[Ee](?![0-9A-Za-z\p{IsCyrillic}_])")),
         };
 
+        // Имена объектов ДВУХ служебных строк подсказки клавиши — единственное исключение свипа (2).
+        private static readonly string[] KeyHintObjectNames = { "TaskKeyHint", "TutKeyHint" };
+
         private static void AssertNoDevKey(string text, string where)
         {
             if (string.IsNullOrEmpty(text)) return;
@@ -211,8 +223,14 @@ namespace ThanksNoThanks.Tests.PlayMode
             // restart CTA, the tutorial's dismiss button) — the rendered truth, not just the constants.
             var texts = driver.GetComponentsInChildren<Text>(includeInactive: true);
             Assert.Greater(texts.Length, 3, "the HUD really built its labels");
+            Assert.AreEqual(KeyHintObjectNames.Length,
+                texts.Count(t => KeyHintObjectNames.Contains(t.name)),
+                "обе служебные строки подсказки клавиш на месте — исключение свипа не протухло");
             foreach (var t in texts)
+            {
+                if (KeyHintObjectNames.Contains(t.name)) continue;   // ⚠ точечное ослабление, см. шапку
                 AssertNoDevKey(t.text, "on-screen label «" + t.name + "»");
+            }
 
             // (2b) …and the whole authored DECK, not just the cards this run happens to draw: every card
             // question, host line and necrolog line in scenes.csv is player-facing copy too.
@@ -245,6 +263,51 @@ namespace ThanksNoThanks.Tests.PlayMode
             yield return null;
         }
 
+        /// <summary>
+        /// Условия точечного ослабления. (а) Ни одна СТАТИЧЕСКАЯ строка игры не называет клавишу — имена
+        /// клавиш существуют только как рантайм-значения из конфига пакета. (б) При живых платах строка
+        /// подсказки ПУСТА: на стойке дев-клавиш не видно. (в) При эмуляции строка есть и говорит правду.
+        /// </summary>
+        [UnityTest]
+        public IEnumerator KeyHintLines_AreTheOnlyDevKeyStrings_AndOnlyUnderEmulation()
+        {
+            var driver = Boot(out var go, out var fake);
+            yield return null;
+
+            // (а) статический свип по константам — БЕЗ послаблений (это и есть «гард на статические тексты»).
+            foreach (var (where, text) in StaticStrings(typeof(GameDriver)))
+                AssertNoDevKey(text, "constant «" + where + "»");
+
+            // (б) стойка: платa ведёт датчики → подсказка пуста.
+            var serial = new HintFakeSerial { ProvidesHeights = true, ProvidesJoystick = true, ProvidesButtons = true };
+            ArcadeInput.Initialize(new CompositeBackend(new KeyboardBackend(KeyboardMapping.LoadDefault()), serial));
+            driver.DebugShowNewScale(NewScale.Energy);
+            yield return null;
+            Assert.AreEqual("", driver.NewScaleHintLine.text,
+                "с живой платой строка клавиши пуста — на стойке дев-клавиш не видно");
+
+            // (в) без плат: подсказка появляется и называет клавишу ИЗ КОНФИГА ПАКЕТА.
+            serial.ProvidesHeights = false;
+            yield return null;
+            string expected = GameDriver.KeyHintPrefix
+                + KeyboardHints.PrimaryFor(KeyboardMapping.LoadDefault(), ArcadeControlId.HeightA)
+                + GameDriver.BreathKeyHintTail;
+            Assert.AreEqual(expected, driver.NewScaleHintLine.text,
+                "без плат строка есть и собрана из маппинга пакета, а не из зашитой в игре буквы");
+
+            ArcadeInput.Initialize(null);
+            Object.Destroy(go);
+            yield return null;
+        }
+
+        private sealed class HintFakeSerial : ISerialBackend, IButtonPresence
+        {
+            public bool ProvidesHeights { get; set; }
+            public bool ProvidesJoystick { get; set; }
+            public bool ProvidesButtons { get; set; }
+            public BackendSnapshot Poll(float deltaTime) => default;
+        }
+
         // A live tutorial really is dismissed by GREEN (the button label promises exactly that).
         [UnityTest]
         public IEnumerator Hint_Dismisses_On_Green()
@@ -256,7 +319,6 @@ namespace ThanksNoThanks.Tests.PlayMode
             int guard = 0;
             while (!driver.TutorialShowing && driver.Game.State == GameState.Playing && guard++ < 8000)
             {
-                if (driver.HostBannerVisible) { driver.DebugPumpHost(GameDriver.BannerSeconds + 0.1f); continue; }
                 // Первые открытия (18/20/25) ведут §D-модалку — она НЕ снимается зелёной и проходится
                 // своим контролом; S5-подсказка, которую и проверяет этот тест, остаётся у здоровья (30).
                 if (driver.NewScaleShowing) { NewScaleTut.Clear(driver, fake); continue; }

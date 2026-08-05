@@ -92,6 +92,42 @@ namespace ThanksNoThanks.Tests
         }
 
         [Test]
+        public void DefaultWindow_AcceptsAComfortableHumanBreath()
+        {
+            // Калибровка 2026-08-05: окно ПО УМОЛЧАНИЮ (а не подкрученное тестом) обязано принимать
+            // спокойное человеческое дыхание 1.5–2.5 c — на 1.5 c верхней границы плейтест встал.
+            foreach (double cycle in new[] { 1.0, 1.5, 2.0, 2.5 })
+            {
+                var r = new BreathRhythm();
+                r.Advance(cycle); r.Pulse();                 // seed
+                r.Advance(cycle);
+                Assert.IsTrue(r.Pulse(), $"каденция {cycle:0.0} c обязана считаться дыханием");
+            }
+
+            var mash = new BreathRhythm();
+            mash.Advance(1.0); mash.Pulse();
+            mash.Advance(0.2);
+            Assert.IsFalse(mash.Pulse(), "заколачивание по-прежнему не лечит");
+        }
+
+        [Test]
+        public void PulseDetailed_TellsSeedApartFromOffRhythm()
+        {
+            // UI обязан различать: первый вдох жизни — не «не в ритм», ругать за него нечестно.
+            var r = new BreathRhythm();
+            r.Advance(1.0);
+            Assert.AreEqual(BreathPulse.Seeded, r.PulseDetailed(), "первый вдох только задаёт каденцию");
+            r.Advance(0.05);
+            Assert.AreEqual(BreathPulse.OffRhythm, r.PulseDetailed(), "а вот это уже долбёж");
+            r.Advance(2.0);
+            Assert.AreEqual(BreathPulse.Valid, r.PulseDetailed(), "спокойный вдох принят");
+
+            r.Reset();
+            r.Advance(1.0);
+            Assert.AreEqual(BreathPulse.Seeded, r.PulseDetailed(), "после сброса снова засев, а не отказ");
+        }
+
+        [Test]
         public void Reset_ClearsCadence()
         {
             var r = New();

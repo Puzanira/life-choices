@@ -8,9 +8,9 @@ namespace ThanksNoThanks.Tests
 {
     /// <summary>
     /// PACING GATE (founder playtest, 2026-07-23). The four young mechanics reveal back-to-back at their
-    /// canon ages — деньги@18, отношения@20, энергия@25, здоровье@30 — each firing a tutorial + gold rubric
-    /// banner. The fix keeps the ages but demands ≥8 ORDINARY (normal player-choice) cards between every
-    /// consecutive reveal, so the player breathes between banners.
+    /// canon ages — деньги@18, отношения@20, энергия@25, здоровье@30 — each firing a tutorial.
+    /// The fix keeps the ages but demands ≥8 ORDINARY (normal player-choice) cards between every
+    /// consecutive reveal, so the player breathes between reveals.
     ///
     /// This test simulates a full young life from the REAL scenes.csv for several fixed seeds: it builds a
     /// <see cref="Game"/> from a seeded <see cref="DeckSampler"/> plan, answers deterministically (all НЕТ —

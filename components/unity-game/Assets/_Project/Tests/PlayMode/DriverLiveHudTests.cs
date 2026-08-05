@@ -205,7 +205,6 @@ namespace ThanksNoThanks.Tests.PlayMode
             int guard = 0;
             while (guard++ < 12000 && driver.Game.State == GameState.Playing && !sawEnergyModal)
             {
-                if (driver.HostBannerVisible) { driver.DebugPumpHost(GameDriver.BannerSeconds + 0.1f); continue; }
                 if (driver.NewScaleShowing)
                 {
                     if (driver.NewScaleKind == NewScale.Energy)
@@ -271,7 +270,6 @@ namespace ThanksNoThanks.Tests.PlayMode
             int guard = 0;
             while (guard++ < 20000 && driver.Game.State == GameState.Playing && !atHealth)
             {
-                if (driver.HostBannerVisible) { driver.DebugPumpHost(GameDriver.BannerSeconds + 0.1f); continue; }
                 // §D-модалки открытий (18/20/25) проходятся своими контролами; хинт здоровья (30) остался S5.
                 if (driver.NewScaleShowing) { NewScaleTut.Clear(driver, fake); yield return null; continue; }
                 if (driver.TutorialShowing)

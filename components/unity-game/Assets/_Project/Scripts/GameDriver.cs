@@ -1,5 +1,6 @@
 using System.Collections;
 using System.Collections.Generic;
+using AiGameStudio.ArcadeControls;
 using UnityEngine;
 using UnityEngine.UI;
 
@@ -71,7 +72,6 @@ namespace ThanksNoThanks
         private static readonly Color TextLight = new(0.918f, 0.941f, 1f);     // #eaf0ff
         private static readonly Color Bulb = new(1f, 0.847f, 0.451f);          // #ffd873
         private static readonly Color Energy = new(0.973f, 0.824f, 0.271f);    // #f8d24c
-        private static readonly Color Muted = new(0.62f, 0.69f, 0.91f);        // #9fb0e8
         // Красный «тревоги» — остался за плашкой разрыва и красной зоной балансира (купол на своих токенах).
         private static readonly Color TimerRed = new(0.910f, 0.267f, 0.227f);  // #e8443a
         // ---- купол-таймер (§5a): токены build-spec §1.1, не выборки с PNG ----
@@ -619,6 +619,53 @@ namespace ThanksNoThanks
         /// снятия выгорания <see cref="Game.BurnoutExitEnergyAbove"/>, но это ОТДЕЛЬНАЯ величина экрана.</summary>
         public const int NewScaleEnergyAbove = 40;
 
+        // ---- подсказки клавиш при эмуляции + отклик на невалидный вдох (плейтест 2026-08-05) ----------
+        /// <summary>Сколько секунд висит подпись «вдох не в ритм» после отбитого ритм-гейтом импульса.</summary>
+        public const float BreathRejectSeconds = 0.9f;
+        /// <summary>Сколько секунд батарея «вздрагивает» затемнением на тот же отбитый вдох.</summary>
+        public const float EnergyDimSeconds = 0.35f;
+        /// <summary>До какой альфы проседает батарея на вздрагивании.</summary>
+        public const float EnergyDimAlpha = 0.35f;
+        /// <summary>Приставка второй строки: она честно говорит, что это НЕ контрол автомата, а эмуляция.</summary>
+        public const string KeyHintPrefix = "эмуляция: ";
+        /// <summary>Хвост подсказки ДЫХАНИЯ. Клавиша сама по себе игрока не спасает: основательница
+        /// ДЕРЖАЛА клавишу («жму — ничего»), а удержание — это поднятая рука, а не дыхание. Поэтому
+        /// строка датчика прямо называет ДВИЖЕНИЕ и его темп (число — из калибровки ритм-гейта).</summary>
+        public const string BreathKeyHintTail = " — нажимай и отпускай, раз в ~2 секунды";
+        /// <summary>Отклик на вдох, отбитый ритм-гейтом (мигает на окне-задаче энергии).</summary>
+        public const string BreathOffRhythmText = "не в ритм — дыши ровно, раз в ~2 секунды";
+
+        // Вторая строка окна-задачи §D: подсказка клавиши при клавиатурной эмуляции, а на энергии — ещё и
+        // мигающий отклик «не в ритм». ОДНА строка на обе роли: у окна-задачи под текстом ровно одна
+        // свободная полоса до дорожки удержания, и две подписи там встали бы друг на друга.
+        private Text _nsHintLine;
+        // То же под текстом S5-подсказки (выгорание объясняет дыхание — там клавиша тоже нужна).
+        private Text _tutHintLine;
+        private ArcadeControlId? _tutHintControl;    // какой контрол объясняет ОТКРЫТАЯ сейчас S5-подсказка
+        private CanvasGroup _energyFade;             // затемнение батареи на отклонённый вдох
+        private float _breathRejectT;                // сек. до конца подписи «не в ритм»
+        private float _energyDimT;                   // сек. до конца вздрагивания батареи
+
+        // Кэш готовой строки подсказки — по одному на каждое место (окно-задача / S5-подсказка), чтобы
+        // два разных контрола на экране не выбивали друг друга из кэша. См. KeyHintLine.
+        private HintCache _nsHintCache;
+        private HintCache _tutHintCache;
+
+        /// <summary>
+        /// Запомненная строка подсказки вместе с ВСЕМ, от чего она зависит: контрол, ответ «этот контрол
+        /// сейчас эмулируется?» и САМА таблица клавиш (по ссылке). Пока всё три совпадают — строку
+        /// пересобирать не из чего, и кадр не создаёт ни одной. Меняется только среднее (воткнули/выдернули
+        /// плату) — ради этого проверка и живёт в каждом кадре.
+        /// </summary>
+        private struct HintCache
+        {
+            public bool Valid;
+            public ArcadeControlId Control;
+            public bool Emulated;
+            public KeyboardMapping Mapping;
+            public string Line;
+        }
+
         // ---- геометрия D, СНЯТА С ЭТАЛОНА «Экран - появление новой шкалы.png» (1920×1080, PIL) ---------
         // Табличные боксы build-spec §D — ориентир; пиксель-истина — эталон (asset-map §11-а). Замеры:
         //   кремовое поле окна-задачи   x 393…1625, y 343…819  (1233×477), центр (1009, 581)
@@ -639,6 +686,22 @@ namespace ThanksNoThanks
         // Кегли сняты с эталона: задача — cap-height ≈75 px ⇒ Arimo Bold ≈104; рассказ — cap-height ≈26 px
         // и межстрочный 48 ⇒ Rubik ≈39 (тот же кегль, что у живой реплики Ведущего, BubbleTextMaxSize).
         private const int TaskTextMaxSize = 104, TaskTextMinSize = 40;
+        // Служебная вторая строка (клавиша эмуляции / отклик «не в ритм»): МЕЛКО — втрое ниже задачи.
+        private const int HintTextSize = 30;
+        // Полоса под неё ВЫРЕЗАЕТСЯ из текстового поля задачи (а не кладётся поверх): иначе длинная
+        // задача — а она теперь длинная, ритм назван словами — доезжает низом ровно туда, где стоит
+        // подсказка. Резерв постоянный, чтобы композиция окна не прыгала от наличия плат.
+        private const float HintLineReserve = 62f;
+        // Центр служебной строки: под ужатым текстом задачи и НАД дорожкой удержания (776…796).
+        private const float HintLineCy = 740f;
+        /// <summary>
+        /// Цвет служебной строки: чернила ПОЛУПРОЗРАЧНО — она обязана быть тише задачи, но остаться
+        /// читаемой с дистанции автомата. Альфа 0.55 давала на кремовом поле ≈#B1AE96 — контраст 2.11:1,
+        /// мало для 23-px строки (дизайн-скептик, 2026-08-05); 0.74 даёт ≈#8B8878 ≈3.3:1. Кегль, вес и
+        /// сама «полупрозрачная» подача не менялись — только глубина чернил.
+        /// Гард: KeyHintLine_IsLegibleOnTheCreamField.
+        /// </summary>
+        private static Color HintInk => new(Ink.r, Ink.g, Ink.b, 0.74f);
         private const int StoryTextMaxSize = 39, StoryTextMinSize = 22;
         // Поля текста внутри кремовых полей (чтобы best-fit не садился на рамку/звёзды).
         private const float TaskTextPadX = 60f, TaskTextPadY = 48f;
@@ -733,15 +796,18 @@ namespace ThanksNoThanks
         /// <summary>Рассказ Ведущего на открытии ЭНЕРГИИ (host-content §4).</summary>
         public const string EnergyStoryText =
             "Ого! Что это? Первая усталость? Ты же не думал, что энергия бесконечна?";
-        /// <summary>Задача на открытии ЭНЕРГИИ (host-content §4).</summary>
+        /// <summary>Задача на открытии ЭНЕРГИИ (host-content §4). Ритм НАЗВАН словами (плейтест
+        /// 2026-08-05 §5): число «~2 секунды» — из финальной калибровки ритм-гейта
+        /// (<see cref="BreathRhythm.TargetSeconds"/>, окно 0.4–3.0 с), а не круглое «на глаз».</summary>
         public const string EnergyTaskText =
-            "Используй датчик высоты — дыши, чтобы восстановить энергию";
+            "Используй датчик высоты — дыши размеренно, раз в ~2 секунды, чтобы восстановить энергию";
         /// <summary>Рассказ Ведущего на открытии ОТНОШЕНИЙ (host-content §4, вар.1).</summary>
         public const string RelationsStoryText =
             "Ого-го! У кого-то, кажется, появились ЧУВСТВА! Только не задуши и не забрось — любовь любит золотую середину!";
-        /// <summary>Задача на открытии ОТНОШЕНИЙ (host-content §4, вар.1).</summary>
+        /// <summary>Задача на открытии ОТНОШЕНИЙ (host-content §4). Формулировка основательницы,
+        /// плейтест 2026-08-05: контрол назван прямо («джойстиком»), вар.1 заменён.</summary>
         public const string RelationsTaskText =
-            "Держи маркер отношений в зелёной зоне — не мало и не много";
+            "Двигай джойстиком — сохраняй маркер отношений в зелёной зоне";
         /// <summary>Рассказ Ведущего на открытии ДЕНЕГ (host-content §4, вар.2).</summary>
         public const string MoneyStoryText =
             "Добро пожаловать во взрослую жизнь! Денежки любят тех, кто их крутит. Так покрути же!";
@@ -829,23 +895,16 @@ namespace ThanksNoThanks
             public float T;         // прожито, с
         }
 
-        // ---- Host (Ведущий): speech bubble (S3) + rubric banner (S4) ----
-        // Tunables (defaults; noted in the report). Both clocks are injected real-time via Update.
+        // ---- Host (Ведущий): speech bubble (S3) ----
+        // Tunable (default; noted in the report). The clock is injected real-time via Update.
+        // Рубрика-баннер вехи (S4) и её «баннер-бит» СНЯТЫ (плейтест 2026-08-05) — см. BuildHost.
         public const float BubbleSeconds = 2f;   // speech bubble auto-hide (~2s)
-        public const float BannerSeconds = 1.5f; // rubric banner brief announce (~1.5s), then it clears
 
-        // The banner is a NON-blocking announcement band: it does NOT pause Game and does NOT swallow
-        // input (so it can never soft-lock, and the direct-Tick test loops keep flowing). It auto-hides
-        // on its own ~1.5s clock AND is replaced/cleared the moment the next card is drawn.
         private HostVoice _voice;
         private readonly TimedReveal _bubbleTimer = new(BubbleSeconds);
-        private readonly TimedReveal _bannerTimer = new(BannerSeconds);
 
         private GameObject _hostBubble;   // yellow bubble.png (9-slice), S3 corner
         private Text _bubbleText;
-        private GameObject _bannerRoot;   // rubric band (S4), over the card's upper area
-        private Image _bannerBand;
-        private Text _bannerText;
 
         private Coroutine _cardAnim;
         private Coroutine _moneyPulse;
@@ -972,6 +1031,18 @@ namespace ThanksNoThanks
         public GameObject NewScaleBigWidget => _nsBorrowed;
         /// <summary>§D: доля удержания 0…1 (то, что рисует полоска прогресса).</summary>
         public float NewScaleHoldFraction => Mathf.Clamp01(_nsHold / NewScaleHoldSeconds);
+        /// <summary>Вторая строка окна-задачи §D (подсказка клавиши / отклик «не в ритм»).</summary>
+        public Text NewScaleHintLine => _nsHintLine;
+        /// <summary>Вторая строка S5-подсказки (подсказка клавиши).</summary>
+        public Text TutorialHintLine => _tutHintLine;
+        /// <summary>Test seam: САМА ссылка на закэшированную строку подсказки §D. Тест сравнивает её
+        /// ReferenceEquals два кадра подряд — если строка пересобирается, ссылка меняется, даже когда
+        /// текст совпадает (и Text.text этого уже не покажет: одинаковую строку туда не переприсваивают).</summary>
+        public string NewScaleHintCachedLine => _nsHintCache.Line;
+        /// <summary>Идёт ли сейчас отклик на отбитый ритм-гейтом вдох (подпись + вздрагивание батареи).</summary>
+        public bool BreathRejectShowing => _breathRejectT > 0f;
+        /// <summary>Текущая альфа батареи: &lt;1 — идёт «вздрагивание» на невалидном вдохе.</summary>
+        public float EnergyDimAmount => _energyFade != null ? _energyFade.alpha : 1f;
         /// <summary>§D: по этой шкале уже был РЕАЛЬНЫЙ принятый ввод (крутилка/дыхание/рычаг/«!»).</summary>
         public bool NewScaleArmed => _nsArmed;
         /// <summary>§D: условие выполнено, идёт фейд ухода.</summary>
@@ -1015,10 +1086,7 @@ namespace ThanksNoThanks
         public GameObject ImpulseWarning => _impulseWarning;
         public Text YesPlateText => _yesPlateText;
         public Text NoPlateText => _noPlateText;
-        public GameObject HostBanner => _bannerRoot;
-        public Text HostBannerText => _bannerText;
         public bool HostBubbleVisible => _bubbleTimer.Visible;
-        public bool HostBannerVisible => _bannerTimer.Visible;
         public GameObject DepressionOverlay => _depressionGroup;
         public Image DepressionVeil => _depressionVeil;
         public Image DepressionPulseIndicator => _depressionPulse;
@@ -1037,10 +1105,10 @@ namespace ThanksNoThanks
         }
 
         /// <summary>Test/screenshot hook: raise a tutorial modal with the given body over live gameplay.</summary>
-        public void DebugShowTutorial(string text)
+        public void DebugShowTutorial(string text, ArcadeControlId? control = null)
         {
             bool dummy = false;
-            ShowTutorial(text, ref dummy);
+            ShowTutorial(text, ref dummy, control);
         }
 
         /// <summary>Layer-2 seam (§D): поднять модальный экран новой шкалы поверх живой игры — тем же
@@ -1050,6 +1118,12 @@ namespace ThanksNoThanks
             _nsSeen[(int)which] = false;
             ShowNewScale(which);
         }
+
+        /// <summary>Test seam: снять §D-модалку тихо (без салюта), как при уходе из Playing.</summary>
+        public void DebugCloseNewScale() => CloseNewScale(reward: false);
+
+        /// <summary>Test seam: снять S5-подсказку тем же путём, что и зелёная кнопка.</summary>
+        public void DebugDismissTutorial() => DismissTutorial();
 
         /// <summary>Layer-2 seam (§D): продвинуть модалку на dt (удержание + фейд) без ожидания кадров —
         /// ровно тем же вызовом, что и Update.</summary>
@@ -1093,6 +1167,7 @@ namespace ThanksNoThanks
                 ApplyPhonePose(1f, 0f);
             }
             DebugShowNewScale(which);
+            ReflectKeyHints(0f);   // поза замораживает Update — вторую строку заполняем явно
             enabled = false;
         }
 
@@ -1506,9 +1581,7 @@ namespace ThanksNoThanks
             // further Confirm passes (harmless during Playing). Cleared next frame in Update.
             if (_dismissedThisFrame && input != GameInput.Confirm) return;
 
-            // A rubric banner beat is up (S4/S6 — the card is hidden): swallow ALL input so a masher can't
-            // answer the hidden card or skip the announce unread. It auto-advances on its own ~1.5s clock.
-            if (_bannerTimer.Visible && _game.State == GameState.Playing) return;
+            // (Раньше здесь глушился ввод на баннер-бите вехи — бит снят вместе с баннером 2026-08-05.)
 
             // §D — модальный экран новой шкалы. Стоит ДО ремапа ДА→CONFIRM: зелёный рычаг здесь обязан
             // остаться инертным (окно не закрывается кнопками-ответами, meeting-revisions §2). Живыми
@@ -1572,13 +1645,17 @@ namespace ThanksNoThanks
                 // Rhythm gate lives HERE (pure BreathRhythm): Game receives the pulse only on a valid
                 // cadence, so mashing / sparse taps never restore energy. Inert outside live gameplay.
                 if (_game.State != GameState.Playing) return;
-                if (_breath.Pulse())
+                var beat = _breath.PulseDetailed();
+                if (beat == BreathPulse.Valid)
                 {
                     _game.HandleInput(GameInput.EnergyPulse);
                     NoteScaleInput(AlarmScale.Energy);      // §6-окно — только по ПРОПУЩЕННОМУ ритм-гейтом
                                                             // импульсу: мэшинг ничего не восстанавливает и
                                                             // салют выпрашивать не должен
                 }
+                // Отбитый вдох обязан быть ВИДЕН (плейтест §5). ПЕРВЫЙ вдох жизни — не «не в ритм»:
+                // ему не с чем сравниваться, ругать за него нечестно.
+                else if (beat == BreathPulse.OffRhythm) NoteBreathRejected();
                 return;
             }
 
@@ -1626,7 +1703,6 @@ namespace ThanksNoThanks
             CloseNewScale(reward: false);   // §D: выход из игры прямо с модалки — тихо, без салюта
             _nsPending = NewScale.None;     // …и отложенный OPEN выход из жизни тоже снимает
             _bubbleTimer.Hide();
-            _bannerTimer.Hide();
             _breakupTimer.Hide();
             if (_game != null)
             {
@@ -1658,12 +1734,7 @@ namespace ThanksNoThanks
             _breath.Advance(Time.deltaTime);     // deterministic clock for the breathing rhythm
             _game.Tick(Time.deltaTime);
             TickNewScale(Time.deltaTime);        // §D: условие выхода модалки → фейд → салют → снятие паузы
-            if (_game.State == GameState.Playing && _bannerTimer.Visible)
-            {
-                // Rubric banner beat (S4/S6): the card, plates and timer are hidden (ReflectBannerBeat) and
-                // the game is paused — render nothing gameplay here so the banner never overlaps a card.
-            }
-            else if (_game.State == GameState.Playing && _game.InCrisis)
+            if (_game.State == GameState.Playing && _game.InCrisis)
             {
                 RenderCrisis();   // S6 blitz / S13 impulse — reuses the plates + dome timer, freezes normal HUD
             }
@@ -1693,11 +1764,11 @@ namespace ThanksNoThanks
                 // На паузе (туториал/баннер-бит) Game.Tick не двигает CardTimer → купол сам заморожен.
                 ReflectDome(Mathf.Max(0f, _game.CardTimer), _game.CardTimerMax);
             }
-            ReflectHostReveals(_game.State == GameState.Playing);   // advances the banner-beat clock + pause
-            ReflectBannerBeat();                                    // hide the card/plates while the beat is up
+            ReflectHostReveals(_game.State == GameState.Playing);   // advances the speech-bubble clock
+            ReflectDomeUnderModal();                                // купол прячется под §D-модалкой
+            ReflectKeyHints(Time.deltaTime);                        // клавиши эмуляции + отклик «не в ритм»
             ReflectBreakupPlate(_game.State == GameState.Playing);
-            // §4/§6 — ПОСЛЕ ReflectBannerBeat (тот прячет ряд HUD, а спрятанная шкала тревогу не несёт)
-            // и до вейлей: депрессия/выгорание/яркость рисуются выше и накрывают подсветку, как и просит
+            // §4/§6 — до вейлей: депрессия/выгорание/яркость рисуются выше и накрывают подсветку, как и просит
             // спек («вейлы поверх»).
             ReflectAlarms(Time.deltaTime);
             UpdateBrightness();
@@ -1856,71 +1927,169 @@ namespace ThanksNoThanks
             _noPlateText.resizeTextMinSize = 24; _noPlateText.resizeTextMaxSize = 60;
         }
 
-        // The game is paused while EITHER a tutorial overlay OR a rubric banner beat is up. Both share the
-        // single Game.Paused freeze (age, drains, cost-of-living, card timer, crisis timer). Kept in sync
-        // from one place so a banner beat and a tutorial can never leave the pause flag stale.
+        // The game is paused while a tutorial overlay OR the §D modal is up. Both share the single
+        // Game.Paused freeze (age, drains, cost-of-living, card timer, crisis timer). Kept in sync from
+        // one place so no overlay can leave the pause flag stale. (Баннер-бит вехи снят 2026-08-05.)
         private void SyncPause()
         {
             if (_game == null) return;
-            _game.Paused = _tutorialShowing || _bannerTimer.Visible || _nsShowing;
+            _game.Paused = _tutorialShowing || _nsShowing;
             // §D: под модальным экраном новой шкалы ВРЕМЯ стоит так же, как под подсказкой (дренажи, возраст,
             // таймер карточки), но КОНТРОЛЫ ШКАЛ живые — иначе условие выхода недостижимо. Если поверх
-            // модалки оказалась S5-подсказка или баннер-бит (они глушат ввод целиком), приоритет у них.
-            _game.PausedInputsLive = _nsShowing && !_tutorialShowing && !_bannerTimer.Visible;
-        }
-
-        // While a rubric banner beat is up (S4/S6), the card marquee, the two answer plates and the dome
-        // timer are HIDDEN so the banner is its own beat and can never overlap a card (the founder bug).
-        // Restored the instant the beat clears. Idempotent — safe to call every frame.
-        private void ReflectBannerBeat()
-        {
-            if (_cardRoot == null) return;
-            bool beat = _game != null && _game.State == GameState.Playing && _bannerTimer.Visible;
-            bool show = !beat;
-            if (_cardRoot.gameObject.activeSelf != show) _cardRoot.gameObject.SetActive(show);
-            if (_yesPlate.gameObject.activeSelf != show) _yesPlate.gameObject.SetActive(show);
-            if (_noPlate.gameObject.activeSelf != show) _noPlate.gameObject.SetActive(show);
-            // Купол прячется НЕ ТОЛЬКО на баннер-бите, но и под §D-модалкой (долг гейта 2026-08-05): время
-            // под ней и так заморожено, поэтому замерший полукруг торчал над затемнением «культёй» — читался
-            // как недорисованный элемент. Скрываем целиком; возвращается сам, как только модалка ушла.
-            bool dome = show && !_nsShowing;
-            if (_timerGroup != null && _timerGroup.activeSelf != dome) _timerGroup.SetActive(dome);
-            // S4: the banner is a clean beat — the whole HUD row is hidden too (re-shown, age-gated, after).
-            if (_hudRow != null && _hudRow.activeSelf != show) _hudRow.SetActive(show);
-            // …и трубка вместе с рядом: она живёт на слое оверлеев (не в _hudRow), поэтому прячется явно.
-            if (beat && _childGroup != null && _childGroup.activeSelf) _childGroup.SetActive(false);
-            if (beat)
-            {
-                if (_crisisInfo != null && _crisisInfo.activeSelf) _crisisInfo.SetActive(false);
-                if (_impulseWarning != null && _impulseWarning.activeSelf) _impulseWarning.SetActive(false);
-            }
+            // модалки оказалась S5-подсказка (она глушит ввод целиком), приоритет у неё.
+            _game.PausedInputsLive = _nsShowing && !_tutorialShowing;
         }
 
         /// <summary>
-        /// Test seam: advance the driver-side host reveal clocks (speech bubble + the blocking rubric banner
-        /// beat) by an injected <paramref name="dt"/> and reconcile pause + visibility exactly as Update
-        /// would — so a synchronous Game.Tick-driven test can pass THROUGH a banner beat deterministically
-        /// without pumping real frames. Production drives these off Time.deltaTime in Update.
+        /// Купол-таймер прячется под §D-модалкой (долг гейта 2026-08-05): время под ней заморожено,
+        /// поэтому замерший полукруг торчал над затемнением «культёй» — читался как недорисованный
+        /// элемент. Скрываем целиком; возвращается сам, как только модалка ушла. Идемпотентно.
+        ///
+        /// Это ВСЁ, что осталось от прежнего <c>ReflectBannerBeat</c>: карточка, плашки ответов и ряд HUD
+        /// пряталась только ради баннер-бита вехи, а он снят целиком (плейтест основательницы 2026-08-05),
+        /// поэтому теперь их никто не скрывает — веха идёт обычной карточкой.
+        /// </summary>
+        private void ReflectDomeUnderModal()
+        {
+            if (_cardRoot == null) return;
+            bool dome = !_nsShowing;
+            if (_timerGroup != null && _timerGroup.activeSelf != dome) _timerGroup.SetActive(dome);
+        }
+
+        /// <summary>
+        /// Вторая строка окон-подсказок и отклик на невалидный вдох. Строка КЛАВИШИ показывается ТОЛЬКО
+        /// пока контрол реально эмулируется клавиатурой (<see cref="ArcadeInput.KeyHint"/> — маппинг
+        /// читается ИЗ КОНФИГА ПАКЕТА, в игре нет ни одного зашитого имени клавиши); стоит воткнуть плату
+        /// — и та же проверка вернёт пустую строку, подсказка исчезнет сама, без перезапуска. Считается
+        /// каждый кадр именно ради этого «воткнул/выдернул».
+        ///
+        /// На окне ЭНЕРГИИ та же строка на <see cref="BreathRejectSeconds"/> подменяется откликом «не в
+        /// ритм» (плейтест §5): вдох, отбитый ритм-гейтом, обязан быть ВИДЕН, иначе игрок снова читает
+        /// молчание игры как «сломано».
+        /// </summary>
+        private void ReflectKeyHints(float dt)
+        {
+            if (_breathRejectT > 0f) _breathRejectT = Mathf.Max(0f, _breathRejectT - dt);
+            if (_energyDimT > 0f) _energyDimT = Mathf.Max(0f, _energyDimT - dt);
+
+            // Батарея «вздрагивает» затемнением — работает и в HUD, и на модалке (виджет там ТОТ ЖЕ,
+            // он одолжен, а не склонирован), потому что альфа живёт на его собственной группе.
+            if (_energyFade != null)
+            {
+                float k = EnergyDimSeconds <= 0f ? 0f : _energyDimT / EnergyDimSeconds;
+                float alpha = Mathf.Lerp(1f, EnergyDimAlpha, k);
+                if (!Mathf.Approximately(_energyFade.alpha, alpha)) _energyFade.alpha = alpha;
+            }
+
+            if (_nsHintLine != null)
+            {
+                // ЗАКРЫТАЯ модалка не считает вообще ничего: её строка пуста по определению, и подмешивать
+                // сюда последнюю шкалу (а тем более собирать строку) — работа в пустоту каждый кадр.
+                bool reject = _nsShowing && _nsWhich == NewScale.Energy && _breathRejectT > 0f;
+                string line = !_nsShowing ? ""
+                    : reject ? BreathOffRhythmText
+                    : KeyHintLine(ControlOf(_nsWhich), ref _nsHintCache);
+                if (_nsHintLine.text != line) _nsHintLine.text = line;
+                var tint = reject ? TimerRed : HintInk;
+                if (_nsHintLine.color != tint) _nsHintLine.color = tint;
+            }
+
+            if (_tutHintLine != null)
+            {
+                string line = _tutorialShowing ? KeyHintLine(_tutHintControl, ref _tutHintCache) : "";
+                if (_tutHintLine.text != line) _tutHintLine.text = line;
+            }
+        }
+
+        /// <summary>Какой контрол автомата объясняет §D-экран этой шкалы (для подсказки клавиши).</summary>
+        private static ArcadeControlId? ControlOf(NewScale s) => s switch
+        {
+            NewScale.Energy => ArcadeControlId.HeightA,     // датчик высоты — дыхание
+            NewScale.Relations => ArcadeControlId.Joystick, // балансир отношений
+            NewScale.Money => ArcadeControlId.Crank,        // крутилка денег
+            NewScale.Child => ArcadeControlId.BangButton,   // «поднять трубку»
+            _ => null,
+        };
+
+        /// <summary>
+        /// Готовая вторая строка, или пусто — когда контрол ведёт настоящая плата (стойка).
+        ///
+        /// Строка ЖИВЁТ В КЭШЕ, а не собирается заново каждый кадр: сама сборка (склейка приставки,
+        /// клавиши и хвоста + StringBuilder внутри KeyboardHints) — это мусор на каждом кадре открытого
+        /// окна, а окна §D висят десятками секунд. Пересборка происходит РОВНО тогда, когда меняется
+        /// что-то, от чего строка зависит: контрол окна, ответ «эмулируется ли он сейчас» (воткнули или
+        /// выдернули плату — ради этого и проверяем каждый кадр) или сама таблица клавиш. В устоявшемся
+        /// кадре возвращается ТА ЖЕ ссылка (гард: KeyHintLine_IsNotRebuiltEveryFrame).
+        /// </summary>
+        private static string KeyHintLine(ArcadeControlId? control, ref HintCache cache)
+        {
+            if (control == null) return "";
+            ArcadeControlId id = control.Value;
+
+            // Дёшево и без аллокаций: два вызова-предиката по уже готовому бэкенду.
+            IKeyboardEmulation emu = ArcadeInput.KeyboardEmulation;
+            bool emulated = emu != null && emu.IsEmulated(id);
+            KeyboardMapping map = emulated ? emu.Mapping : null;
+
+            if (cache.Valid && cache.Control == id && cache.Emulated == emulated
+                && ReferenceEquals(cache.Mapping, map))
+                return cache.Line;
+
+            string line = "";
+            if (emulated)
+            {
+                string key = KeyboardHints.PrimaryFor(map, id);
+                if (!string.IsNullOrEmpty(key))
+                    line = KeyHintPrefix + key + (id == ArcadeControlId.HeightA ? BreathKeyHintTail : "");
+            }
+
+            cache.Valid = true;
+            cache.Control = id;
+            cache.Emulated = emulated;
+            cache.Mapping = map;
+            cache.Line = line;
+            return line;
+        }
+
+        /// <summary>Вдох отбит ритм-гейтом → видимый отклик: подпись мигает, батарея вздрагивает.</summary>
+        private void NoteBreathRejected()
+        {
+            _breathRejectT = BreathRejectSeconds;
+            _energyDimT = EnergyDimSeconds;
+        }
+
+        /// <summary>
+        /// Test seam: advance the driver-side host speech-bubble clock by an injected
+        /// <paramref name="dt"/> and reconcile visibility exactly as Update would, so a synchronous
+        /// Game.Tick-driven test can age a bubble out deterministically without pumping real frames.
+        /// Production drives it off Time.deltaTime in Update.
         /// </summary>
         public void DebugPumpHost(float dt)
         {
             if (_game == null) return;
             _bubbleTimer.Advance(dt);
-            _bannerTimer.Advance(dt);
             SyncPause();
             bool playing = _game.State == GameState.Playing;
             bool bub = playing && _bubbleTimer.Visible;
             if (_hostBubble != null && _hostBubble.activeSelf != bub) _hostBubble.SetActive(bub);
-            bool ban = playing && _bannerTimer.Visible;
-            if (_bannerRoot.activeSelf != ban) _bannerRoot.SetActive(ban);
-            ReflectBannerBeat();
+            ReflectDomeUnderModal();
         }
 
-        // Crisis entered (CR00): announce «КРИЗИС СРЕДНЕГО ВОЗРАСТА! БЛИЦ!» on the rubric banner.
-        private void OnCrisisStarted() => ShowBannerText(HostContent.BannerFor("CR00"), muted: false);
+        // Crisis entered (CR00): the Ведущий ANNOUNCES the blitz in his speech bubble. It used to be a
+        // blocking gold rubric band; the band (and its beat) went with the milestone banners on 2026-08-05,
+        // and the bubble is the voice that stayed.
+        private void OnCrisisStarted() => _bubbleTimer.Show(HostContent.CrisisAnnounce);
 
         // Each new blitz thought: shout a hurrying host-nag line in the speech bubble (S3).
-        private void OnCrisisBlitzAdvanced() => _bubbleTimer.Show(HostContent.BlitzNagFor(_game.BlitzThoughtNumber));
+        // ПЕРВАЯ мысль — исключение: на ней в облачке ещё висит объявление входа в кризис
+        // (OnCrisisStarted, тем же кадром), и нахлобучить сверху «Быстрее!» значило бы съесть
+        // объявление целиком — ровно это и случилось, когда рубрика-плашка со своим битом ушла
+        // (2026-08-05). Объявление громче и играет ту же роль подгонялки, поэтому нагоняй №1 пропускаем.
+        private void OnCrisisBlitzAdvanced()
+        {
+            if (_game.BlitzThoughtNumber <= 1) return;
+            _bubbleTimer.Show(HostContent.BlitzNagFor(_game.BlitzThoughtNumber));
+        }
 
         // Impulse round opened: the S13 warning plate reveals via RenderCrisis; nothing else needed here.
         private void OnCrisisImpulseStarted() { }
@@ -2716,30 +2885,9 @@ namespace ThanksNoThanks
             _bubbleText.verticalOverflow = VerticalWrapMode.Truncate;
             _hostBubble.SetActive(false);
 
-            // ---- Rubric banner (S4): a bold gold band over the card's upper area, static flourish ----
-            _bannerRoot = NewGroup("HostBanner", _gamePanel.transform);
-            _bannerBand = NewSolid("BannerBand", _bannerRoot.transform, Bulb);
-            Anchor(_bannerBand.rectTransform, new Vector2(0.5f, 0.60f), new Vector2(1600, 240));
-            // Static star flourishes at the band ends (no particles, no sound — canon).
-            var starL = NewSprite("BannerStarL", _bannerBand.transform, Sprite("star-white"));
-            Anchor(starL.rectTransform, new Vector2(0.05f, 0.5f), new Vector2(80, 80));
-            var starR = NewSprite("BannerStarR", _bannerBand.transform, Sprite("star-white"));
-            Anchor(starR.rectTransform, new Vector2(0.95f, 0.5f), new Vector2(80, 80));
-            _bannerText = NewText("BannerText", _bannerBand.transform, "", 82,
-                TextAnchor.MiddleCenter, Ink, _display);
-            // Asymmetric inset: clear the end flourishes horizontally (150) but only a slim top/bottom pad
-            // (24) — a uniform 150 inset on the 240-tall band collapses the text rect to a negative height,
-            // which is why the band rendered EMPTY (the founder «пустой баннер» bug). Best-fit so a long
-            // rubric («КРИЗИС СРЕДНЕГО ВОЗРАСТА! БЛИЦ!») wraps/shrinks fully inside the band.
-            var banRt = _bannerText.rectTransform;
-            banRt.anchorMin = Vector2.zero; banRt.anchorMax = Vector2.one;
-            banRt.offsetMin = new Vector2(150f, 24f);
-            banRt.offsetMax = new Vector2(-150f, -24f);
-            _bannerText.resizeTextForBestFit = true;
-            _bannerText.resizeTextMinSize = 28;
-            _bannerText.resizeTextMaxSize = 82;
-            DisplayFx(_bannerText);
-            _bannerRoot.SetActive(false);
+            // ⚠ ЖЁЛТЫЙ БАННЕР-РУБРИКА ВЕХИ (S4) СНЯТ ЦЕЛИКОМ — плейтест основательницы 2026-08-05:
+            // «их нет в присланных макетах, убрать вместе с паузой баннер-бита». Вехи (TIMELINE) идут
+            // обычными карточками; облачко Ведущего (выше) остаётся единственным голосом на поле.
         }
 
         // ---------------------------------------------------------------- art-pack HUD widgets
@@ -2752,6 +2900,10 @@ namespace ThanksNoThanks
         private void BuildBattery()
         {
             _energyGroup = NewGroup("EnergyGroup", _hudRow.transform);
+            // Своя группа альфы: на отбитый ритм-гейтом вдох батарея коротко темнеет (плейтест §5).
+            // Именно CanvasGroup, а не тонировка спрайтов, — иначе отклик подрался бы с §4-тревогой,
+            // которая красит батарею целиком, и с кроссфейдом её красной копии.
+            _energyFade = _energyGroup.AddComponent<CanvasGroup>();
             _batteryImg = NewSprite("Battery", _energyGroup.transform, Sprite("energy-battery-v2"));
             AnchorPx(_batteryImg.rectTransform, BatteryRect.x, BatteryRect.y, BatteryRect.z, BatteryRect.w);
             // §4-ТРЕВОГА: та же батарея, ОФЛАЙН перекрашенная в палитру эталона (`energy-battery-alarm-v2`,
@@ -3432,6 +3584,16 @@ namespace ThanksNoThanks
             trt.offsetMin = new Vector2(120f, 20f); trt.offsetMax = new Vector2(-120f, -100f);
             _tutorialText.resizeTextForBestFit = true; _tutorialText.resizeTextMinSize = 26; _tutorialText.resizeTextMaxSize = 44;
 
+            // Вторая строка подсказки — клавиша эмуляции, мелко и приглушённо, между телом и кнопкой.
+            _tutHintLine = NewText("TutKeyHint", modal.transform, "", HintTextSize,
+                TextAnchor.MiddleCenter, HintInk, _body);
+            var thrt = _tutHintLine.rectTransform;
+            thrt.anchorMin = new Vector2(0f, 0.255f); thrt.anchorMax = new Vector2(1f, 0.33f);
+            thrt.offsetMin = new Vector2(120f, 0f); thrt.offsetMax = new Vector2(-120f, 0f);
+            _tutHintLine.resizeTextForBestFit = true;
+            _tutHintLine.resizeTextMinSize = 16; _tutHintLine.resizeTextMaxSize = HintTextSize;
+            _tutHintLine.verticalOverflow = VerticalWrapMode.Truncate;
+
             // Blue «ПОНЯТНО — ЖМИ ЗЕЛЁНУЮ» button (S5) with a clear bottom margin inside the modal (NOT flush
             // to the edge). The dismiss control is named by its PHYSICAL colour (founder 99fab3c): the crank
             // must never dismiss, so the green lever stays discoverable on the button. bar-track tinted cobalt.
@@ -3475,12 +3637,26 @@ namespace ThanksNoThanks
             // запечено со смещением, поэтому текст сажаем по ЗАМЕРУ поля, а не по долям спрайта.
             _nsTaskText = NewText("TaskText", _nsOverlay.transform, EnergyTaskText, TaskTextMaxSize,
                 TextAnchor.MiddleCenter, Ink, _display);
-            AnchorPx(_nsTaskText.rectTransform, TaskFieldRect.x, TaskFieldRect.y,
-                TaskFieldRect.z - 2f * TaskTextPadX, TaskFieldRect.w - 2f * TaskTextPadY);
+            AnchorPx(_nsTaskText.rectTransform, TaskFieldRect.x, TaskFieldRect.y - HintLineReserve / 2f,
+                TaskFieldRect.z - 2f * TaskTextPadX, TaskFieldRect.w - 2f * TaskTextPadY - HintLineReserve);
             _nsTaskText.resizeTextForBestFit = true;
             _nsTaskText.resizeTextMinSize = TaskTextMinSize;
             _nsTaskText.resizeTextMaxSize = TaskTextMaxSize;
             _nsTaskText.verticalOverflow = VerticalWrapMode.Truncate;
+
+            // Вторая строка: мелко, Rubik, приглушённым — она служебная и не должна спорить с задачей.
+            // Полоса между низом ужатого текста задачи (≈710) и дорожкой удержания (776…796).
+            // Приглушённый ЧЕРНИЛЬНЫЙ, а не холодный голубой: строка лежит на КРЕМОВОМ поле, и
+            // #9fb0e8 (прежний токен Muted, ушёл вместе с тусклым баннером) на нём почти не читается —
+            // проверено по кадру. Полупрозрачный Ink держит и «служебность», и контраст.
+            _nsHintLine = NewText("TaskKeyHint", _nsOverlay.transform, "", HintTextSize,
+                TextAnchor.MiddleCenter, HintInk, _body);
+            AnchorPx(_nsHintLine.rectTransform, TaskFieldRect.x, HintLineCy,
+                TaskFieldRect.z - 2f * TaskTextPadX, 34f);
+            _nsHintLine.resizeTextForBestFit = true;
+            _nsHintLine.resizeTextMinSize = 16;
+            _nsHintLine.resizeTextMaxSize = HintTextSize;
+            _nsHintLine.verticalOverflow = VerticalWrapMode.Truncate;
 
             // Видимый прогресс удержания (done-contract §5): тонкая полоска у нижнего края кремового поля.
             // Дорожка — приглушённый INK, заполнение — GREEN кабинета (тот же токен, что у «подтверждения»).
@@ -3588,11 +3764,12 @@ namespace ThanksNoThanks
             return UnityEngine.Sprite.Create(tex, new Rect(0, 0, n, n), new Vector2(0.5f, 0.5f), 100f);
         }
 
-        // Depression started (CR09): muted «ТЁМНАЯ ПОЛОСА…» banner + reset the mutter cycle.
+        // Depression started (CR09): the muted «ТЁМНАЯ ПОЛОСА…» announce (now in the host bubble — the
+        // rubric band it used to ride on was removed 2026-08-05) + reset the mutter cycle.
         private void OnDepressionStarted()
         {
             _depMutterCount = 0;
-            ShowBannerText(HostContent.BannerFor("CR09"), muted: true);
+            _bubbleTimer.Show(HostContent.DepressionAnnounce);
         }
 
         // Each successful catch: a muted host mutter as a step of colour returns.
@@ -3642,7 +3819,8 @@ namespace ThanksNoThanks
         private void OnRelationshipsOpened() => ShowNewScale(NewScale.Relations);
         private void OnEnergyOpened() => ShowNewScale(NewScale.Energy);
         private void OnHealthOpened() { if (!_healthTutorialSeen) ShowTutorial(HealthTutorialText, ref _healthTutorialSeen); }
-        private void OnBurnoutEntered(){ if (!_burnoutHintSeen)  ShowTutorial(BurnoutHintText,   ref _burnoutHintSeen); }
+        // Выгорание объясняет ДЫХАНИЕ — значит, на клавиатуре подсказка должна назвать клавишу датчика.
+        private void OnBurnoutEntered(){ if (!_burnoutHintSeen)  ShowTutorial(BurnoutHintText,   ref _burnoutHintSeen, ArcadeControlId.HeightA); }
         // MD02=ДА opened the child scale: the «ПОПОЛНЕНИЕ!» rubric banner already fired when MD02 was drawn;
         // this sequences the §D modal after the answer (one-shot per life, pauses like every other open).
         private void OnChildOpened()  => ShowNewScale(NewScale.Child);
@@ -3654,11 +3832,12 @@ namespace ThanksNoThanks
         // Shared S5 hint: pauses the game (freezes age, drains, cost-of-living, decay and the card timer)
         // and shows the modal. The one-shot «seen» flag is set at show time (the hint always resolves via
         // dismiss). Opens don't collide — each pauses until dismissed — so a stacked show is simply skipped.
-        private void ShowTutorial(string text, ref bool seen)
+        private void ShowTutorial(string text, ref bool seen, ArcadeControlId? control = null)
         {
             if (_tutorialShowing) return;
             seen = true;
             _tutorialShowing = true;
+            _tutHintControl = control;
             _tutorialText.text = text;
             _tutorialOverlay.transform.SetAsLastSibling();
             _tutorialOverlay.SetActive(true);
@@ -3747,7 +3926,7 @@ namespace ThanksNoThanks
             _nsOverlay.SetActive(true);
             ReflectNewScaleHold();
             SyncPause();
-            ReflectBannerBeat();   // купол уходит ЭТИМ же кадром (иначе «культя» мигала бы один кадр)
+            ReflectDomeUnderModal();   // купол уходит ЭТИМ же кадром (иначе «культя» мигала бы один кадр)
 
             // Ребёнок: условие — ПОДНЯТЬ ЗВОНОК, поэтому звонок заводится принудительно (обычный планировщик
             // 15–25 с под замороженным временем не сработал бы никогда). Трубка выезжает и звонит, пока не
@@ -3847,7 +4026,7 @@ namespace ThanksNoThanks
             _nsFade.alpha = 1f;
             if (reward) StarBurst();      // §6-салют «всё сделано верно» — ПОСЛЕ фейда, ДО снятия паузы
             SyncPause();
-            ReflectBannerBeat();          // …и купол возвращается тем же кадром, что снялась модалка
+            ReflectDomeUnderModal();      // …и купол возвращается тем же кадром, что снялась модалка
             // Та же причина, что у DismissTutorial: открытие происходит СЕРЕДИНОЙ карточки, поэтому
             // возрастные гейты и значения HUD пересчитываются прямо здесь — виджет живой сразу.
             if (_game != null && _game.State == GameState.Playing)
@@ -3890,7 +4069,12 @@ namespace ThanksNoThanks
                 case GameInput.EnergyPulse:
                     if (_nsWhich != NewScale.Energy) return;          // чужой экран — дыхание мертво
                     if (_game.State != GameState.Playing) return;
-                    if (!_breath.Pulse()) return;                     // ритм-гейт: мэшинг не считается
+                    var beat = _breath.PulseDetailed();                // ритм-гейт: мэшинг не считается
+                    if (beat != BreathPulse.Valid)
+                    {
+                        if (beat == BreathPulse.OffRhythm) NoteBreathRejected();
+                        return;
+                    }
                     _game.HandleInput(GameInput.EnergyPulse);
                     _nsArmed = true;
                     return;
@@ -4037,11 +4221,9 @@ namespace ThanksNoThanks
                 _depressionGroup.SetActive(false);   // no B&W wash carried across a restart
                 _depMutterCount = 0;
                 _brightnessAlpha = 0f;
-                // Host reveals reset each life: no stale bubble/banner carried across a restart.
+                // Host reveals reset each life: no stale bubble carried across a restart.
                 _bubbleTimer.Hide();
-                _bannerTimer.Hide();
                 _hostBubble.SetActive(false);
-                _bannerRoot.SetActive(false);
                 // §4/§6: свежая жизнь начинается без единой тревоги и без звёзд в воздухе. Сброс МОЛЧАЛИВЫЙ
                 // (ResetAlarms не стреляет салютом) — иначе рестарт из тревожного состояния давал бы салют.
                 ResetAlarms();
@@ -4051,7 +4233,7 @@ namespace ThanksNoThanks
             if (!playing) { ResetAlarms(); ClearStars(); }
             if (!playing && _tutorialShowing) DismissTutorial();
             if (!playing && _nsShowing) CloseNewScale(reward: false);   // §D: смерть/финал с модалки — тихо
-            if (!playing) { _bannerTimer.Hide(); _bannerRoot.SetActive(false); SyncPause(); }
+            if (!playing) { _bubbleTimer.Hide(); _hostBubble.SetActive(false); SyncPause(); }
             _wasPlaying = playing;
 
             if (playing)
@@ -4076,16 +4258,11 @@ namespace ThanksNoThanks
             SetCardBlockedDim(blocked);           // S10: dim the card (frame tint) + red banner when unaffordable
             SetBlockBannerVisible(blocked);
             RefreshPriceLabel();                  // S10: show the required amount on any BLOCK$ card
-            // Rubric banner (S4): announce on a TIMELINE milestone; clear it on any non-milestone card
-            // (so it never lingers onto the card after the milestone). The bubble is answer-driven and
-            // deliberately NOT touched here — it survives this same-frame advance to live out its ~2s.
-            // MD02 «РЕБЁНОК! Завести?» is the one timeline card whose banner («ПОПОЛНЕНИЕ!» — a newborn
-            // arrived) must NOT fire on DRAW: it would announce the baby BEFORE you answer «завести?»
-            // (founder playtest: «пополнение вышло раньше, чем случилось»). Its announce comes AFTER ДА via
-            // the OpenChild hint (OnChildOpened). Every other timeline card still announces on draw.
-            if (c != null && c.IsTimeline && c.Id != "MD02") ShowBanner(c);
-            else _bannerTimer.Hide();
-            SyncPause();   // reconcile the beat pause NOW (a non-timeline card ends any prior beat)
+            // TIMELINE-веха больше НИЧЕГО не объявляет: жёлтая рубрика-баннер и её блокирующий бит сняты
+            // (плейтест основательницы 2026-08-05 — «их нет в макетах»). Веха приходит обычной карточкой;
+            // голос Ведущего живёт в облачке и остаётся ответным (OnAnswerResolved), поэтому здесь его
+            // намеренно не трогаем — облачко доживает свои ~2 с поверх новой карточки.
+            SyncPause();
             UpdateHudValues();
             ApplyAgeGates(_game.Age);
             if (c != null && isActiveAndEnabled)
@@ -4105,40 +4282,15 @@ namespace ThanksNoThanks
             else _bubbleTimer.Hide();
         }
 
-        // Show the rubric band for a TIMELINE card. CR09 is styled muted (out-of-scope crisis; text baked).
-        private void ShowBanner(Card c)
-            => ShowBannerText(HostContent.BannerFor(c.Id), muted: c.Id == HostContent.MutedBannerId);
-
-        // Show an arbitrary rubric-band caption as a brief BLOCKING beat (used by TIMELINE milestone cards
-        // and the crisis CR00 banner). The text is set BEFORE the reveal (never an empty band), the game is
-        // paused and the card/plates/timer are hidden this same frame, and it auto-advances on the ~1.5s
-        // banner clock (ReflectHostReveals) — card appears only once the beat clears (S4/S6). Never both up.
-        private void ShowBannerText(string text, bool muted)
-        {
-            _bannerBand.color = muted ? CobaltDeep : Bulb;
-            _bannerText.color = muted ? Muted : Ink;
-            _bannerText.text = text;
-            _bannerTimer.Show(text);
-            _bannerRoot.transform.SetAsLastSibling();   // draw above the (now hidden) card
-            SyncPause();                                 // freeze the game for the beat
-            ReflectBannerBeat();                         // hide the card/plates/timer immediately
-        }
-
-        // Advance both host clocks (real-time) and mirror their visibility onto the widgets. Only visible
-        // while Playing; the timers keep their own state so a restart/leaving-play simply hides them.
+        // Advance the host speech-bubble clock (real-time) and mirror its visibility onto the widget.
+        // Only visible while Playing; the timer keeps its own state so a restart/leaving-play simply hides it.
         private void ReflectHostReveals(bool playing)
         {
             _bubbleTimer.Advance(Time.deltaTime);
-            _bannerTimer.Advance(Time.deltaTime);   // when this auto-hides, the banner beat ends
-            SyncPause();                            // Game.Paused tracks the beat (+ any tutorial)
 
             bool bub = playing && _bubbleTimer.Visible;
             if (_hostBubble.activeSelf != bub) _hostBubble.SetActive(bub);
             if (bub) _bubbleText.text = _bubbleTimer.Text;
-
-            bool ban = playing && _bannerTimer.Visible;
-            if (_bannerRoot.activeSelf != ban) _bannerRoot.SetActive(ban);
-            if (ban) _bannerText.text = _bannerTimer.Text;
         }
 
         // BLOCK$ price sub-line: reads the single source (Game.CurrentCardPrice / CurrentCardBlocked) and

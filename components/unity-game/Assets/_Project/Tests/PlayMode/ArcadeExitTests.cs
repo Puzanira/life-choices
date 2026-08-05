@@ -100,8 +100,7 @@ namespace ThanksNoThanks.Tests.PlayMode
             Assert.AreEqual(GameState.Playing, _driver.Game.State);
 
             // Live the whole life on the cabinet buttons: RED declines every card; GREEN dismisses hints
-            // (arcade confirm while a tutorial is up); banner beats swallow input and are pumped through
-            // on their own clock, exactly as DriverSmokeTests does.
+            // (arcade confirm while a tutorial is up), exactly as DriverSmokeTests does.
             int guard = 0;
             while (_driver.Game.State == GameState.Playing && guard++ < 600)
             {
@@ -109,12 +108,6 @@ namespace ThanksNoThanks.Tests.PlayMode
                 // настоящим контролом кабинета (крутилка / джойстик / «!» / рычаг дыхания).
                 if (_driver.NewScaleShowing) { yield return NewScaleTut.ClearArcade(_driver, _fake); continue; }
                 if (_driver.TutorialShowing) { yield return Press(Green); continue; }
-                if (_driver.HostBannerVisible)
-                {
-                    _driver.DebugPumpHost(GameDriver.BannerSeconds + 0.1f);
-                    yield return null;
-                    continue;
-                }
                 yield return Press(Red);
             }
 

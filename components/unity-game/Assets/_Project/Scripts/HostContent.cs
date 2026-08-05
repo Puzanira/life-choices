@@ -8,36 +8,26 @@ namespace ThanksNoThanks
     /// <summary>
     /// FINAL host content, baked from <c>docs/new_concept/host-content.md</c> (commit 6ef28fc) — the
     /// design agent's canon, NOT the GAME_SPEC drafts. Tone: Цезарь Фликерман (восторженно, громко,
-    /// чуть глумливо). Two tables:
-    ///  • <see cref="Banners"/> — S4 rubric captions keyed by TIMELINE card id (big caps, host tone);
-    ///  • <see cref="Pool"/> — the fallback speech-bubble lines per tone (used only when a card has no
-    ///    named «Ведущий (ДА)/(НЕТ)» line for the chosen side).
+    /// чуть глумливо). The main table is <see cref="Pool"/> — the fallback speech-bubble lines per tone,
+    /// used only when a card has no named «Ведущий (ДА)/(НЕТ)» line for the chosen side.
     /// Named CSV lines always win over the pool (that priority lives in <see cref="HostVoice"/>).
     /// Pure data — no engine references.
+    ///
+    /// ⚠ ВСЯ СЕРИЯ БАННЕРОВ-РУБРИК ВЕХ («СВЕТ! КАМЕРА! ЖИЗНЬ!», «ПОРА ЗАРАБАТЫВАТЬ!», «ПЕРВАЯ ЛЮБОВЬ!»,
+    /// «ПЕРВАЯ УСТАЛОСТЬ!», «СВАДЬБА! ГОРЬКО!», «ПОПОЛНЕНИЕ!», «ВТОРАЯ МОЛОДОСТЬ!», «ПТЕНЦЫ УЛЕТЕЛИ!»)
+    /// СНЯТА плейтестом основательницы 2026-08-05: «их нет в присланных макетах» — вместе с жёлтой
+    /// плашкой и её блокирующим «баннер-битом». Вехи идут обычными карточками. Уцелели только ДВА
+    /// объявления (<see cref="CrisisAnnounce"/> / <see cref="DepressionAnnounce"/>) — это не вехи-карточки,
+    /// а смены состояния со своим оверлеем, и Ведущий произносит их В ОБЛАЧКЕ, которое осталось.
+    /// Канон-таблица §1 в host-content.md помечена как снятая — не восстанавливать без основательницы.
     /// </summary>
     public static class HostContent
     {
-        /// <summary>
-        /// Rubric banner captions by TIMELINE card id. Only I03/YA01/YA03/YA05/MD01 are in THIS
-        /// increment's playable pool; the rest (later increments) are baked too — harmless. CR09 is
-        /// deliberately un-celebratory (the driver styles its banner muted).
-        /// </summary>
-        public static readonly IReadOnlyDictionary<string, string> Banners = new Dictionary<string, string>
-        {
-            { "I03",  "СВЕТ! КАМЕРА! ЖИЗНЬ!" },
-            { "YA01", "ПОРА ЗАРАБАТЫВАТЬ!" },
-            { "YA03", "ПЕРВАЯ ЛЮБОВЬ!" },
-            { "YA05", "ПЕРВАЯ УСТАЛОСТЬ!" },
-            { "MD01", "СВАДЬБА! ГОРЬКО!" },
-            { "MD02", "ПОПОЛНЕНИЕ!" },
-            { "CR00", "КРИЗИС СРЕДНЕГО ВОЗРАСТА! БЛИЦ!" },
-            { "MD06", "ВТОРАЯ МОЛОДОСТЬ!" },
-            { "CR09", "ТЁМНАЯ ПОЛОСА…" },        // muted / sarcastic — styled dim by the driver
-            { "LT04", "ПТЕНЦЫ УЛЕТЕЛИ!" },
-        };
+        /// <summary>Кризис среднего возраста (CR00) — реплика Ведущего в облачке на входе в блиц.</summary>
+        public const string CrisisAnnounce = "КРИЗИС СРЕДНЕГО ВОЗРАСТА! БЛИЦ!";
 
-        /// <summary>Card id whose banner is intentionally un-celebratory (dim styling in the driver).</summary>
-        public const string MutedBannerId = "CR09";
+        /// <summary>Депрессия (CR09) — единственное объявление, где восторг Ведущего намеренно ломается.</summary>
+        public const string DepressionAnnounce = "ТЁМНАЯ ПОЛОСА…";
 
         /// <summary>
         /// Ведущий's fast, mockingly-hurrying nag lines shouted over the blitz thoughts (crisis-content §2).
@@ -66,13 +56,6 @@ namespace ThanksNoThanks
         public const string ImpulseInvertWarning = "МОЛЧАНИЕ = ДА!";
         /// <summary>S13 sub-line prompting the active decline (the highlighted «СПАСИБО, НЕ НАДО» → button).</summary>
         public const string ImpulseDeclinePrompt = "ЖМИ «СПАСИБО, НЕ НАДО» →";
-
-        /// <summary>Fallback banner for any TIMELINE card without a named rubric (none in the current deck).</summary>
-        public const string GenericBanner = "НОВАЯ ВЕХА!";
-
-        /// <summary>Banner caption for a card id, or the generic fallback.</summary>
-        public static string BannerFor(string id)
-            => id != null && Banners.TryGetValue(id, out var b) ? b : GenericBanner;
 
         /// <summary>Tone → the 6 short (1–3 word) fallback lines. Verbatim from host-content.md §2.</summary>
         public static readonly IReadOnlyDictionary<HostTone, string[]> Pool = new Dictionary<HostTone, string[]>

@@ -80,13 +80,14 @@ namespace ThanksNoThanks.Tests.PlayMode
             }
             Assert.AreEqual(CrisisPhase.Blitz, g.Phase, "reached the crisis blitz");
 
-            // The «КРИЗИС… БЛИЦ!» rubric is a blocking beat — clear it before pressing the blitz buttons.
-            driver.DebugPumpHost(GameDriver.BannerSeconds + 0.1f);
+            // Объявление кризиса теперь живёт в облачке и ничего не блокирует — состарим его, чтобы
+            // экран читался отдохнувшим (плашка-рубрика и её бит сняты 2026-08-05).
+            driver.DebugPumpHost(GameDriver.BubbleSeconds + 0.1f);
             for (int i = 0; i < 5; i++) fake.Yes();         // clear the blitz cleanly → crisis tail rolls
             Assert.IsTrue(g.InDepression, "the crisis tail entered depression");
 
-            // Depression opens with its own muted «ТЁМНАЯ ПОЛОСА…» beat — clear it before driving pulses.
-            driver.DebugPumpHost(GameDriver.BannerSeconds + 0.1f);
+            // Depression announces itself with a muted «ТЁМНАЯ ПОЛОСА…» bubble — age it out before pulses.
+            driver.DebugPumpHost(GameDriver.BubbleSeconds + 0.1f);
             yield return null;                              // let the driver's Update reflect it
             Assert.IsTrue(driver.DepressionOverlay.activeSelf, "the B&W overlay is shown while depressed");
             float fullGrayAlpha = driver.DepressionVeil.color.a;
@@ -119,7 +120,7 @@ namespace ThanksNoThanks.Tests.PlayMode
         }
 
         // Reach depression through the real driver (age → blitz → clean tail → depression), clearing the
-        // banner beats. Leaves the game AT REST (no pulse lit yet). Mirrors the boot in the test above.
+        // announce bubbles. Leaves the game AT REST (no pulse lit yet). Mirrors the boot in the test above.
         private IEnumerator ReachDepressionAtRest(GameDriver driver, Game g, PlayFakeInputSource fake)
         {
             driver.DebugReplaceGame(g);
@@ -133,10 +134,10 @@ namespace ThanksNoThanks.Tests.PlayMode
                 g.Tick(0.2f);
             }
             Assert.AreEqual(CrisisPhase.Blitz, g.Phase, "reached the crisis blitz");
-            driver.DebugPumpHost(GameDriver.BannerSeconds + 0.1f);
+            driver.DebugPumpHost(GameDriver.BubbleSeconds + 0.1f);
             for (int i = 0; i < 5; i++) fake.Yes();
             Assert.IsTrue(g.InDepression, "the crisis tail entered depression");
-            driver.DebugPumpHost(GameDriver.BannerSeconds + 0.1f);   // clear the «ТЁМНАЯ ПОЛОСА…» beat
+            driver.DebugPumpHost(GameDriver.BubbleSeconds + 0.1f);   // age out the «ТЁМНАЯ ПОЛОСА…» bubble
             yield return null;                                       // one Update → ReflectDepression, resting
         }
 

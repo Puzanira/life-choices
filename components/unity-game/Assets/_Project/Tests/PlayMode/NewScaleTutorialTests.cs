@@ -121,7 +121,6 @@ namespace ThanksNoThanks.Tests.PlayMode
             {
                 if (driver.NewScaleShowing) { NewScaleTut.Clear(driver, fake); continue; }
                 if (driver.TutorialShowing) { fake.Confirm(); continue; }
-                if (driver.HostBannerVisible) { driver.DebugPumpHost(GameDriver.BannerSeconds + 0.1f); continue; }
                 if (driver.Game.CurrentCard != null && driver.Game.CurrentCard.Id == "MD02") break;
                 driver.DebugTick(0.1f);
                 if (driver.Game.CurrentCard != null && driver.Game.CardTimer < 1.0f) fake.No();
@@ -139,7 +138,6 @@ namespace ThanksNoThanks.Tests.PlayMode
             {
                 if (driver.NewScaleShowing) { NewScaleTut.Clear(driver, fake); continue; }
                 if (driver.TutorialShowing) { fake.Confirm(); continue; }
-                if (driver.HostBannerVisible) { driver.DebugPumpHost(GameDriver.BannerSeconds + 0.1f); continue; }
                 driver.DebugTick(0.1f);
                 if (driver.Game.CurrentCard != null && driver.Game.CardTimer < 1.0f) fake.No();
             }
@@ -604,7 +602,6 @@ namespace ThanksNoThanks.Tests.PlayMode
             DriveToLateMd02(driver, fake);
             yield return null;                        // кадр: одноразовый swallow-гейт подсказки сброшен
             fake.Yes();                               // MD02=ДА → детский экран
-            if (driver.HostBannerVisible) driver.DebugPumpHost(GameDriver.BannerSeconds + 0.1f);
             Assert.AreEqual(NewScale.Child, driver.NewScaleKind, "детский экран поднят");
             Assert.IsTrue(driver.Game.MoneyOpen, "деньги ОТКРЫТЫ — крутилка реально под рукой");
             Assert.IsTrue(driver.Game.RelationshipsOpen, "и балансир тоже");
@@ -658,12 +655,10 @@ namespace ThanksNoThanks.Tests.PlayMode
             Assert.IsTrue(driver.Game.Burnout, "выгорание активно ДО открытия ребёнка");
             if (driver.TutorialShowing) fake.Confirm();
             yield return null;                        // подсказка снята → одноразовый swallow-гейт сброшен
-            if (driver.HostBannerVisible) driver.DebugPumpHost(GameDriver.BannerSeconds + 0.1f);
             Assert.IsFalse(driver.Game.Paused, "подсказка снята — игра не на паузе");
 
             int stars0 = driver.StarBurstCount;
             fake.Yes();                               // MD02=ДА → механика ребёнка ОТКРЫТА прямо под выгоранием
-            if (driver.HostBannerVisible) driver.DebugPumpHost(GameDriver.BannerSeconds + 0.1f);
             Assert.IsTrue(driver.Game.ChildOpen, "механика ребёнка открыта");
 
             // Модалка НЕ встала — она отложена.
@@ -730,7 +725,6 @@ namespace ThanksNoThanks.Tests.PlayMode
             Assert.IsFalse(driver.Game.Burnout, "в момент открытия выгорания нет");
             yield return null;                        // кадр: одноразовый swallow-гейт подсказки сброшен
             fake.Yes();                               // MD02=ДА → детский экран встаёт сразу
-            if (driver.HostBannerVisible) driver.DebugPumpHost(GameDriver.BannerSeconds + 0.1f);
             Assert.IsTrue(driver.NewScaleShowing, "детский экран поднят");
             Assert.AreEqual(NewScale.Child, driver.NewScaleKind, "…именно он");
 

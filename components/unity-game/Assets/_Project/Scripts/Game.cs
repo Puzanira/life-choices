@@ -257,7 +257,7 @@ namespace ThanksNoThanks
         /// The child call is FROZEN: the 5s window stops counting down and a press is not scored. Two cases,
         /// one rule — «the player can't see the handset, so the clock must not run»:
         /// <list type="bullet">
-        /// <item><see cref="Paused"/> — a hint / rubric banner beat is up over the board;</item>
+        /// <item><see cref="Paused"/> — a hint / the §D modal is up over the board;</item>
         /// <item><see cref="Burnout"/> — the S7 «ВЫГОРАНИЕ» plate is a FULL-SCREEN takeover drawn ON TOP of
         /// the handset, so a running window would bank INVISIBLE misses (two of them = «плохой родитель»
         /// for a call the player never saw).</item>
@@ -312,7 +312,7 @@ namespace ThanksNoThanks
         /// <summary>The full duration of the current crisis timer (5s blitz / 3s impulse) for the dome fill.</summary>
         public float CrisisTimerMax => _phase == CrisisPhase.Impulse ? ImpulseSeconds : BlitzSeconds;
 
-        /// <summary>Fired the instant the crisis begins (CR00): drives the S6 «КРИЗИС… БЛИЦ!» banner.</summary>
+        /// <summary>Fired the instant the crisis begins (CR00): drives the S6 «КРИЗИС… БЛИЦ!» announce.</summary>
         public event Action CrisisStarted;
         /// <summary>Fired for each new blitz thought (incl. the first): drives the S6 host-nag bubble + relabel.</summary>
         public event Action CrisisBlitzAdvanced;
@@ -353,7 +353,7 @@ namespace ThanksNoThanks
         /// Read by the driver to reveal the faint centre pulse indicator (S8).</summary>
         public bool DepressionPulsing { get; private set; }
 
-        /// <summary>Fired the instant depression begins — drives the muted «ТЁМНАЯ ПОЛОСА…» banner (S8).</summary>
+        /// <summary>Fired the instant depression begins — drives the muted «ТЁМНАЯ ПОЛОСА…» announce (S8).</summary>
         public event Action DepressionStarted;
         /// <summary>Fired on each successful catch (a step of colour returns) — drives a muted host mutter.</summary>
         public event Action DepressionProgressed;
@@ -393,7 +393,7 @@ namespace ThanksNoThanks
         public bool PausedInputsLive { get; set; }
 
         /// <summary>True while the run is frozen AND the scale controls are frozen with it (the plain S5
-        /// hint / banner-beat pause). The D-modal pause (<see cref="PausedInputsLive"/>) is deliberately NOT
+        /// hint pause). The D-modal pause (<see cref="PausedInputsLive"/>) is deliberately NOT
         /// «input frozen» — that is the whole point of the screen.</summary>
         private bool InputsFrozen => Paused && !PausedInputsLive;
 
@@ -1049,8 +1049,9 @@ namespace ThanksNoThanks
             return true;
         }
 
-        // Suspend the current normal card and open the blitz. CR00 (баннер) is a driver-only flourish
-        // (HostContent.BannerFor("CR00")); the mechanic is the 5 thoughts. Latches _crisisDone so nothing
+        // Suspend the current normal card and open the blitz. The CR00 announce is a driver-only flourish
+        // (HostContent.CrisisAnnounce, in the host bubble); the mechanic is the 5 thoughts. Latches
+        // _crisisDone so nothing
         // can re-trigger this life (not even mid-crisis).
         private void EnterCrisis()
         {
@@ -1218,7 +1219,7 @@ namespace ThanksNoThanks
             _depPulseWindow = 0f;
             _depPressLockout = 0f;
             _depPulseNextInterval = PickDepressionInterval();
-            DepressionStarted?.Invoke();      // driver: muted «ТЁМНАЯ ПОЛОСА…» banner + B&W overlay
+            DepressionStarted?.Invoke();      // driver: muted «ТЁМНАЯ ПОЛОСА…» announce + B&W overlay
         }
 
         // The next wait between dim pulses: an injected value (test/tuning) or a uniform draw in [min,max].

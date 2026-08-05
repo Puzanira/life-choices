@@ -52,7 +52,6 @@ namespace ThanksNoThanks.Tests.PlayMode
             int guard = 0;
             while (guard++ < 12000 && driver.Game.State == GameState.Playing && !sawRelModal)
             {
-                if (driver.HostBannerVisible) { driver.DebugPumpHost(GameDriver.BannerSeconds + 0.1f); continue; }
                 if (driver.NewScaleShowing)
                 {
                     if (driver.NewScaleKind == NewScale.Relations)

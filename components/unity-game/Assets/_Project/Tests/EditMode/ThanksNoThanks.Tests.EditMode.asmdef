@@ -3,6 +3,7 @@
     "rootNamespace": "ThanksNoThanks.Tests",
     "references": [
         "ThanksNoThanks.Runtime",
+        "AiGameStudio.ArcadeControls",
         "UnityEngine.TestRunner",
         "UnityEditor.TestRunner"
     ],

@@ -11,10 +11,12 @@ using UnityEngine.UI;
 namespace ThanksNoThanks.Tests.PlayMode
 {
     /// <summary>
-    /// The host reactions through the REAL driver: the rubric banner (S4/S6) fires on a TIMELINE milestone
-    /// but not on a normal card, plays as a brief BLOCKING beat (game paused + card hidden — never both up),
-    /// auto-advances on its own ~1.5s clock without soft-locking, the speech bubble (S3) shows a named line
-    /// on a resolved answer and survives the same-frame card advance, and a restart clears both.
+    /// The host reactions through the REAL driver: the speech bubble (S3) shows a named line on a resolved
+    /// answer and survives the same-frame card advance, and a restart clears it.
+    ///
+    /// ⚠ БАННЕР-РУБРИКА ВЕХИ (S4) СНЯТ (плейтест основательницы 2026-08-05). Тесты, которые его проверяли,
+    /// перевёрнуты в ГАРД ОТСУТСТВИЯ: веха обязана идти обычной карточкой — без плашки, без паузы, без
+    /// спрятанной карточки. Так «верну баннер по-тихому» падает красным, а не проходит незамеченным.
     /// </summary>
     public class HostReactionTests
     {
@@ -33,7 +35,7 @@ namespace ThanksNoThanks.Tests.PlayMode
         private static Card Milestone(string id) =>
             new Card { Id = id, Question = id + "?", Age = 4, IsTimeline = true };
 
-        // Deck: normal → milestone(YA03) → normal, so we can watch the banner appear on the milestone only.
+        // Deck: normal → milestone(YA03) → normal, so we can watch what a milestone does (now: nothing).
         private static Game DeckGame() => new Game(new List<Card>
         {
             Normal("N0", hostYes: "Красавчик!"),
@@ -41,8 +43,11 @@ namespace ThanksNoThanks.Tests.PlayMode
             Normal("N2"),
         });
 
+        // Плейтест 2026-08-05: «убрать жёлтые баннеры-рубрики вех целиком вместе с их паузой». ВЕХА =
+        // ОБЫЧНАЯ КАРТОЧКА: ничего не всплывает, игра не встаёт на паузу, карточка видна и отвечаема
+        // ТЕМ ЖЕ кадром — и ни один объект сцены больше не зовётся баннером-рубрикой.
         [UnityTest]
-        public IEnumerator Banner_FiresOnTimeline_NotNormal_AndPausesAsBeat_CardHidden()
+        public IEnumerator Timeline_Milestone_PlaysAsAnOrdinaryCard_NoBannerNoBeat()
         {
             var driver = Boot(out var go, out var fake);
             yield return null;
@@ -51,47 +56,43 @@ namespace ThanksNoThanks.Tests.PlayMode
             yield return null;
 
             Assert.AreEqual("N0", driver.Game.CurrentCard.Id);
-            Assert.IsFalse(driver.HostBannerVisible, "no banner on a normal card");
-            Assert.IsFalse(driver.HostBanner.activeSelf, "banner GO hidden on a normal card");
-            Assert.IsTrue(driver.CardRect.gameObject.activeSelf, "card is shown on a normal (non-banner) card");
+            Assert.IsTrue(driver.CardRect.gameObject.activeSelf, "card is shown");
 
             fake.No();                            // resolve N0 → milestone YA03 becomes current
             yield return null;
 
             Assert.AreEqual("YA03", driver.Game.CurrentCard.Id);
-            Assert.IsTrue(driver.HostBannerVisible, "banner fires on the TIMELINE milestone");
-            Assert.IsTrue(driver.HostBanner.activeSelf, "banner GO visible");
-            Assert.AreEqual("ПЕРВАЯ ЛЮБОВЬ!", driver.HostBannerText.text, "correct rubric caption");
-            // Blocking beat (S4/S6): the banner pauses the game and the card is HIDDEN — NEVER both up.
-            Assert.IsTrue(driver.Game.Paused, "the rubric banner is a blocking beat — it pauses the game");
-            Assert.IsFalse(driver.CardRect.gameObject.activeSelf,
-                "the card is hidden while the banner beat is up (banner never overlaps the card)");
+            Assert.IsFalse(driver.Game.Paused, "веха НЕ ставит игру на паузу — баннер-бит снят");
+            Assert.IsTrue(driver.CardRect.gameObject.activeSelf, "карточка вехи видна сразу, её не прячут");
+            Assert.IsTrue(driver.YesPlateImage.gameObject.activeSelf, "плашки ответов на месте");
+            Assert.IsTrue(driver.NoPlateImage.gameObject.activeSelf);
+
+            // …и она отвечаема тем же кадром (раньше бит глотал ввод 1.5 c).
+            fake.No();
+            Assert.AreEqual("N2", driver.Game.CurrentCard.Id, "ответ на вехе проходит сразу");
 
             Object.Destroy(go);
             yield return null;
         }
 
+        // Ни одной жёлтой плашки-рубрики в собранном HUD: ни объекта, ни строки из снятой серии.
         [UnityTest]
-        public IEnumerator Banner_AutoAdvances_WithoutSoftLock_CardStaysAnswerable()
+        public IEnumerator No_RubricBannerWidget_Survives_InTheBuiltHud()
         {
             var driver = Boot(out var go, out var fake);
             yield return null;
-            driver.DebugReplaceGame(DeckGame());
-            fake.Confirm();
-            yield return null;
-            fake.No();                            // → milestone YA03 + banner
-            yield return null;
-            Assert.IsTrue(driver.HostBannerVisible, "banner up");
 
-            var card = driver.Game.CurrentCard;
-            yield return new WaitForSeconds(GameDriver.BannerSeconds + 0.3f);   // let Update run its clock
+            foreach (var rt in driver.GetComponentsInChildren<RectTransform>(includeInactive: true))
+                Assert.IsFalse(rt.name.Contains("Banner") && !rt.name.Contains("Block"),
+                    "рубрика-баннер снята целиком, а в сцене остался объект «" + rt.name + "»");
 
-            Assert.IsFalse(driver.HostBannerVisible, "banner auto-hid after ~1.5s");
-            Assert.IsFalse(driver.HostBanner.activeSelf, "banner GO hidden after auto-advance");
-            Assert.AreSame(card, driver.Game.CurrentCard, "milestone card still up (not skipped/soft-locked)");
-
-            fake.No();                            // still answerable → advances
-            Assert.AreEqual("N2", driver.Game.CurrentCard.Id, "answer advances past the milestone");
+            var series = new[] { "СВЕТ! КАМЕРА! ЖИЗНЬ!", "ПОРА ЗАРАБАТЫВАТЬ!", "ПЕРВАЯ ЛЮБОВЬ!",
+                                 "ПЕРВАЯ УСТАЛОСТЬ!", "СВАДЬБА! ГОРЬКО!", "ПОПОЛНЕНИЕ!",
+                                 "ВТОРАЯ МОЛОДОСТЬ!", "ПТЕНЦЫ УЛЕТЕЛИ!", "НОВАЯ ВЕХА!" };
+            foreach (var t in driver.GetComponentsInChildren<Text>(includeInactive: true))
+                foreach (var caption in series)
+                    Assert.AreNotEqual(caption, t.text,
+                        "снятая рубрика «" + caption + "» снова на экране (объект «" + t.name + "»)");
 
             Object.Destroy(go);
             yield return null;
@@ -121,24 +122,21 @@ namespace ThanksNoThanks.Tests.PlayMode
         }
 
         [UnityTest]
-        public IEnumerator Restart_ClearsBubbleAndBanner()
+        public IEnumerator Restart_ClearsBubble()
         {
             var driver = Boot(out var go, out var fake);
             yield return null;
             driver.DebugReplaceGame(DeckGame());
             fake.Confirm();
             yield return null;
-            fake.Yes();                           // bubble «Красавчик!» + advance to milestone (banner)
+            fake.Yes();                           // bubble «Красавчик!» + advance to the milestone card
             yield return null;
             Assert.IsTrue(driver.HostBubbleVisible, "bubble up before restart");
-            Assert.IsTrue(driver.HostBannerVisible, "banner up before restart");
 
-            // Exhaust the deck to the finale, then restart to a fresh life. A milestone banner is a blocking
-            // beat now (swallows input) — pump its ~1.5s clock synchronously so the loop passes through it.
+            // Exhaust the deck to the finale, then restart to a fresh life.
             int guard = 0;
             while (driver.Game.State == GameState.Playing && guard++ < 50)
             {
-                if (driver.HostBannerVisible) { driver.DebugPumpHost(GameDriver.BannerSeconds + 0.1f); continue; }
                 fake.No();
             }
             Assert.AreEqual(GameState.Finale, driver.Game.State, "reached the finale");
@@ -147,9 +145,7 @@ namespace ThanksNoThanks.Tests.PlayMode
             yield return null;
 
             Assert.IsFalse(driver.HostBubbleVisible, "bubble cleared on restart");
-            Assert.IsFalse(driver.HostBannerVisible, "banner cleared on restart");
             Assert.IsFalse(driver.HostBubble.activeSelf, "bubble GO hidden on restart");
-            Assert.IsFalse(driver.HostBanner.activeSelf, "banner GO hidden on restart");
 
             Object.Destroy(go);
             yield return null;

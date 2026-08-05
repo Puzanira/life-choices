@@ -3,6 +3,7 @@ using System.Collections;
 using System.IO;
 using NUnit.Framework;
 using ThanksNoThanks;
+using AiGameStudio.ArcadeControls;
 using UnityEngine;
 using UnityEngine.TestTools;
 
@@ -66,6 +67,11 @@ namespace ThanksNoThanks.Tests.PlayMode
             var driver = go.AddComponent<GameDriver>();
             var fake = new PlayFakeInputSource();
             driver.Input = fake;
+
+            // Снимаем ровно то, что видит РАЗРАБОТЧИК/ОСНОВАТЕЛЬНИЦА без плат: клавиатурная эмуляция
+            // жива, значит служебные строки подсказки клавиш (плейтест 2026-08-05 §2) на кадре ЕСТЬ.
+            // Иначе кадр врал бы — в тестах ArcadeInput никем не инициализирован, и подсказки пусты.
+            ArcadeInput.Initialize(new KeyboardBackend(KeyboardMapping.LoadDefault()));
             yield return null;                       // Start builds/subscribes
 
             // Which frame to capture. Default = the representative card+scales pose; the others exist so the
@@ -99,6 +105,13 @@ namespace ThanksNoThanks.Tests.PlayMode
                 case "tutenergy": driver.DebugPreviewNewScale(NewScale.Energy); break;
                 case "tutchild": driver.DebugPreviewNewScale(NewScale.Child); break;
                 case "host": driver.DebugPreviewHostComment(); break;
+                // Веха-TIMELINE в обычном ходу: жёлтая рубрика-баннер снята (плейтест 2026-08-05 §3),
+                // поэтому веха выглядит РОВНО как любая другая карточка — этот кадр и показывает.
+                case "milestone":
+                    driver.DebugPreviewArcadeShot();
+                    driver.CardRect.Find("CardText").GetComponent<UnityEngine.UI.Text>().text =
+                        "Первая любовь. Признаться ей?";
+                    break;
                 case "opener":
                     // S1 as the player meets it: the driver already boots into the opener, so the pose is
                     // «touch nothing». Freeze Update so the spinning rays land on a deterministic angle.

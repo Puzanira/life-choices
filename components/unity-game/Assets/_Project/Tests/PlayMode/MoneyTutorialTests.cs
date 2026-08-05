@@ -37,9 +37,6 @@ namespace ThanksNoThanks.Tests.PlayMode
             int guard = 0;
             while (!driver.NewScaleShowing && driver.Game.State == GameState.Playing && guard++ < 4000)
             {
-                // A TIMELINE milestone (I03, YA01…) plays a blocking banner beat that swallows input — pump
-                // its ~1.5s clock synchronously so the run passes through it (banner beat → card → modal).
-                if (driver.HostBannerVisible) { driver.DebugPumpHost(GameDriver.BannerSeconds + 0.1f); continue; }
                 driver.Game.Tick(0.25f);
                 if (!driver.NewScaleShowing && driver.Game.CurrentCard != null
                     && driver.Game.CardTimer < 3.5f)
@@ -198,7 +195,6 @@ namespace ThanksNoThanks.Tests.PlayMode
             {
                 if (driver.NewScaleShowing) { NewScaleTut.Clear(driver, fake); continue; }
                 if (driver.TutorialShowing) { fake.Confirm(); continue; }
-                if (driver.HostBannerVisible) { driver.DebugPumpHost(GameDriver.BannerSeconds + 0.1f); continue; }
                 fake.No();
             }
             Assert.AreEqual(GameState.Finale, driver.Game.State, "reached the finale");

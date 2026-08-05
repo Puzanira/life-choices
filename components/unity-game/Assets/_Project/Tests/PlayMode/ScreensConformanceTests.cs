@@ -320,7 +320,6 @@ namespace ThanksNoThanks.Tests.PlayMode
             int guard = 0;
             while (driver.Game.Age < 3f && driver.Game.State == GameState.Playing && guard++ < 400)
             {
-                if (driver.HostBannerVisible) { driver.DebugPumpHost(GameDriver.BannerSeconds + 0.1f); continue; }
                 driver.Game.Tick(0.25f);
                 if (driver.Game.CurrentCard != null && driver.Game.CardTimer < 3.5f) fake.No();
             }

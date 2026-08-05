@@ -596,7 +596,6 @@ namespace ThanksNoThanks.Tests.PlayMode
             {
                 if (driver.NewScaleShowing) { NewScaleTut.Clear(driver, fake); yield return null; continue; }
                 if (driver.TutorialShowing) { fake.Confirm(); yield return null; continue; }
-                if (driver.HostBannerVisible) { driver.DebugPumpHost(GameDriver.BannerSeconds + 0.1f); continue; }
                 if (driver.Game.CurrentCard != null) fake.No();   // доигрываем жизнь «СПАСИБО, НЕ НАДО»
                 else driver.DebugTick(0.5f);
             }

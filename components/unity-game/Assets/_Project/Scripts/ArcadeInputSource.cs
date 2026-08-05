@@ -33,15 +33,14 @@ namespace ThanksNoThanks
         [Tooltip("Crank rotation (degrees, either direction) that equals one MoneyTick.")]
         [SerializeField] private float degreesPerMoneyTick = 12f;
 
-        // Breathing lever (HeightA): one pulse per rising crossing of mid-travel, re-armed once it drops back.
-        private const float BreathHigh = 0.5f;
-        private const float BreathLow = 0.35f;
+        // Breathing lever (HeightA): one pulse per rising crossing of mid-travel, re-armed once it drops
+        // back. The thresholds and the edge logic live in the PURE BreathLever, so the whole keyboard
+        // path can be simulated deterministically in EditMode (BreathKeyboardPathTests).
+        private readonly BreathLever _breathLever = new();
         // Relationship balancer (Joystick.y): held axis, re-emitted every frame past the deadzone.
         private const float JoyDeadzone = 0.4f;
 
         private float _crankAccum;
-        private float _prevHeightA;
-        private bool _breathArmed = true;
         private bool _prevGreen, _prevRed, _prevBang, _prevMenu;
 
         private void Awake()
@@ -81,17 +80,7 @@ namespace ThanksNoThanks
             }
 
             // ---- breathing lever (HeightA) → one EnergyPulse per up-stroke through mid-travel ----
-            float h = ArcadeInput.HeightA.Value;
-            if (_breathArmed && _prevHeightA < BreathHigh && h >= BreathHigh)
-            {
-                Emit(GameInput.EnergyPulse);
-                _breathArmed = false;
-            }
-            else if (!_breathArmed && h <= BreathLow)
-            {
-                _breathArmed = true; // lever came back down → ready for the next breath
-            }
-            _prevHeightA = h;
+            if (_breathLever.Step(ArcadeInput.HeightA.Value)) Emit(GameInput.EnergyPulse);
 
             // ---- relationship balancer (Joystick vertical) → held axis, re-emitted each frame ----
             float y = ArcadeInput.Joystick.Vector.y;

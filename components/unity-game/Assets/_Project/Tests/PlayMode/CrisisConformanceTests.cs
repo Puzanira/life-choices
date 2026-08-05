@@ -19,7 +19,7 @@ namespace ThanksNoThanks.Tests.PlayMode
     ///  • the blitz view renders EXACTLY its expected sprite set (no stray empty band / tofu);
     ///  • the S13 impulse warning carries a DRAWN mute icon (a real sprite, not a font glyph) and the
     ///    «СПАСИБО, НЕ НАДО» decline is highlighted.
-    /// Time is driven by explicit Game.Tick calls; the banner beat is pumped via DebugPumpHost.
+    /// Time is driven by explicit Game.Tick calls; the host bubble is aged out via DebugPumpHost.
     /// </summary>
     public class CrisisConformanceTests
     {
@@ -68,11 +68,11 @@ namespace ThanksNoThanks.Tests.PlayMode
             };
         }
 
-        // Drive to the crisis blitz; on return the CR00 banner beat is UP (card hidden, game paused).
+        // Drive to the crisis blitz; on return the CR00 announce bubble is UP (nothing is blocked).
         private static IEnumerator DriveToCrisis(GameDriver driver, PlayFakeInputSource fake, Game g)
         {
             driver.DebugReplaceGame(g);
-            fake.Confirm();                               // opener → playing, I03 (banner beat)
+            fake.Confirm();                               // opener → playing, I03 (обычная карточка-веха)
             g.HandleInput(GameInput.AnswerNo);            // resolve I03 directly → age timer on, beat clears
 
             int guard = 0;
@@ -80,7 +80,6 @@ namespace ThanksNoThanks.Tests.PlayMode
             {
                 if (driver.NewScaleShowing) { NewScaleTut.Clear(driver, fake); yield return null; continue; }
                 if (driver.TutorialShowing) { fake.Confirm(); yield return null; continue; }
-                if (driver.HostBannerVisible) { driver.DebugPumpHost(GameDriver.BannerSeconds + 0.1f); continue; }
                 g.Tick(0.2f);
             }
             Assert.AreEqual(CrisisPhase.Blitz, g.Phase, "reached the crisis blitz");
@@ -170,29 +169,26 @@ namespace ThanksNoThanks.Tests.PlayMode
         }
 
         [UnityTest]
-        public IEnumerator BlitzBeat_BannerAndCard_NeverBothVisible_ThenBlitzConforms()
+        public IEnumerator CrisisAnnounce_RidesTheHostBubble_ThenBlitzConforms()
         {
             var driver = Boot(out var go, out var fake);
             yield return null;
             var g = CrisisGame(Csv());
             yield return DriveToCrisis(driver, fake, g);
 
-            // (1) Banner beat up: the «КРИЗИС… БЛИЦ!» band is visible and the card is HIDDEN — never both.
+            // (1) Вход в кризис объявляет ВЕДУЩИЙ В ОБЛАЧКЕ: жёлтая рубрика-плашка и её блокирующий бит
+            // сняты (плейтест 2026-08-05), поэтому блиц читаем СРАЗУ — игра не встаёт и карточку не прячет.
             yield return null;
-            Assert.IsTrue(driver.HostBannerVisible, "the crisis rubric plays as a banner beat");
-            Assert.IsTrue(driver.Game.Paused, "the beat pauses the game");
-            Assert.IsFalse(driver.CardRect.gameObject.activeSelf, "the card/blitz thought is hidden on the beat");
-            // The band must actually RENDER its caption (the founder «пустой баннер» bug: text set but the
-            // rect collapsed so nothing drew). Assert visible glyphs that fit the band.
-            Assert.IsFalse(string.IsNullOrEmpty(driver.HostBannerText.text), "banner caption text is set");
-            AssertLabelFits(driver.HostBannerText, "banner caption");
+            Assert.IsTrue(driver.HostBubbleVisible, "вход в кризис объявлен репликой Ведущего");
+            StringAssert.Contains("БЛИЦ", driver.HostBubbleText.text, "…и это именно объявление блица");
+            AssertLabelFits(driver.HostBubbleText, "crisis announce");
+            Assert.IsFalse(driver.Game.Paused, "объявление НЕ блокирующее — паузы больше нет");
+            Assert.IsTrue(driver.CardRect.gameObject.activeSelf, "мысль блица видна сразу, её не прячут");
 
-            // Clear the beat (and the thought-1 nag bubble) → the blitz appears.
+            // Age the bubble out (thought-1 nag included) so the screenshots below read the resting blitz.
             driver.DebugPumpHost(3f);
             yield return null;
-            Assert.IsFalse(driver.HostBannerVisible, "banner gone once the blitz shows");
-            Assert.IsFalse(driver.HostBanner.activeSelf, "banner GO hidden in the blitz view");
-            Assert.IsTrue(driver.CardRect.gameObject.activeSelf, "the blitz thought is shown once the beat clears");
+            Assert.IsTrue(driver.CardRect.gameObject.activeSelf, "the blitz thought is shown");
 
             var canvas = driver.CanvasRect;
 
@@ -230,7 +226,7 @@ namespace ThanksNoThanks.Tests.PlayMode
                 "bar-track",                                        // the dark counter badge
             }.OrderBy(s => s).ToList();
             CollectionAssert.AreEqual(expected, actual,
-                "the blitz view renders exactly its expected sprites — no empty rubric band, no stray Image");
+                "the blitz view renders exactly its expected sprites — no stray Image");
 
             Object.Destroy(go);
             yield return null;
@@ -249,7 +245,7 @@ namespace ThanksNoThanks.Tests.PlayMode
             yield return null;
             var g = CrisisGame(Csv(), normalOnYesLever);
             yield return DriveToCrisis(driver, fake, g);
-            driver.DebugPumpHost(3f);                     // clear the CR00 beat → the blitz is answerable
+            driver.DebugPumpHost(3f);                     // age out the CR00 announce bubble
             yield return null;
 
             var canvas = driver.CanvasRect;
@@ -318,7 +314,7 @@ namespace ThanksNoThanks.Tests.PlayMode
 
             var g = CrisisGame(Csv());
             yield return DriveToCrisis(driver, fake, g);
-            driver.DebugPumpHost(3f);                     // clear the CR00 beat → the blitz view is up
+            driver.DebugPumpHost(3f);                     // age out the CR00 announce bubble
             yield return null;
 
             // (2) blitz: blank code-plates + the live relabel.
@@ -353,7 +349,7 @@ namespace ThanksNoThanks.Tests.PlayMode
             var g = CrisisGame(Csv());
             yield return DriveToCrisis(driver, fake, g);
 
-            driver.DebugPumpHost(3f);                     // clear the CR00 beat → blitz answerable
+            driver.DebugPumpHost(3f);                     // age out the CR00 announce bubble
             yield return null;
 
             for (int i = 0; i < 5; i++) fake.No();        // fail all 5 thoughts (≥2) → impulse round opens

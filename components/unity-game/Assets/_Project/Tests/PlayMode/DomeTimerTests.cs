@@ -13,7 +13,7 @@ namespace ThanksNoThanks.Tests.PlayMode
     /// <summary>
     /// Купол-таймер (revisions §5a / build-spec §2) через НАСТОЯЩИЙ драйвер: круглое кольцо снято
     /// целиком, дуга-остаток убывает ровно за таймер текущей фазы (§3), в последнюю секунду уходит
-    /// в `RED_BRIGHT`, на паузе (туториал/баннер-бит) заморожена, а на опенере и финале купола нет.
+    /// в `RED_BRIGHT`, на паузе (туториал/§D-модалка) заморожена, а на опенере и финале купола нет.
     /// Геометрия (крупный бокс §2 по центру), z-порядок «под барами» и просветы живут в
     /// HudConformanceTests (DomeTimer_IsTheBigCentredDome_DrawnUnderTheBars).
     /// </summary>
@@ -33,14 +33,8 @@ namespace ThanksNoThanks.Tests.PlayMode
             yield return null;          // Start wires input + subscriptions
             fake.Confirm();             // opener → playing, first card dealt
             yield return null;
-            // A TIMELINE milestone opens with a rubric banner beat that PAUSES the game (and hides the
-            // dome): pump its clock so the tests below drive a live, unpaused card.
-            if (driver.HostBannerVisible)
-            {
-                driver.DebugPumpHost(GameDriver.BannerSeconds + 0.1f);
-                yield return null;
-            }
-            Assert.IsFalse(driver.Game.Paused, "карточка идёт живьём (баннер-бит прокачан)");
+            // Веха идёт обычной карточкой (баннер-бит снят 2026-08-05) — игра живая с первого же кадра.
+            Assert.IsFalse(driver.Game.Paused, "карточка идёт живьём");
         }
 
         // ---- the ring is gone -------------------------------------------------------------------

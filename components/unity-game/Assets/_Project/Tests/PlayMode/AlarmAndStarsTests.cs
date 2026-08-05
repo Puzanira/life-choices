@@ -41,12 +41,7 @@ namespace ThanksNoThanks.Tests.PlayMode
             yield return null;                       // Start wires input + subscriptions
             fake.Confirm();                          // opener → playing, first card dealt
             yield return null;
-            if (driver.HostBannerVisible)            // TIMELINE-карта открывается баннер-битом на паузе
-            {
-                driver.DebugPumpHost(GameDriver.BannerSeconds + 0.1f);
-                yield return null;
-            }
-            Assert.IsFalse(driver.Game.Paused, "карточка идёт живьём (баннер-бит прокачан)");
+            Assert.IsFalse(driver.Game.Paused, "карточка идёт живьём");
             driver.enabled = false;                  // дальше время подаём вручную
             driver.DebugApplyAgeGates(40f);          // батарея + оба бара + банка на экране
         }
