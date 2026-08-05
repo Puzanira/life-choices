@@ -44,6 +44,9 @@ namespace ThanksNoThanks.Tests.PlayMode
                 // A TIMELINE milestone plays a blocking banner beat that swallows input — pump its clock
                 // synchronously, exactly as the other driver tests do, so the run never stalls on it.
                 if (driver.HostBannerVisible) { driver.DebugPumpHost(GameDriver.BannerSeconds + 0.1f); continue; }
+                // §D: открытия четырёх шкал поднимают МОДАЛКУ, которая кнопкой не снимается — её
+                // проходят реальным контролом шкалы (NewScaleTut), остальные подсказки — как раньше.
+                if (driver.NewScaleShowing) { NewScaleTut.Clear(driver, fake); continue; }
                 if (driver.TutorialShowing) { fake.Confirm(); continue; }
                 driver.Game.Tick(0.5f);
                 if (driver.Game.EnergyOpen)
@@ -234,10 +237,9 @@ namespace ThanksNoThanks.Tests.PlayMode
             StringAssert.Contains("ЗЕЛЁНУЮ", driver.TutorialButtonText.text, "the hint dismiss names the GREEN button");
 
             // (4) …and the child tutorial names the «!» button (the cabinet control), per the same decision.
-            var child = (string)typeof(GameDriver)
-                .GetField("ChildTutorialText", BindingFlags.NonPublic | BindingFlags.Static)
-                .GetValue(null);
-            StringAssert.Contains("«!»", child, "the child hint names the physical «!» button");
+            // Since the §D screen replaced the old text hint, the canon copy now lives in the TASK window.
+            StringAssert.Contains("«!»", GameDriver.ChildTaskText,
+                "the child task window names the physical «!» button");
 
             Object.Destroy(go);
             yield return null;
@@ -255,8 +257,11 @@ namespace ThanksNoThanks.Tests.PlayMode
             while (!driver.TutorialShowing && driver.Game.State == GameState.Playing && guard++ < 8000)
             {
                 if (driver.HostBannerVisible) { driver.DebugPumpHost(GameDriver.BannerSeconds + 0.1f); continue; }
+                // Первые открытия (18/20/25) ведут §D-модалку — она НЕ снимается зелёной и проходится
+                // своим контролом; S5-подсказка, которую и проверяет этот тест, остаётся у здоровья (30).
+                if (driver.NewScaleShowing) { NewScaleTut.Clear(driver, fake); continue; }
                 driver.Game.Tick(0.25f);
-                if (!driver.TutorialShowing && driver.Game.CurrentCard != null
+                if (!driver.TutorialShowing && !driver.NewScaleShowing && driver.Game.CurrentCard != null
                     && driver.Game.CardTimer < 3.5f) fake.No();
             }
             Assert.IsTrue(driver.TutorialShowing, "a hint modal came up");

@@ -39,10 +39,12 @@ namespace ThanksNoThanks.Tests.PlayMode
             int guard = 0;
             while (!driver.Game.RelationshipsOpen && driver.Game.State == GameState.Playing && guard++ < 300)
             {
-                if (driver.TutorialShowing) fake.Confirm();   // dismiss money/rel S5 hints (they pause)
+                // §D: деньги/отношения теперь поднимают модальный экран новой шкалы — он снимается своим
+                // контролом, а не кнопкой (NewScaleTut); прочие S5-подсказки — как раньше.
+                if (driver.NewScaleShowing || driver.TutorialShowing) NewScaleTut.ClearAny(driver, fake);
                 else driver.Game.Tick(0.2f);
             }
-            if (driver.TutorialShowing) fake.Confirm();
+            NewScaleTut.ClearAny(driver, fake);
             yield return null;
         }
 

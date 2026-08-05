@@ -310,19 +310,22 @@ namespace ThanksNoThanks.Tests.PlayMode
 
         // ============================================================ S5 tutorial
 
-        // Drive a real life until the first (money) tutorial modal appears.
+        // Raise the S5 hint over live gameplay. It used to be reached by walking a life to the money open
+        // (18); since that open now leads the §D modal instead (increment «экран появления новой шкалы»),
+        // the S5 hint survives only for health (30) and burnout — both far enough into a CSV-SAMPLED deck
+        // that walking there is a flake. The composition guarded below is the modal's own, so the hint is
+        // raised through the driver's own show path over a live board.
         private static void PlayUntilTutorial(GameDriver driver, PlayFakeInputSource fake)
         {
             int guard = 0;
-            while (!driver.TutorialShowing && driver.Game.State == GameState.Playing && guard++ < 6000)
+            while (driver.Game.Age < 3f && driver.Game.State == GameState.Playing && guard++ < 400)
             {
                 if (driver.HostBannerVisible) { driver.DebugPumpHost(GameDriver.BannerSeconds + 0.1f); continue; }
-                fake.Fire(GameInput.MoneyTick);
                 driver.Game.Tick(0.25f);
-                if (!driver.TutorialShowing && driver.Game.CurrentCard != null && driver.Game.CardTimer < 3.5f)
-                    fake.No();
+                if (driver.Game.CurrentCard != null && driver.Game.CardTimer < 3.5f) fake.No();
             }
-            Assert.IsTrue(driver.TutorialShowing, "a tutorial modal appeared during the run");
+            driver.DebugShowTutorial("ЗДОРОВЬЕ НАЧАЛО ТАЯТЬ.\n\nС этого возраста ЗДОРОВЬЕ убывает само по себе.");
+            Assert.IsTrue(driver.TutorialShowing, "a tutorial modal is up over live gameplay");
         }
 
         [UnityTest]

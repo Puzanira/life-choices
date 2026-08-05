@@ -47,36 +47,42 @@ namespace ThanksNoThanks.Tests.PlayMode
             yield return null;                             // Start wires input + events
             fake.Confirm();                                // opener → playing
 
-            bool sawRelHint = false;
+            // §D: «первая любовь» (20) поднимает МОДАЛЬНЫЙ экран новой шкалы, а не текстовый S5-хинт.
+            bool sawRelModal = false;
             int guard = 0;
-            while (guard++ < 12000 && driver.Game.State == GameState.Playing && !sawRelHint)
+            while (guard++ < 12000 && driver.Game.State == GameState.Playing && !sawRelModal)
             {
                 if (driver.HostBannerVisible) { driver.DebugPumpHost(GameDriver.BannerSeconds + 0.1f); continue; }
-                if (driver.TutorialShowing)
+                if (driver.NewScaleShowing)
                 {
-                    if (driver.TutorialText.text.Contains("ОТНОШЕНИЙ"))
+                    if (driver.NewScaleKind == NewScale.Relations)
                     {
-                        Assert.IsTrue(driver.Game.Paused, "the relationships hint pauses the game");
+                        Assert.IsTrue(driver.Game.Paused, "the relationships modal pauses the game");
                         Assert.IsTrue(driver.Game.RelationshipsOpen, "balancer opened");
-                        Assert.GreaterOrEqual(driver.Game.Age, 19f, "relationships hint fires around age 20");
-                        sawRelHint = true;
+                        Assert.GreaterOrEqual(driver.Game.Age, 19f, "relationships modal fires around age 20");
+                        Assert.AreEqual(GameDriver.RelationsTaskText, driver.NewScaleTaskText.text,
+                            "…and it carries the canon relationships task (host-content §4)");
+                        sawRelModal = true;
                         break;
                     }
-                    fake.Confirm();                        // dismiss the earlier money hint and press on
+                    NewScaleTut.Clear(driver, fake);       // pass the earlier money modal
                     yield return null;
                     continue;
                 }
+                if (driver.TutorialShowing) { fake.Confirm(); yield return null; continue; }
                 fake.Fire(GameInput.MoneyTick);
                 driver.Game.Tick(0.25f);
                 if (driver.Game.CurrentCard != null && driver.Game.CardTimer < 3.5f)
                     fake.No();
             }
-            Assert.IsTrue(sawRelHint, "the «первая любовь» balancer hint appeared at 20");
+            Assert.IsTrue(sawRelModal, "the «первая любовь» balancer screen appeared at 20");
 
-            fake.Confirm();                                // Enter dismisses
-            Assert.IsFalse(driver.TutorialShowing, "hint closed on Enter");
+            NewScaleTut.Clear(driver, fake);               // выполнить условие настоящим рычагом
+            Assert.IsFalse(driver.NewScaleShowing, "the screen closed once the marker was held in the zone");
             Assert.IsTrue(driver.BalancerGroup.activeSelf,
-                "the balancer is visible the moment the hint closes — no one-card lag");
+                "the balancer is visible the moment the screen closes — no one-card lag");
+            Assert.AreEqual(1f, ((RectTransform)driver.BalancerGroup.transform).localScale.x, 1e-3f,
+                "…and back at its ordinary HUD size");
 
             Object.Destroy(go);
             yield return null;
@@ -101,6 +107,7 @@ namespace ThanksNoThanks.Tests.PlayMode
             int guard = 0;
             while (guard++ < 8000 && g.State == GameState.Playing && !g.RelationshipsLost)
             {
+                if (driver.NewScaleShowing) { NewScaleTut.Clear(driver, fake); yield return null; continue; }
                 if (driver.TutorialShowing) { fake.Confirm(); yield return null; continue; }
                 driver.Game.Tick(0.25f);
                 if (g.CurrentCard != null && g.CardTimer < 3.5f) fake.No();

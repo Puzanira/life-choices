@@ -66,9 +66,8 @@ namespace ThanksNoThanks.Tests.PlayMode
             driver.DebugReplaceGame(CallDeck(holdAge));
             fake.Confirm();                              // опенер → игра (I03)
             fake.No();                                   // I03 решена → MD02 текущая
-            fake.Yes();                                  // MD02=ДА → механика ребёнка открыта (+ пауза)
-            int guard = 0;
-            while (driver.TutorialShowing && guard++ < 20) fake.Confirm();
+            fake.Yes();                                  // MD02=ДА → механика ребёнка открыта (+ §D-модалка)
+            NewScaleTut.ClearAny(driver, fake);          // поднять туториальный звонок → экран уходит
             yield return null;                           // Update прогоняет ReflectChildPhone
         }
 
@@ -79,7 +78,7 @@ namespace ThanksNoThanks.Tests.PlayMode
             int guard = 0;
             while (!driver.Game.ChildFlashing && driver.Game.State == GameState.Playing && guard++ < 600)
             {
-                if (driver.TutorialShowing) fake.Confirm();
+                if (driver.NewScaleShowing || driver.TutorialShowing) NewScaleTut.ClearAny(driver, fake);
                 else driver.DebugTick(0.1f);
             }
             Assert.IsTrue(driver.Game.ChildFlashing, "окно звонка открылось");
@@ -98,14 +97,14 @@ namespace ThanksNoThanks.Tests.PlayMode
             int guard = 0;
             while (!driver.Game.EnergyOpen && driver.Game.State == GameState.Playing && guard++ < 900)
             {
-                if (driver.TutorialShowing) fake.Confirm();
+                if (driver.NewScaleShowing || driver.TutorialShowing) NewScaleTut.ClearAny(driver, fake);
                 else driver.DebugTick(0.1f);
             }
             Assert.IsTrue(driver.Game.EnergyOpen, "шкала энергии открылась (25) — есть чему выгорать");
             guard = 0;
             while (driver.Game.ChildFlashing && driver.Game.State == GameState.Playing && guard++ < 200)
             {
-                if (driver.TutorialShowing) fake.Confirm();
+                if (driver.NewScaleShowing || driver.TutorialShowing) NewScaleTut.ClearAny(driver, fake);
                 else driver.DebugTick(0.1f);
             }
             if (driver.TutorialShowing) fake.Confirm();
@@ -134,6 +133,7 @@ namespace ThanksNoThanks.Tests.PlayMode
             int guard = 0;
             while (!driver.Game.ChildFlashing && driver.Game.State == GameState.Playing && guard++ < 600)
             {
+                if (driver.NewScaleShowing) { yield return NewScaleTut.ClearArcade(driver, backend); continue; }
                 if (driver.TutorialShowing) { yield return Press(backend, Green); continue; }
                 driver.DebugTick(0.1f);
             }
@@ -384,6 +384,7 @@ namespace ThanksNoThanks.Tests.PlayMode
             yield return Press(backend, Red);             // RED = НЕТ на I03 → MD02 текущая
             Assert.AreEqual("MD02", driver.Game.CurrentCard.Id, "дошли до карточки ребёнка");
             yield return Press(backend, Green);           // GREEN = ДА на MD02 → механика ребёнка открыта
+            yield return NewScaleTut.ClearArcade(driver, backend);   // «!» кабинета поднимает туториальный звонок
             int guard = 0;
             while (driver.TutorialShowing && guard++ < 20) yield return Press(backend, Green);
             Assert.IsTrue(driver.Game.ChildOpen, "MD02=ДА открыл механику ребёнка");
@@ -551,18 +552,24 @@ namespace ThanksNoThanks.Tests.PlayMode
             fake.No();                                   // I03 решена → MD02 текущая
             Assert.AreEqual("MD02", driver.Game.CurrentCard.Id);
 
-            // (2) MD02=ДА открывает ребёнка → S5-подсказка «ПОПОЛНЕНИЕ!» и пауза.
+            // (2) MD02=ДА открывает ребёнка → §D-экран новой шкалы «ПОПОЛНЕНИЕ» и пауза.
             fake.Yes();
             Assert.IsTrue(driver.Game.ChildOpen, "MD02=ДА открыл ребёнка");
-            Assert.IsTrue(driver.TutorialShowing, "S5-подсказка ребёнка поднялась");
-            StringAssert.Contains("ПОПОЛНЕНИЕ", driver.TutorialText.text, "это подсказка про ребёнка");
-            StringAssert.Contains("телефон", driver.TutorialText.text,
-                "подсказка канон host-content §4: «когда телефон слева зазвонит»");
-            StringAssert.Contains("«!»", driver.TutorialText.text, "…и называет кнопку «!»");
+            Assert.IsTrue(driver.NewScaleShowing, "модальный экран ребёнка поднялся");
+            Assert.AreEqual(NewScale.Child, driver.NewScaleKind, "это экран про ребёнка");
+            StringAssert.Contains("Пополнение", driver.NewScaleStoryText.text, "рассказ про пополнение");
+            StringAssert.Contains("телефон", driver.NewScaleTaskText.text,
+                "задача канон host-content §4: «когда телефон слева зазвонит»");
+            StringAssert.Contains("«!»", driver.NewScaleTaskText.text, "…и называет кнопку «!»");
 
-            // (3) Под подсказкой CONFIRM её СНИМАЕТ — это не поднятие трубки.
+            // (3) Под экраном CONFIRM = ПОДНЯТЬ ТРУБКУ (условие выхода), а не «понятно»: туториал
+            // заводит звонок принудительно, поэтому dev-Enter здесь работает как «!» кабинета.
+            Assert.IsTrue(driver.Game.ChildFlashing, "туториал завёл звонок");
             fake.Confirm();
-            Assert.IsFalse(driver.TutorialShowing, "CONFIRM снял подсказку");
+            Assert.IsFalse(driver.Game.ChildFlashing, "трубка поднята");
+            driver.DebugAdvanceNewScale(0.05f);                      // условие засчитано → фейд
+            driver.DebugAdvanceNewScale(GameDriver.NewScaleFadeSeconds);
+            Assert.IsFalse(driver.NewScaleShowing, "условие выполнено — экран ушёл");
             Assert.IsFalse(driver.Game.Paused, "игра пошла дальше");
             yield return null;
             Assert.IsTrue(driver.ChildGroup.activeSelf, "после открытия механики трубка на экране");
@@ -587,6 +594,7 @@ namespace ThanksNoThanks.Tests.PlayMode
             int guard = 0;
             while (driver.Game.State == GameState.Playing && guard++ < 2000)
             {
+                if (driver.NewScaleShowing) { NewScaleTut.Clear(driver, fake); yield return null; continue; }
                 if (driver.TutorialShowing) { fake.Confirm(); yield return null; continue; }
                 if (driver.HostBannerVisible) { driver.DebugPumpHost(GameDriver.BannerSeconds + 0.1f); continue; }
                 if (driver.Game.CurrentCard != null) fake.No();   // доигрываем жизнь «СПАСИБО, НЕ НАДО»

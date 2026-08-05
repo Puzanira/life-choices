@@ -22,6 +22,25 @@ namespace ThanksNoThanks
     }
 
     /// <summary>
+    /// Шкала, чей ТУТОРИАЛ-ЭКРАН (build-spec §D, «появление новой шкалы») поднят сейчас. Ровно четыре
+    /// открытия (`OPEN:*`) ведут этот модальный экран; здоровье (30) и выгорание остались на прежней
+    /// текстовой S5-подсказке (meeting-revisions §2 их не перечисляет).
+    /// </summary>
+    public enum NewScale
+    {
+        /// <summary>Никакой — экран не поднят.</summary>
+        None,
+        /// <summary>Деньги (18, `OPEN:Дн`) — условие выхода: ≥1 ПРИНЯТЫЙ тик крутилки.</summary>
+        Money,
+        /// <summary>Отношения (20, `OPEN:Отн`) — маркер в механической зоне 40–75 % и удержать 1.5 с.</summary>
+        Relations,
+        /// <summary>Энергия (25, `OPEN:Эн`) — дыханием поднять энергию &gt;40 % и удержать 1.5 с.</summary>
+        Energy,
+        /// <summary>Ребёнок (свадьба+2, `OPEN:Реб`) — поднять один звонок кнопкой «!».</summary>
+        Child,
+    }
+
+    /// <summary>
     /// MonoBehaviour driver for «Спасибо, не надо». Owns the pure <see cref="Game"/>, wires an
     /// <see cref="IInputSource"/> (an <see cref="ArcadeInputSource"/> reading the shared arcade-controls
     /// layer by default; a fake can be injected for tests), and
@@ -528,6 +547,175 @@ namespace ThanksNoThanks
         private Text _cardPriceText;
         private Image _cardPricePlate;
 
+        // ---- D: «экран появления новой шкалы» (meeting-revisions §2 / build-spec §D) ------------------
+        // Модальный туториал на каждом OPEN четырёх шкал: затемнение поверх геймплея, КРУПНАЯ копия самой
+        // шкалы у её HUD-места, облачко-рассказ Ведущего и окно-задача. Кнопками НЕ закрывается — только
+        // выполнением условия по РЕАЛЬНОМУ контролу (крутилка / дыхание / рычаг / «!»).
+        private GameObject _nsOverlay;     // корень модалки; поднимается в конец списка на показе
+        private CanvasGroup _nsFade;       // фейд 0.2 с на выходе
+        private Image _nsDim;              // затемнение ~40 % INK на весь экран
+        private GameObject _nsSlot;        // полноэкранный слот, куда «одалживается» настоящий HUD-виджет
+        private Image _nsPlate;            // окно-задача — `task-plate-v2` (Simple, НЕ 9-slice: звёзды-лучи)
+        private Image _nsBubble;           // окно-рассказ — `host-comment-v2`, ЗЕРКАЛЬНО (рупор справа)
+        private Image _nsHoldTrack;        // видимый прогресс удержания 1.5 с — дорожка…
+        private Image _nsHoldFill;         // …и её заполнение
+        private Text _nsTaskText;          // задача (Arimo Bold, в кремовом поле плашки)
+        private Text _nsStoryText;         // рассказ (Rubik-Bold, в кремовом поле облачка)
+        private NewScale _nsWhich;         // какая шкала сейчас объясняется
+        private bool _nsShowing;
+        private bool _nsArmed;             // РЕАЛЬНЫЙ ввод по этой шкале уже был (см. NewScaleArmed)
+        private bool _nsDone;              // условие выполнено → идёт фейд
+        private float _nsHold;             // секунд НЕПРЕРЫВНОГО удержания режима
+        private float _nsFadeT;            // прожито фейда, с
+        private readonly bool[] _nsSeen = new bool[5];   // один раз за жизнь на шкалу (индекс = NewScale)
+        // ОТЛОЖЕННЫЙ показ: OPEN пришёл, но поднимать модалку сейчас нельзя (сейчас — только ВЫГОРАНИЕ под
+        // ребёнком, см. ShowNewScale). OPEN не теряется: пампится в TickNewScale и стартует, как только
+        // помеха снята. См. NewScalePending.
+        private NewScale _nsPending = NewScale.None;
+
+        // Одолженный виджет: настоящий HUD-виджет уезжает на модалку (увеличенным), а не клонируется, —
+        // так КРУПНАЯ копия ЖИВАЯ (батарея растёт от дыхания, сердце едет от рычага, монетка падает в банку)
+        // и рисуется поверх затемнения. Возвращается на своё место в HUD при закрытии.
+        private GameObject _nsBorrowed;
+        private Transform _nsBorrowedParent;
+        private int _nsBorrowedIndex;
+        // Раскладка виджета в HUD целиком (якоря + отступы + масштаб): модалка сдвигает его ЯКОРЯМИ, поэтому
+        // и возвращать надо якоря, а не одну anchoredPosition.
+        private Vector2 _nsBorrowedAnchorMin, _nsBorrowedAnchorMax, _nsBorrowedOffsetMin, _nsBorrowedOffsetMax;
+        private Vector3 _nsBorrowedScale;
+
+        /// <summary>Сколько секунд НЕПРЕРЫВНО держать режим, чтобы окно ушло (revisions §2: «~1.5 сек»).</summary>
+        public const float NewScaleHoldSeconds = 1.5f;
+        /// <summary>Фейд ухода окна (build-spec §D: «окно уходит (фейд 0.2с)»).</summary>
+        public const float NewScaleFadeSeconds = 0.2f;
+        /// <summary>Затемнение геймплея под модалкой — ~40 % INK (build-spec §D).</summary>
+        public const float NewScaleDimAlpha = 0.40f;
+        /// <summary>Энергия «в рабочей зоне» для задачи D (revisions §2: &gt;40 %). Совпадает с порогом
+        /// снятия выгорания <see cref="Game.BurnoutExitEnergyAbove"/>, но это ОТДЕЛЬНАЯ величина экрана.</summary>
+        public const int NewScaleEnergyAbove = 40;
+
+        // ---- геометрия D, СНЯТА С ЭТАЛОНА «Экран - появление новой шкалы.png» (1920×1080, PIL) ---------
+        // Табличные боксы build-spec §D — ориентир; пиксель-истина — эталон (asset-map §11-а). Замеры:
+        //   кремовое поле окна-задачи   x 393…1625, y 343…819  (1233×477), центр (1009, 581)
+        //   кремовое поле облачка       x 1014…1747, y 107…343 (734×237),  центр (1380.5, 225)
+        //   крупная батарея (обводка)   x 207…412,  y 144…546  (206×403),  центр (309.5, 345)
+        // Спрайт `task-plate-v2` 1536×892, его запечённое кремовое поле — sprite (204…1442, 220…701):
+        // 1233/1239 = ×0.995, т.е. плашка на эталоне нарисована практически 1:1 к исходнику.
+        /// <summary>Окно-задача: спрайт целиком (центр x, центр y от ВЕРХА, w, h).</summary>
+        public static readonly Vector4 TaskPlateRect = new(954.3f, 566.6f, 1528.3f, 887.5f);
+        /// <summary>Кремовое поле окна-задачи на экране — сюда садится текст задачи.</summary>
+        public static readonly Vector4 TaskFieldRect = new(1009f, 581f, 1233f, 477f);
+        /// <summary>Окно-рассказ: спрайт `host-comment-v2` целиком, ×0.655 (рупор ЗЕРКАЛЬНО, справа).
+        /// Центр по X учитывает ОТРАЖЕНИЕ: кремовое поле лежит правее центра спрайта (+96 sprite-px), а
+        /// после зеркала уходит левее, поэтому рект сдвинут на +62.9 экранных px относительно поля.</summary>
+        public static readonly Vector4 StoryBubbleRect = new(1443.4f, 224.7f, 946.5f, 331.4f);
+        /// <summary>Кремовое поле облачка на экране — сюда садится рассказ.</summary>
+        public static readonly Vector4 StoryFieldRect = new(1380.5f, 225f, 734f, 237f);
+        // Кегли сняты с эталона: задача — cap-height ≈75 px ⇒ Arimo Bold ≈104; рассказ — cap-height ≈26 px
+        // и межстрочный 48 ⇒ Rubik ≈39 (тот же кегль, что у живой реплики Ведущего, BubbleTextMaxSize).
+        private const int TaskTextMaxSize = 104, TaskTextMinSize = 40;
+        private const int StoryTextMaxSize = 39, StoryTextMinSize = 22;
+        // Поля текста внутри кремовых полей (чтобы best-fit не садился на рамку/звёзды).
+        private const float TaskTextPadX = 60f, TaskTextPadY = 48f;
+        private const float StoryTextPadX = 30f, StoryTextPadY = 20f;
+        // Полоска прогресса удержания — внутри кремового поля, у нижнего края.
+        private static readonly Vector4 HoldBarRect = new(1009f, 786f, 900f, 20f);
+
+        // ---- КРУПНАЯ копия шкалы: ИСТОЧНИК → ЦЕЛЬ, оба БОКСАМИ (cx, cy-от-верха, w, h) в 1920×1080 --------
+        // Задаётся именно ЦЕЛЕВОЙ бокс, а не «точка + масштаб»: масштаб ВЫВОДИТСЯ (k = dst.w / src.w), и
+        // промах константы-источника больше не умножается на масштаб. Прошлая раскладка ошибалась вдвойне:
+        // (1) источником брался рект СПРАЙТА, а целью — бокс НАРИСОВАННОЙ фигуры с эталона (у батареи это
+        // разные боксы: рект 126×231, рисунок 114×218, внутренняя кромка обводки 92×179), и
+        // (2) позиция замораживалась в пикселях канваса на момент «одалживания» — см. PlaceBigWidget.
+        //
+        // ИСТОЧНИК — бокс НАРИСОВАННОГО виджета в HUD (замер по кадру hud-phonering, канвас ровно 1920×1080).
+        private static readonly Vector4 BigEnergySrc = new(183.5f, 166.5f, 114f, 218f);
+        private static readonly Vector4 BigRelSrc = new(674f, 100.5f, 523f, 130f);
+        private static readonly Vector4 BigMoneySrc = new(1750f, 127.5f, 173f, 244f);   // банка + монета над ней
+        private static readonly Vector4 BigChildSrc = new(144f, 540f, 411.3f, 444.2f);  // = PhoneRingRect, рисунок его заполняет
+        // ЦЕЛЬ. Энергия — С ЭТАЛОНА: подобрана так, чтобы ВНУТРЕННЯЯ КРОМКА ОБВОДКИ батареи легла в
+        // x 207…412, y 145…546 (см. BatteryInnerStrokeSrc и NewScaleBigWidgetLayoutTests). Остальные три
+        // эталона не имеют и расставлены по правилам: у своего HUD-места, крупнее HUD, ЦЕЛИКОМ в кадре с
+        // полем ≥16 px, мимо текстовых полей обоих окон и мимо бейджа возраста.
+        private static readonly Vector4 BigEnergyDst = new(309.5f, 326.442f, 255.60f, 488.78f);   // k=2.2421
+        private static readonly Vector4 BigRelDst = new(515f, 178f, 993.70f, 247.00f);            // k=1.90
+        private static readonly Vector4 BigMoneyDst = new(1764.5f, 835f, 273.34f, 385.52f);       // k=1.58
+        private static readonly Vector4 BigChildDst = new(234f, 540f, 431.87f, 466.41f);          // k=1.05
+
+        /// <summary>Бокс ВНУТРЕННЕЙ КРОМКИ обводки батареи в HUD (замер по кадру, 1920×1080). Именно этот
+        /// бокс эталон «Экран - появление новой шкалы.png» задаёт как x 207…412, y 145…546.</summary>
+        public static readonly Vector4 BatteryInnerStrokeSrc = new(183.5f, 175f, 92f, 179f);
+        /// <summary>Эталонный бокс той же кромки на модалке (замер с эталона, допуск ±10).</summary>
+        public static readonly Vector4 BatteryInnerStrokeRef = new(309.5f, 345.5f, 206f, 402f);
+
+        /// <summary>Бокс виджета в HUD (нарисованная фигура) — вход раскладки крупной шкалы.</summary>
+        public static Vector4 BigScaleSrc(NewScale s) => s switch
+        {
+            NewScale.Energy => BigEnergySrc,
+            NewScale.Relations => BigRelSrc,
+            NewScale.Money => BigMoneySrc,
+            NewScale.Child => BigChildSrc,
+            _ => Vector4.zero,
+        };
+
+        /// <summary>Целевой бокс той же фигуры на модалке.</summary>
+        public static Vector4 BigScaleDst(NewScale s) => s switch
+        {
+            NewScale.Energy => BigEnergyDst,
+            NewScale.Relations => BigRelDst,
+            NewScale.Money => BigMoneyDst,
+            NewScale.Child => BigChildDst,
+            _ => Vector4.zero,
+        };
+
+        /// <summary>Во сколько раз крупная копия больше своего HUD-виджета (выводится из боксов).</summary>
+        public static float BigScaleFactor(NewScale s)
+        {
+            var src = BigScaleSrc(s);
+            return src.z <= 0f ? 1f : BigScaleDst(s).z / src.z;
+        }
+
+        /// <summary>Поле от краёв кадра, которое крупная шкала обязана оставлять (done-contract §6).</summary>
+        public const float BigScaleFrameMargin = 16f;
+
+        /// <summary>Текстовое поле окна-задачи (кремовое поле минус поля набора) — его крупная шкала не
+        /// имеет права накрывать НИ НА ОДНОЙ шкале.</summary>
+        public static Vector4 TaskTextBox => new(TaskFieldRect.x, TaskFieldRect.y,
+            TaskFieldRect.z - 2f * TaskTextPadX, TaskFieldRect.w - 2f * TaskTextPadY);
+        /// <summary>То же для окна-рассказа.</summary>
+        public static Vector4 StoryTextBox => new(StoryFieldRect.x, StoryFieldRect.y,
+            StoryFieldRect.z - 2f * StoryTextPadX, StoryFieldRect.w - 2f * StoryTextPadY);
+        /// <summary>Бейдж возраста — крупная шкала на него не налезает.</summary>
+        public static Vector4 AgeBadgeBox => AgeBadgeRect;
+
+        // ---- КАНОН-ТЕКСТЫ D (docs/new_concept/host-content.md §4, выбор основательницы 2026-07-29) ----
+        // Дословно. Проверяются против самого документа (NewScaleTutorialTests), чтобы копия не разъехалась
+        // с каноном. Энергия — единственное число («датчик высоты»): §Q-controls закрыт основательницей.
+        /// <summary>Рассказ Ведущего на открытии ЭНЕРГИИ (host-content §4).</summary>
+        public const string EnergyStoryText =
+            "Ого! Что это? Первая усталость? Ты же не думал, что энергия бесконечна?";
+        /// <summary>Задача на открытии ЭНЕРГИИ (host-content §4).</summary>
+        public const string EnergyTaskText =
+            "Используй датчик высоты — дыши, чтобы восстановить энергию";
+        /// <summary>Рассказ Ведущего на открытии ОТНОШЕНИЙ (host-content §4, вар.1).</summary>
+        public const string RelationsStoryText =
+            "Ого-го! У кого-то, кажется, появились ЧУВСТВА! Только не задуши и не забрось — любовь любит золотую середину!";
+        /// <summary>Задача на открытии ОТНОШЕНИЙ (host-content §4, вар.1).</summary>
+        public const string RelationsTaskText =
+            "Держи маркер отношений в зелёной зоне — не мало и не много";
+        /// <summary>Рассказ Ведущего на открытии ДЕНЕГ (host-content §4, вар.2).</summary>
+        public const string MoneyStoryText =
+            "Добро пожаловать во взрослую жизнь! Денежки любят тех, кто их крутит. Так покрути же!";
+        /// <summary>Задача на открытии ДЕНЕГ (host-content §4, вар.2).</summary>
+        public const string MoneyTaskText =
+            "Верти ручку — и монетки посыплются в копилку";
+        /// <summary>Рассказ Ведущего на открытии РЕБЁНКА (host-content §4, вар.1).</summary>
+        public const string ChildStoryText =
+            "Пополнение в семействе! Теперь вас трое! Малыш будет звонить — не игнорируй, а то запишем в плохие родители!";
+        /// <summary>Задача на открытии РЕБЁНКА (host-content §4, вар.1).</summary>
+        public const string ChildTaskText =
+            "Когда телефон слева зазвонит — жми «!», чтобы поднять трубку";
+
         // Tutorial overlay (S5): dimmed bg + yellow modal + «ПОНЯТНО»; freezes the game while up.
         // Reused for every hint: money (18), energy (25), health (30) and the first burnout.
         private GameObject _tutorialOverlay;
@@ -538,12 +726,8 @@ namespace ThanksNoThanks
         // a Confirm dismisses a hint we arm this; the rest of THIS frame's non-Confirm input is swallowed.
         // Reset at the top of Update so the next frame behaves normally.
         private bool _dismissedThisFrame;
-        private bool _moneyTutorialSeen;   // one-shot per life; reset on a fresh life
-        private bool _relTutorialSeen;
-        private bool _energyTutorialSeen;
-        private bool _healthTutorialSeen;
+        private bool _healthTutorialSeen;  // one-shot per life; reset on a fresh life
         private bool _burnoutHintSeen;
-        private bool _childTutorialSeen;
         private bool _wasPlaying;
 
         // Burnout state plate (S7): dim-cobalt «ВЫГОРАНИЕ» banner, shown while Game.Burnout is on.
@@ -631,26 +815,11 @@ namespace ThanksNoThanks
         // outside Playing (crank-only), so the cap never interacts with any confirm.
         private readonly MoneyTickThrottle _crankCap = new();
 
-        private const string MoneyTutorialText =
-            "ТЕПЕРЬ У ВАС ЕСТЬ РАБОТА!\n\n" +
-            "Крутите РУЧКУ — и деньги потекут. Но жизнь идёт своим чередом:\n" +
-            "содержать себя стоит денег каждую секунду.\n\n" +
-            "Рук всего две — крутить и отвечать придётся разом.";
-
-        // NOTE: must NOT contain «УСТАЛОСТЬ» or «ТАЯТЬ» — the PlayMode hint-walker tests key off those
-        // substrings to identify the energy/health hints; a collision would misidentify this one.
-        private const string RelationshipsTutorialText =
-            "ПЕРВАЯ ЛЮБОВЬ!\n\n" +
-            "Появился БАЛАНСИР ОТНОШЕНИЙ — маркер всё время сползает ВНИЗ.\n" +
-            "ДЕРЖИТЕ ДЖОЙСТИК ВВЕРХ, чтобы удержать его в зелёной зоне (ВНИЗ — опустить).\n\n" +
-            "Упадёт в КРАСНУЮ надолго — расстанетесь. Задушите вверху — ссоры.";
-
-        private const string EnergyTutorialText =
-            "ПЕРВАЯ УСТАЛОСТЬ!\n\n" +
-            "Появилась ЭНЕРГИЯ — и она тает сама собой.\n" +
-            "Дышите РИТМИЧНО: ведите ДАТЧИК ВЫСОТЫ в спокойном темпе, не долбите.\n\n" +
-            "Ровное дыхание возвращает силы.";
-
+        // ⚠ ЧЕТЫРЕ прежних S5-хинта открытий (деньги 18, отношения 20, энергия 25, ребёнок «свадьба+2»)
+        // СНЯТЫ этим инкрементом: их заменил модальный экран §D (канон-тексты — константы *StoryText /
+        // *TaskText выше, host-content §4). Дублирующие тексты убраны из кода целиком, чтобы вторая
+        // формулировка той же задачи не осталась в пуле подсказок. На S5-подсказке остались только
+        // ЗДОРОВЬЕ (30) и ВЫГОРАНИЕ — их meeting-revisions §2 не перечисляет.
         private const string HealthTutorialText =
             "ЗДОРОВЬЕ НАЧАЛО ТАЯТЬ.\n\n" +
             "С этого возраста ЗДОРОВЬЕ убывает само по себе.\n" +
@@ -662,16 +831,6 @@ namespace ThanksNoThanks
             "Всё даётся тяжелее — деньги идут вдвое медленнее.\n" +
             "Подышите ДАТЧИКОМ ВЫСОТЫ, чтобы прийти в себя.\n\n" +
             "Отпустит само, когда энергия восстановится.";
-
-        // Child S5 hint. Must NOT contain «УСТАЛОСТЬ»/«ТАЯТЬ»/«ОТНОШЕНИЙ» — the PlayMode hint-walkers key
-        // off those substrings to identify the energy/health/relationships hints; a collision misids this.
-        // Канон host-content §4 («Когда телефон слева зазвонит — жми «!», чтобы поднять трубку»); про
-        // старую вспышку/кнопку-лампочку здесь больше ничего нет (revisions §5b).
-        private const string ChildTutorialText =
-            "ПОПОЛНЕНИЕ!\n\n" +
-            "Появился РЕБЁНОК — теперь он будет звонить.\n" +
-            "Когда телефон слева зазвонит — жмите «!», чтобы поднять трубку.\n\n" +
-            "Пропустите подряд — станете плохим родителем.";
 
         // ---- public inspection accessors (visual-assembly PlayMode tests) ----
         public RectTransform CanvasRect { get; private set; }
@@ -749,6 +908,38 @@ namespace ThanksNoThanks
         public GameObject FinalePanel => _finalePanel;
         public GameObject TutorialOverlay => _tutorialOverlay;
         public bool TutorialShowing => _tutorialShowing;
+        // ---- D-модалка «появление новой шкалы» (Слой-2) ----
+        /// <summary>§D: корень модального экрана новой шкалы (затемнение + окна + крупная шкала).</summary>
+        public GameObject NewScaleOverlay => _nsOverlay;
+        /// <summary>§D: модалка поднята прямо сейчас (включая 0.2 с фейда на выходе).</summary>
+        public bool NewScaleShowing => _nsShowing;
+        /// <summary>§D: какая шкала объясняется (None, если модалки нет).</summary>
+        public NewScale NewScaleKind => _nsShowing ? _nsWhich : NewScale.None;
+        /// <summary>§D: полноэкранное затемнение под модалкой (~40 % INK).</summary>
+        public Image NewScaleDim => _nsDim;
+        /// <summary>§D: окно-задача — спрайт `task-plate-v2` (Simple, не 9-slice).</summary>
+        public Image NewScaleTaskPlate => _nsPlate;
+        /// <summary>§D: окно-рассказ — `host-comment-v2`, отражённое (рупор справа, как на эталоне).</summary>
+        public Image NewScaleStoryBubble => _nsBubble;
+        /// <summary>§D: текст задачи (Arimo Bold в кремовом поле плашки).</summary>
+        public Text NewScaleTaskText => _nsTaskText;
+        /// <summary>§D: текст рассказа (Rubik-Bold в кремовом поле облачка).</summary>
+        public Text NewScaleStoryText => _nsStoryText;
+        /// <summary>§D: дорожка видимого прогресса удержания (показана только у шкал с удержанием).</summary>
+        public Image NewScaleHoldTrack => _nsHoldTrack;
+        /// <summary>§D: заполнение прогресса удержания — его ширина и есть индикатор.</summary>
+        public Image NewScaleHoldFill => _nsHoldFill;
+        /// <summary>§D: КРУПНАЯ копия шкалы — это НАСТОЯЩИЙ HUD-виджет, одолженный модалке.</summary>
+        public GameObject NewScaleBigWidget => _nsBorrowed;
+        /// <summary>§D: доля удержания 0…1 (то, что рисует полоска прогресса).</summary>
+        public float NewScaleHoldFraction => Mathf.Clamp01(_nsHold / NewScaleHoldSeconds);
+        /// <summary>§D: по этой шкале уже был РЕАЛЬНЫЙ принятый ввод (крутилка/дыхание/рычаг/«!»).</summary>
+        public bool NewScaleArmed => _nsArmed;
+        /// <summary>§D: условие выполнено, идёт фейд ухода.</summary>
+        public bool NewScaleSatisfied => _nsDone;
+        /// <summary>§D: OPEN пришёл, но экран ОТЛОЖЕН до снятия помехи (выгорание под ребёнком).
+        /// None — ничего не отложено. Открытие не теряется: поднимется само (PumpPendingNewScale).</summary>
+        public NewScale NewScalePending => _nsPending;
         public Image TutorialModal => _tutorialModal;
         public Image TutorialButton => _tutorialButton;
         public Text TutorialButtonText => _tutorialButtonText;
@@ -810,6 +1001,59 @@ namespace ThanksNoThanks
         {
             bool dummy = false;
             ShowTutorial(text, ref dummy);
+        }
+
+        /// <summary>Layer-2 seam (§D): поднять модальный экран новой шкалы поверх живой игры — тем же
+        /// путём, каким его поднимает открытие шкалы (одалживание виджета, канон-тексты, пауза).</summary>
+        public void DebugShowNewScale(NewScale which)
+        {
+            _nsSeen[(int)which] = false;
+            ShowNewScale(which);
+        }
+
+        /// <summary>Layer-2 seam (§D): продвинуть модалку на dt (удержание + фейд) без ожидания кадров —
+        /// ровно тем же вызовом, что и Update.</summary>
+        public void DebugAdvanceNewScale(float dt) => TickNewScale(dt);
+
+        /// <summary>
+        /// Screenshot pose (§D): модальный экран новой шкалы поверх обычного кадра — с КРУПНОЙ живой
+        /// шкалой у её HUD-места, окном-рассказом и окном-задачей. Драйвер замораживается, чтобы кадр
+        /// был стабилен; для «ребёнка» трубка ставится в позу звонка тем же путём, что в живой игре.
+        /// </summary>
+        public void DebugPreviewNewScale(NewScale which)
+        {
+            _openerPanel.SetActive(false); _finalePanel.SetActive(false); _gamePanel.SetActive(true);
+            RestoreNormalPlates();
+            // Возраст показываем «свой» для каждой шкалы, а HUD раскрываем ровно до неё — на эталоне
+            // за модалкой видны только уже открытые виджеты.
+            float age = which switch
+            {
+                NewScale.Money => 18f,
+                NewScale.Relations => 20f,
+                NewScale.Energy => 25f,
+                _ => 33f,
+            };
+            ApplyAgeGates(age);
+            _ageText.text = Mathf.FloorToInt(age).ToString();
+            _moneyText.text = FormatMoneyJar(120);
+            _cardText.text = "Взять ипотеку на 25 лет?";
+            ReflectEnergyLevel(100f);
+            ReflectHealthMarker(100f);
+            ReflectRelationsMarker(55f, redZone: false);
+            _yesPlate.color = Color.white; _noPlate.color = Color.white;
+            _yesPlateText.text = "ДА"; _noPlateText.text = "СПАСИБО,\nНЕ НАДО";
+            ReflectDome(6f, 6f);
+            if (which == NewScale.Child)
+            {
+                _childGroup.SetActive(true);
+                _phoneRinging = true;
+                _phoneOut = 1f;
+                _phoneRingClock = 0f;
+                _phoneImg.sprite = _phoneRingSprite;
+                ApplyPhonePose(1f, 0f);
+            }
+            DebugShowNewScale(which);
+            enabled = false;
         }
 
         public void DebugRenderFinale(NecrologResult n)
@@ -1048,6 +1292,7 @@ namespace ThanksNoThanks
         {
             if (_game == null) return;
             _game.Tick(dt);
+            TickNewScale(dt);   // §D-модалка живёт тем же тактом, что и в Update
             if (_game.State != GameState.Playing) return;
             if (_game.InCrisis) ReflectDome(Mathf.Max(0f, _game.CrisisTimer), _game.CrisisTimerMax);
             else ReflectDome(Mathf.Max(0f, _game.CardTimer), _game.CardTimerMax);
@@ -1241,6 +1486,11 @@ namespace ThanksNoThanks
             // answer the hidden card or skip the announce unread. It auto-advances on its own ~1.5s clock.
             if (_bannerTimer.Visible && _game.State == GameState.Playing) return;
 
+            // §D — модальный экран новой шкалы. Стоит ДО ремапа ДА→CONFIRM: зелёный рычаг здесь обязан
+            // остаться инертным (окно не закрывается кнопками-ответами, meeting-revisions §2). Живыми
+            // проходят только контролы шкал — их разбирает NewScaleInput.
+            if (_nsShowing) { NewScaleInput(input); return; }
+
             // The arcade cabinet has no dedicated CONFIRM control (founder Gate-2 mapping). FOUNDER DECISION
             // 2026-07-29 (99fab3c): GREEN (ДА) is the ONE confirm across every non-gameplay screen — it starts
             // a life on the opener, dismisses a hint AND restarts from the finale. RED is answer-only: on the
@@ -1349,6 +1599,8 @@ namespace ThanksNoThanks
                 _tutorialShowing = false;
                 if (_tutorialOverlay != null) _tutorialOverlay.SetActive(false);
             }
+            CloseNewScale(reward: false);   // §D: выход из игры прямо с модалки — тихо, без салюта
+            _nsPending = NewScale.None;     // …и отложенный OPEN выход из жизни тоже снимает
             _bubbleTimer.Hide();
             _bannerTimer.Hide();
             _breakupTimer.Hide();
@@ -1381,6 +1633,7 @@ namespace ThanksNoThanks
             _crankCap.Advance(Time.deltaTime);   // deterministic clock for the income cap
             _breath.Advance(Time.deltaTime);     // deterministic clock for the breathing rhythm
             _game.Tick(Time.deltaTime);
+            TickNewScale(Time.deltaTime);        // §D: условие выхода модалки → фейд → салют → снятие паузы
             if (_game.State == GameState.Playing && _bannerTimer.Visible)
             {
                 // Rubric banner beat (S4/S6): the card, plates and timer are hidden (ReflectBannerBeat) and
@@ -1585,7 +1838,11 @@ namespace ThanksNoThanks
         private void SyncPause()
         {
             if (_game == null) return;
-            _game.Paused = _tutorialShowing || _bannerTimer.Visible;
+            _game.Paused = _tutorialShowing || _bannerTimer.Visible || _nsShowing;
+            // §D: под модальным экраном новой шкалы ВРЕМЯ стоит так же, как под подсказкой (дренажи, возраст,
+            // таймер карточки), но КОНТРОЛЫ ШКАЛ живые — иначе условие выхода недостижимо. Если поверх
+            // модалки оказалась S5-подсказка или баннер-бит (они глушат ввод целиком), приоритет у них.
+            _game.PausedInputsLive = _nsShowing && !_tutorialShowing && !_bannerTimer.Visible;
         }
 
         // While a rubric banner beat is up (S4/S6), the card marquee, the two answer plates and the dome
@@ -1686,7 +1943,10 @@ namespace ThanksNoThanks
             var want = ringing ? _phoneRingSprite : _phoneRestSprite;
             if (_phoneImg.sprite != want) _phoneImg.sprite = want;
 
-            float step = _game.Paused ? 0f : dt;                   // на паузе (туториал) трубка замирает
+            // На паузе (S5-подсказка / баннер-бит) трубка замирает. Исключение — §D-модалка ребёнка:
+            // там окно звонка ЖИВОЕ (Game.PausedInputsLive), трубка обязана выехать и качаться, иначе
+            // «поднять звонок» показывали бы на неподвижной трубке за краем экрана.
+            float step = (_game.Paused && !_game.PausedInputsLive) ? 0f : dt;
             _phoneOut = Mathf.MoveTowards(_phoneOut, ringing ? 1f : 0f, step / PhoneSlideSeconds);
             float wobble = 0f;
             if (ringing)
@@ -1783,6 +2043,10 @@ namespace ThanksNoThanks
             BuildDepressionOverlay(canvasGo.transform);  // B&W wash + grain + pulse (above the show veil)
 
             BuildTutorialOverlay(canvasGo.transform);   // dims every screen when up
+
+            // §D — модальный экран новой шкалы. СТРОГО выше S5-подсказки (задание: «затемнение ~40 % INK
+            // поверх геймплея, ниже модальных окон») и ниже слоя салюта, который строится следующим.
+            BuildNewScaleOverlay(canvasGo.transform);
 
             // §6 салют — build-spec §1.3 слой 7, ПОВЕРХ ВСЕГО (включая модалку туториала: та поднимает
             // себя в конец на показе, поэтому бёрст тоже поднимает свой слой на каждом выстреле).
@@ -3040,7 +3304,7 @@ namespace ThanksNoThanks
 
             // Hint body (S5): the title rides as the first line of each hint constant. Fully inside the
             // modal's visible pill with margins; best-fit shrinks a long hint to fit above the button.
-            _tutorialText = NewText("TutBody", modal.transform, MoneyTutorialText, 40, TextAnchor.MiddleCenter, Ink, _body);
+            _tutorialText = NewText("TutBody", modal.transform, HealthTutorialText, 40, TextAnchor.MiddleCenter, Ink, _body);
             var trt = _tutorialText.rectTransform;
             trt.anchorMin = new Vector2(0f, 0.34f); trt.anchorMax = new Vector2(1f, 1f);
             trt.offsetMin = new Vector2(120f, 20f); trt.offsetMax = new Vector2(-120f, -100f);
@@ -3061,6 +3325,72 @@ namespace ThanksNoThanks
             _tutorialButtonText = plateTxt;
 
             _tutorialOverlay.SetActive(false);
+        }
+
+        /// <summary>
+        /// §D «Экран появления новой шкалы»: затемнение ~40 % INK поверх геймплея, слот под КРУПНУЮ копию
+        /// открываемой шкалы, окно-рассказ (облачко Ведущего, зеркальное) и окно-задача (`task-plate-v2`).
+        /// Порядок детей = z-порядок: затемнение → плашка-задача → её текст → прогресс → облачко → его
+        /// текст → слот виджета. Крупная шкала рисуется ПОВЕРХ окон — ровно как на эталоне, где батарея
+        /// перекрывает левые лучи плашки. Строится скрытым.
+        /// </summary>
+        private void BuildNewScaleOverlay(Transform parent)
+        {
+            _nsOverlay = NewGroup("NewScaleOverlay", parent);
+            _nsFade = _nsOverlay.AddComponent<CanvasGroup>();
+            _nsFade.interactable = false; _nsFade.blocksRaycasts = false;
+
+            _nsDim = NewSolid("NewScaleDim", _nsOverlay.transform, new Color(Ink.r, Ink.g, Ink.b, NewScaleDimAlpha));
+            Stretch(_nsDim.rectTransform);
+
+            // Окно-задача. `ui_warning_v2` НЕЛЬЗЯ резать 9-slice (asset-map §5/§1.1: звёзды-лучи по периметру),
+            // поэтому Simple и один фиксированный размер = исходник ×0.995 (замер с эталона).
+            _nsPlate = NewSprite("TaskPlate", _nsOverlay.transform, Sprite("task-plate-v2"));
+            _nsPlate.type = Image.Type.Simple;
+            AnchorPx(_nsPlate.rectTransform, TaskPlateRect.x, TaskPlateRect.y, TaskPlateRect.z, TaskPlateRect.w);
+
+            // Текст задачи — отдельный ребёнок ОВЕРЛЕЯ (не плашки): плашка стоит ровно, а поле кремовое
+            // запечено со смещением, поэтому текст сажаем по ЗАМЕРУ поля, а не по долям спрайта.
+            _nsTaskText = NewText("TaskText", _nsOverlay.transform, EnergyTaskText, TaskTextMaxSize,
+                TextAnchor.MiddleCenter, Ink, _display);
+            AnchorPx(_nsTaskText.rectTransform, TaskFieldRect.x, TaskFieldRect.y,
+                TaskFieldRect.z - 2f * TaskTextPadX, TaskFieldRect.w - 2f * TaskTextPadY);
+            _nsTaskText.resizeTextForBestFit = true;
+            _nsTaskText.resizeTextMinSize = TaskTextMinSize;
+            _nsTaskText.resizeTextMaxSize = TaskTextMaxSize;
+            _nsTaskText.verticalOverflow = VerticalWrapMode.Truncate;
+
+            // Видимый прогресс удержания (done-contract §5): тонкая полоска у нижнего края кремового поля.
+            // Дорожка — приглушённый INK, заполнение — GREEN кабинета (тот же токен, что у «подтверждения»).
+            _nsHoldTrack = NewSolid("HoldTrack", _nsOverlay.transform, new Color(Ink.r, Ink.g, Ink.b, 0.18f));
+            AnchorPx(_nsHoldTrack.rectTransform, HoldBarRect.x, HoldBarRect.y, HoldBarRect.z, HoldBarRect.w);
+            _nsHoldFill = NewSolid("HoldFill", _nsHoldTrack.transform, GoGreen);
+            var hf = _nsHoldFill.rectTransform;
+            hf.anchorMin = Vector2.zero; hf.anchorMax = new Vector2(0f, 1f);
+            hf.pivot = new Vector2(0f, 0.5f);
+            hf.offsetMin = Vector2.zero; hf.offsetMax = Vector2.zero;
+            _nsHoldTrack.gameObject.SetActive(false);
+
+            // Окно-рассказ: тот же спрайт облачка, но ОТРАЖЁННЫЙ — на эталоне рупор смотрит ВПРАВО-ВНИЗ
+            // (на экране C он слева). Текст — отдельный ребёнок оверлея, поэтому отражение его не касается.
+            _nsBubble = NewSprite("StoryBubble", _nsOverlay.transform, Sprite("host-comment-v2"));
+            _nsBubble.type = Image.Type.Simple;
+            AnchorPx(_nsBubble.rectTransform, StoryBubbleRect.x, StoryBubbleRect.y, StoryBubbleRect.z, StoryBubbleRect.w);
+            _nsBubble.rectTransform.localScale = new Vector3(-1f, 1f, 1f);
+
+            _nsStoryText = NewText("StoryText", _nsOverlay.transform, EnergyStoryText, StoryTextMaxSize,
+                TextAnchor.MiddleCenter, Ink, _bodyBold);
+            AnchorPx(_nsStoryText.rectTransform, StoryFieldRect.x, StoryFieldRect.y,
+                StoryFieldRect.z - 2f * StoryTextPadX, StoryFieldRect.w - 2f * StoryTextPadY);
+            _nsStoryText.resizeTextForBestFit = true;
+            _nsStoryText.resizeTextMinSize = StoryTextMinSize;
+            _nsStoryText.resizeTextMaxSize = StoryTextMaxSize;
+            _nsStoryText.verticalOverflow = VerticalWrapMode.Truncate;
+
+            // Слот КРУПНОЙ шкалы — последний ребёнок: одолженный виджет рисуется поверх обоих окон.
+            _nsSlot = NewGroup("BigScaleSlot", _nsOverlay.transform);
+
+            _nsOverlay.SetActive(false);
         }
 
         // Depression «тёмная полоса» (S8): a HARD black-&-white wash + static grain over the whole show, a
@@ -3184,14 +3514,16 @@ namespace ThanksNoThanks
             }
         }
 
-        private void OnMoneyOpened()  { if (!_moneyTutorialSeen)  ShowTutorial(MoneyTutorialText,  ref _moneyTutorialSeen); }
-        private void OnRelationshipsOpened() { if (!_relTutorialSeen) ShowTutorial(RelationshipsTutorialText, ref _relTutorialSeen); }
-        private void OnEnergyOpened() { if (!_energyTutorialSeen) ShowTutorial(EnergyTutorialText, ref _energyTutorialSeen); }
+        // Четыре OPEN-открытия ведут МОДАЛЬНЫЙ экран §D (не S5-подсказку): он закрывается только
+        // выполнением условия по реальному контролу. Здоровье (30) осталось на S5.
+        private void OnMoneyOpened()  => ShowNewScale(NewScale.Money);
+        private void OnRelationshipsOpened() => ShowNewScale(NewScale.Relations);
+        private void OnEnergyOpened() => ShowNewScale(NewScale.Energy);
         private void OnHealthOpened() { if (!_healthTutorialSeen) ShowTutorial(HealthTutorialText, ref _healthTutorialSeen); }
         private void OnBurnoutEntered(){ if (!_burnoutHintSeen)  ShowTutorial(BurnoutHintText,   ref _burnoutHintSeen); }
         // MD02=ДА opened the child scale: the «ПОПОЛНЕНИЕ!» rubric banner already fired when MD02 was drawn;
-        // this sequences the S5 hint after the answer (one-shot per life, pauses like every other open).
-        private void OnChildOpened()  { if (!_childTutorialSeen)  ShowTutorial(ChildTutorialText,  ref _childTutorialSeen); }
+        // this sequences the §D modal after the answer (one-shot per life, pauses like every other open).
+        private void OnChildOpened()  => ShowNewScale(NewScale.Child);
 
         // Breakup: flash the transient «РАССТАЛИСЬ» plate (auto-hides on its own ~2s clock, reflected in
         // Update). The balancer HUD hides itself off Game.RelationshipsLost on the next ApplyAgeGates.
@@ -3228,6 +3560,317 @@ namespace ThanksNoThanks
             }
         }
 
+        // ================================================================ §D — экран появления новой шкалы
+
+        /// <summary>Канон-рассказ Ведущего для шкалы (host-content §4).</summary>
+        public static string NewScaleStory(NewScale s) => s switch
+        {
+            NewScale.Money => MoneyStoryText,
+            NewScale.Relations => RelationsStoryText,
+            NewScale.Energy => EnergyStoryText,
+            NewScale.Child => ChildStoryText,
+            _ => "",
+        };
+
+        /// <summary>Канон-задача для шкалы (host-content §4).</summary>
+        public static string NewScaleTask(NewScale s) => s switch
+        {
+            NewScale.Money => MoneyTaskText,
+            NewScale.Relations => RelationsTaskText,
+            NewScale.Energy => EnergyTaskText,
+            NewScale.Child => ChildTaskText,
+            _ => "",
+        };
+
+        /// <summary>Шкалы, где условие — УДЕРЖАНИЕ режима 1.5 с (у денег и ребёнка условие мгновенное).</summary>
+        private static bool IsHoldScale(NewScale s) => s == NewScale.Energy || s == NewScale.Relations;
+
+        // Поднять модальный экран новой шкалы. Один раз за жизнь на шкалу. Не встаёт поверх S5-подсказки
+        // (здоровье/выгорание) и поверх самой себя — иначе два открытия в одном кадре подрались бы за паузу.
+        private void ShowNewScale(NewScale which)
+        {
+            if (which == NewScale.None || _nsShowing || _tutorialShowing) return;
+            if (_nsSeen[(int)which]) return;
+
+            // ⚠ ВЫГОРАНИЕ × РЕБЁНОК (находка ревью). Условие детской модалки — ПОДНЯТЬ ЗВОНОК, а под
+            // выгоранием звонок поднять нельзя ПО ДВУМ причинам сразу: плашка S7 — полноэкранный захват,
+            // поэтому драйвер прячет трубку целиком (ReflectChildPhone), а Game морозит и окно, и само
+            // нажатие (Game.ChildCallFrozen = ... || Burnout). Модалка встала бы НЕВЫПОЛНИМОЙ: пауза
+            // держится вечно, выхода нет. Открытие ребёнка приходит на «свадьба+2», то есть уже ПОСЛЕ
+            // энергии (25) — момент, когда выгорание вполне может быть активно.
+            // Решение: OPEN не теряется, а ОТКЛАДЫВАЕТСЯ — `_nsSeen` не помечаем, ставим `_nsPending`, и
+            // TickNewScale поднимет экран сразу, как выгорание снимется. Остальные три шкалы этой развилки
+            // не имеют: деньги (18) и отношения (20) открываются раньше энергии (25), а выгорание требует
+            // открытой энергии ≤10 %, так что при их OPEN оно невозможно.
+            if (which == NewScale.Child && _game != null && _game.Burnout)
+            {
+                _nsPending = which;
+                return;
+            }
+
+            _nsSeen[(int)which] = true;
+            _nsPending = NewScale.None;
+
+            _nsWhich = which;
+            _nsShowing = true;
+            _nsDone = false;
+            _nsArmed = false;
+            _nsHold = 0f;
+            _nsFadeT = 0f;
+            _nsStoryText.text = NewScaleStory(which);
+            _nsTaskText.text = NewScaleTask(which);
+            BorrowBigWidget(which);
+            _nsFade.alpha = 1f;
+            _nsOverlay.transform.SetAsLastSibling();
+            _nsOverlay.SetActive(true);
+            ReflectNewScaleHold();
+            SyncPause();
+
+            // Ребёнок: условие — ПОДНЯТЬ ЗВОНОК, поэтому звонок заводится принудительно (обычный планировщик
+            // 15–25 с под замороженным временем не сработал бы никогда). Трубка выезжает и звонит, пока не
+            // поднимут (окно не истекает: IntegrateChild под паузой не крутится).
+            if (which == NewScale.Child) _game.RingChildNow();
+        }
+
+        /// <summary>
+        /// Такт модалки: условие выхода → фейд 0.2 с → салют → снятие паузы. Условие проверяется ТОЛЬКО по
+        /// живому состоянию механики (деньги/энергия/отношения/звонок) плюс флаг «реальный ввод по этой
+        /// шкале уже был» — фальшивых «нажал ок» здесь нет.
+        ///
+        /// ⚠ РЕШЕНИЕ ВЛАДЕЛЬЦА (задокументировано в чекпойнте): удержание НАЧИНАЕТ считаться только ПОСЛЕ
+        /// первого принятого ввода по шкале (<see cref="_nsArmed"/>). Энергия на открытии = 100 %, отношения =
+        /// 55 % — обе УЖЕ в «нужном режиме», и без этого условия экран уходил бы сам через 1.5 с, не потребовав
+        /// от игрока ничего (ровно та «живая шкала, калиброванная под пассивного игрока», которую основательница
+        /// забраковала). Со «взводом» задача читается буквально: «привести шкалу в режим» = сделать ввод.
+        /// </summary>
+        private void TickNewScale(float dt)
+        {
+            PumpPendingNewScale();
+            if (!_nsShowing) return;
+
+            if (_nsDone)
+            {
+                _nsFadeT += dt;
+                _nsFade.alpha = Mathf.Clamp01(1f - _nsFadeT / NewScaleFadeSeconds);
+                if (_nsFadeT >= NewScaleFadeSeconds) CloseNewScale(reward: true);
+                return;
+            }
+
+            bool inMode;
+            switch (_nsWhich)
+            {
+                case NewScale.Money:                    // ≥1 ПРИНЯТЫЙ тик крутилки (кэп + Game.Crank)
+                case NewScale.Child:                    // один ПОДНЯТЫЙ звонок
+                    inMode = _nsArmed;
+                    _nsHold = inMode ? NewScaleHoldSeconds : 0f;   // мгновенные условия — без удержания
+                    break;
+                case NewScale.Energy:
+                    inMode = _nsArmed && _game.Scales.Energy > NewScaleEnergyAbove;
+                    _nsHold = inMode ? _nsHold + dt : 0f;          // вышел из режима — счётчик с нуля
+                    break;
+                case NewScale.Relations:
+                    float r = _game.Scales.Relationships;
+                    inMode = _nsArmed && r >= Game.RelZoneMin && r <= Game.RelZoneMax;
+                    _nsHold = inMode ? _nsHold + dt : 0f;
+                    break;
+                default:
+                    inMode = false;
+                    break;
+            }
+
+            ReflectNewScaleHold();
+            if (inMode && _nsHold >= NewScaleHoldSeconds) _nsDone = true;   // → фейд со следующего такта
+        }
+
+        // Отложенный OPEN (см. ShowNewScale): держим его, пока помеха не снята, и поднимаем экран ТЕМ ЖЕ
+        // путём — с теми же гейтами `_nsSeen`/подсказки и с тем же RingChildNow. Ретраим каждый такт, а не
+        // «один раз по фронту»: на выходе из выгорания сверху может стоять S5-подсказка, и тогда попытка
+        // просто повторится следующим тактом, вместо того чтобы потерять открытие насовсем.
+        // Жизнь кончилась (смерть/финал/опенер) — отложенное открытие снимается вместе с ней.
+        private void PumpPendingNewScale()
+        {
+            if (_nsPending == NewScale.None) return;
+            if (_game == null || _game.State != GameState.Playing) { _nsPending = NewScale.None; return; }
+            if (_game.Burnout || _nsShowing || _tutorialShowing) return;
+
+            var pending = _nsPending;
+            _nsPending = NewScale.None;
+            ShowNewScale(pending);
+        }
+
+        // Полоска прогресса: видна только у шкал с УДЕРЖАНИЕМ и только после взвода (до первого ввода
+        // держать нечего). Деньги/ребёнок закрываются мгновенным событием — там полоски нет.
+        private void ReflectNewScaleHold()
+        {
+            if (_nsHoldTrack == null) return;
+            bool show = _nsShowing && IsHoldScale(_nsWhich) && _nsArmed && !_nsDone;
+            if (_nsHoldTrack.gameObject.activeSelf != show) _nsHoldTrack.gameObject.SetActive(show);
+            var rt = _nsHoldFill.rectTransform;
+            rt.anchorMax = new Vector2(NewScaleHoldFraction, 1f);
+        }
+
+        // Закрыть модалку. reward=true — штатный выход по выполненному условию (салют звёзд, build-spec §D);
+        // reward=false — аварийный (выход из игры / рестарт / уход из Playing): тихо, без награды.
+        private void CloseNewScale(bool reward)
+        {
+            if (!_nsShowing) return;
+            _nsShowing = false;
+            _nsDone = false;
+            _nsArmed = false;
+            _nsHold = 0f;
+            _nsWhich = NewScale.None;
+            ReturnBigWidget();
+            _nsOverlay.SetActive(false);
+            _nsFade.alpha = 1f;
+            if (reward) StarBurst();      // §6-салют «всё сделано верно» — ПОСЛЕ фейда, ДО снятия паузы
+            SyncPause();
+            // Та же причина, что у DismissTutorial: открытие происходит СЕРЕДИНОЙ карточки, поэтому
+            // возрастные гейты и значения HUD пересчитываются прямо здесь — виджет живой сразу.
+            if (_game != null && _game.State == GameState.Playing)
+            {
+                UpdateHudValues();
+                ApplyAgeGates(_game.Age);
+            }
+        }
+
+        // Ввод под модалкой. Ответы (ДА/НЕТ) и таймаут окно НЕ закрывают — они здесь просто инертны;
+        // живым остаётся ровно ОДИН контрол — контрол ОБЪЯСНЯЕМОЙ шкалы, тем же путём, что и в обычной
+        // игре (кэп дохода, ритм-гейт, ось балансира, окно звонка), поэтому «выполнил условие» = «реально
+        // поработал контролом».
+        //
+        // ⚠ ФИЛЬТР ПО ШКАЛЕ — не косметика, а защита механики (находка ревью). Под модалкой время стоит:
+        // возраст, стоимость жизни и ВСЕ дренажи заморожены. Если под ней живы ВСЕ контролы, игрок,
+        // получив, скажем, экран энергии, может бесконечно крутить крутилку в замороженном мире и
+        // накрутить сколько угодно денег — вся экономика игры проходит мимо. Поэтому чужие scale-вводы
+        // сюда доходят, но до Game НЕ доходят: они инертны ровно как ДА/НЕТ.
+        private void NewScaleInput(GameInput input)
+        {
+            if (_nsDone) return;   // условие уже выполнено, идёт фейд — доигрываем без новых событий
+
+            switch (input)
+            {
+                case GameInput.MoneyTick:
+                case GameInput.MoneyTickRepeat:
+                    if (_nsWhich != NewScale.Money) return;           // чужой экран — крутилка мертва
+                    if (_game.State != GameState.Playing) return;
+                    if (!_crankCap.TryAccept()) return;               // тот же кэп дохода ~5/с
+                    _game.HandleInput(GameInput.MoneyTick);
+                    if (_game.MoneyOpen && isActiveAndEnabled)
+                    {
+                        if (_moneyPulse != null) StopCoroutine(_moneyPulse);
+                        _moneyPulse = StartCoroutine(DropCoin());
+                    }
+                    _nsArmed = true;                                  // ПРИНЯТЫЙ тик — вот и условие
+                    return;
+
+                case GameInput.EnergyPulse:
+                    if (_nsWhich != NewScale.Energy) return;          // чужой экран — дыхание мертво
+                    if (_game.State != GameState.Playing) return;
+                    if (!_breath.Pulse()) return;                     // ритм-гейт: мэшинг не считается
+                    _game.HandleInput(GameInput.EnergyPulse);
+                    _nsArmed = true;
+                    return;
+
+                case GameInput.RelationUp:
+                case GameInput.RelationDown:
+                    if (_nsWhich != NewScale.Relations) return;       // чужой экран — ось не латчится
+                    if (_game.State != GameState.Playing) return;
+                    _game.HandleInput(input);                         // ось латчится, TickModalBalancer её сведёт
+                    _nsArmed = true;
+                    return;
+
+                case GameInput.ChildPress:
+                case GameInput.Confirm:   // dev-Enter = «поднять трубку», как и в обычной игре
+                    if (_nsWhich != NewScale.Child) return;           // на остальных экранах CONFIRM инертен
+                    bool wasRinging = _game.ChildFlashing;
+                    _game.HandleInput(GameInput.ChildPress);
+                    if (wasRinging && !_game.ChildFlashing) _nsArmed = true;
+                    return;
+            }
+        }
+
+        // «Одолжить» настоящий HUD-виджет модалке: перевесить его в слот оверлея (оба родителя —
+        // полноэкранные stretched-рект, поэтому раскладка детей не меняется), увеличить и поставить на
+        // указанную точку. Масштаб идёт ВОКРУГ точки-источника: localScale масштабирует детей относительно
+        // пивота группы (центр канваса), а anchoredPosition доводит центр виджета до места назначения.
+        private void BorrowBigWidget(NewScale which)
+        {
+            GameObject w = which switch
+            {
+                NewScale.Money => _moneyGroup,
+                NewScale.Relations => _balancerGroup,
+                NewScale.Energy => _energyGroup,
+                NewScale.Child => _childGroup,
+                _ => null,
+            };
+            if (w == null || _nsBorrowed != null) return;
+
+            var rt = (RectTransform)w.transform;
+            _nsBorrowed = w;
+            _nsBorrowedParent = rt.parent;
+            _nsBorrowedIndex = rt.GetSiblingIndex();
+            _nsBorrowedAnchorMin = rt.anchorMin;
+            _nsBorrowedAnchorMax = rt.anchorMax;
+            _nsBorrowedOffsetMin = rt.offsetMin;
+            _nsBorrowedOffsetMax = rt.offsetMax;
+            _nsBorrowedScale = rt.localScale;
+
+            rt.SetParent(_nsSlot.transform, worldPositionStays: false);
+            rt.SetAsLastSibling();
+            w.SetActive(true);
+            PlaceBigWidget(rt, which);
+        }
+
+        /// <summary>
+        /// Поставить одолженный виджет так, чтобы его HUD-бокс <see cref="BigScaleSrc"/> лёг ровно в целевой
+        /// <see cref="BigScaleDst"/>.
+        ///
+        /// ⚠ ПОЧЕМУ ЧЕРЕЗ ЯКОРЯ, А НЕ ЧЕРЕЗ anchoredPosition. Виджет-группа растянута на весь канвас, а её
+        /// дети посажены <see cref="AnchorPx"/> — то есть ДОЛЯМИ канваса, которые пересчитываются на каждом
+        /// layout-проходе. Старый код замораживал сдвиг группы в ПИКСЕЛЯХ канваса на момент «одалживания»:
+        /// стоило канвасу потом поменять размер (харнесс скриншотов пиннит его с ≈1664×1248 на 1920×1080 уже
+        /// ПОСЛЕ показа модалки), как дети уезжали по долям, а замороженный сдвиг — нет, и крупная шкала
+        /// промахивалась мимо цели на ~100 px. Сдвиг в ДОЛЯХ (якорями) переживает любой ресайз канваса.
+        /// </summary>
+        private static void PlaceBigWidget(RectTransform rt, NewScale which)
+        {
+            var src = BigScaleSrc(which);
+            var dst = BigScaleDst(which);
+            if (src.z <= 0f) return;
+            float k = dst.z / src.z;
+
+            // Доли канваса: где фигура лежит сейчас и куда должна лечь (y считается от ВЕРХА, как в AnchorPx).
+            Vector2 f = new(src.x / 1920f, 1f - src.y / 1080f);
+            Vector2 g = new(dst.x / 1920f, 1f - dst.y / 1080f);
+            // Масштаб идёт вокруг пивота группы (центр канваса), поэтому доля источника тоже масштабируется.
+            Vector2 d = new((g.x - 0.5f) - k * (f.x - 0.5f), (g.y - 0.5f) - k * (f.y - 0.5f));
+
+            rt.localScale = new Vector3(k, k, 1f);
+            rt.anchorMin = new Vector2(d.x, d.y);
+            rt.anchorMax = new Vector2(1f + d.x, 1f + d.y);
+            rt.offsetMin = Vector2.zero;
+            rt.offsetMax = Vector2.zero;
+        }
+
+        // …и вернуть его в HUD ровно туда, откуда взяли (родитель, порядок, позиция, масштаб).
+        private void ReturnBigWidget()
+        {
+            if (_nsBorrowed == null) return;
+            var rt = (RectTransform)_nsBorrowed.transform;
+            if (_nsBorrowedParent != null)
+            {
+                rt.SetParent(_nsBorrowedParent, worldPositionStays: false);
+                rt.SetSiblingIndex(_nsBorrowedIndex);
+            }
+            rt.anchorMin = _nsBorrowedAnchorMin;
+            rt.anchorMax = _nsBorrowedAnchorMax;
+            rt.offsetMin = _nsBorrowedOffsetMin;
+            rt.offsetMax = _nsBorrowedOffsetMax;
+            rt.localScale = _nsBorrowedScale;
+            _nsBorrowed = null;
+            _nsBorrowedParent = null;
+        }
+
         // ================================================================ refresh / events
 
         private void Refresh()
@@ -3244,12 +3887,12 @@ namespace ThanksNoThanks
             // Fresh life → every hint is armed again, breathing re-seeds, and leftover state is cleared.
             if (playing && !_wasPlaying)
             {
-                _moneyTutorialSeen = false;
-                _relTutorialSeen = false;
-                _energyTutorialSeen = false;
                 _healthTutorialSeen = false;
                 _burnoutHintSeen = false;
-                _childTutorialSeen = false;
+                // §D: свежая жизнь — все четыре модальных экрана взводятся заново и ни один не висит.
+                for (int i = 0; i < _nsSeen.Length; i++) _nsSeen[i] = false;
+                _nsPending = NewScale.None;   // …и отложенный OPEN прошлой жизни с собой не тащим
+                CloseNewScale(reward: false);
                 // §5b: свежая жизнь начинается БЕЗ трубки на экране, и любой звонок оборван — поза
                 // сбрасывается в покой (иначе выехавшая трубка пережила бы рестарт).
                 _childGroup.SetActive(false);
@@ -3283,6 +3926,7 @@ namespace ThanksNoThanks
             // Опенер/финал: тревог там нет по спеку, и подсветка не должна пережить уход из игры.
             if (!playing) { ResetAlarms(); ClearStars(); }
             if (!playing && _tutorialShowing) DismissTutorial();
+            if (!playing && _nsShowing) CloseNewScale(reward: false);   // §D: смерть/финал с модалки — тихо
             if (!playing) { _bannerTimer.Hide(); _bannerRoot.SetActive(false); SyncPause(); }
             _wasPlaying = playing;
 

@@ -523,6 +523,12 @@ namespace ThanksNoThanks.Tests.PlayMode
                 "депрессия рисуется поверх подсветки");
             Assert.Greater(driver.TutorialOverlay.transform.GetSiblingIndex(), game,
                 "модалка подсказки — поверх");
+            Assert.Greater(driver.NewScaleOverlay.transform.GetSiblingIndex(),
+                driver.TutorialOverlay.transform.GetSiblingIndex(),
+                "§D-экран новой шкалы — над затемнением подсказки (build-spec §D, слой 6)");
+            Assert.Greater(driver.StarLayer.transform.GetSiblingIndex(),
+                driver.NewScaleOverlay.transform.GetSiblingIndex(),
+                "…и под салютом звёзд (слой 7)");
             Assert.Greater(driver.StarLayer.transform.GetSiblingIndex(),
                 driver.DepressionOverlay.transform.GetSiblingIndex(),
                 "салют — слой 7, поверх всего (build-spec §1.3)");

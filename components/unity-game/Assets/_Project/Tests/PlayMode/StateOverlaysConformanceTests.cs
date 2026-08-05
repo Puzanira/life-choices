@@ -284,8 +284,8 @@ namespace ThanksNoThanks.Tests.PlayMode
 
             fake.Confirm();                              // opener → playing (starter drawn)
             fake.No();                                   // resolve I03 → MD02 current
-            fake.Yes();                                  // MD02=ДА opens the child (+ S5 hint)
-            if (driver.TutorialShowing) fake.Confirm();  // dismiss the child hint
+            fake.Yes();                                  // MD02=ДА opens the child (+ §D modal)
+            NewScaleTut.ClearAny(driver, fake);          // pick the tutorial call up — that closes the screen
             yield return null;
 
             // Drive to an open CALL window (dismissing age-gate hints along the way). DebugTick is the
@@ -293,7 +293,7 @@ namespace ThanksNoThanks.Tests.PlayMode
             int guard = 0;
             while (!driver.Game.ChildFlashing && driver.Game.State == GameState.Playing && guard++ < 600)
             {
-                if (driver.TutorialShowing) fake.Confirm();
+                if (driver.NewScaleShowing || driver.TutorialShowing) NewScaleTut.ClearAny(driver, fake);
                 else driver.DebugTick(0.1f);
             }
             Assert.IsTrue(driver.Game.ChildFlashing, "the call window is open");

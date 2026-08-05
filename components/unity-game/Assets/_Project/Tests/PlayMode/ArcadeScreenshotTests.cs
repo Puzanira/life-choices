@@ -66,6 +66,12 @@ namespace ThanksNoThanks.Tests.PlayMode
                 case "alarm": driver.DebugPreviewAlarms(); break;
                 // §6: салют звёзд, пойманный на середине разлёта.
                 case "stars": driver.DebugPreviewStarBurst(); break;
+                // §D: модальный экран появления новой шкалы — по одному кадру на каждую из четырёх шкал
+                // (сверяется с эталоном «Экран - появление новой шкалы.png»; эталон нарисован для энергии).
+                case "tutmoney": driver.DebugPreviewNewScale(NewScale.Money); break;
+                case "tutrel": driver.DebugPreviewNewScale(NewScale.Relations); break;
+                case "tutenergy": driver.DebugPreviewNewScale(NewScale.Energy); break;
+                case "tutchild": driver.DebugPreviewNewScale(NewScale.Child); break;
                 case "host": driver.DebugPreviewHostComment(); break;
                 case "opener":
                     // S1 as the player meets it: the driver already boots into the opener, so the pose is

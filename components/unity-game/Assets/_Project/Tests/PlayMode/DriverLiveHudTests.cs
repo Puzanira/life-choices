@@ -101,7 +101,7 @@ namespace ThanksNoThanks.Tests.PlayMode
             fake.Confirm();                              // → StartLife, starter drawn
             fake.No();                                   // starter resolved → FILL drawn, age timer on
             g.Tick(2f);                                  // age → 18, money opens (driver shows the S5 hint + pauses)
-            fake.Confirm();                              // dismiss the money hint → unpause
+            NewScaleTut.Clear(driver, fake);             // §D money screen: crank once → it closes, unpause
             yield return null;                           // let Update clear the same-frame dismiss guard (tiny tick)
             for (int i = 0; i < 100; i++) g.HandleInput(GameInput.MoneyTick); // bank ≥ 60₽ (direct game, no cap)
             Assert.GreaterOrEqual(g.Money, 60.0, "banked past the price");
@@ -170,39 +170,45 @@ namespace ThanksNoThanks.Tests.PlayMode
             yield return null;
             fake.Confirm();                              // → playing
 
-            bool sawEnergyHint = false;
+            // §D: открытие энергии (25) поднимает МОДАЛЬНЫЙ экран новой шкалы, а не текстовый S5-хинт.
+            bool sawEnergyModal = false;
             int guard = 0;
-            while (guard++ < 12000 && driver.Game.State == GameState.Playing && !sawEnergyHint)
+            while (guard++ < 12000 && driver.Game.State == GameState.Playing && !sawEnergyModal)
             {
                 if (driver.HostBannerVisible) { driver.DebugPumpHost(GameDriver.BannerSeconds + 0.1f); continue; }
-                if (driver.TutorialShowing)
+                if (driver.NewScaleShowing)
                 {
-                    if (driver.TutorialText.text.Contains("УСТАЛОСТЬ"))
+                    if (driver.NewScaleKind == NewScale.Energy)
                     {
-                        Assert.IsTrue(driver.Game.Paused, "the energy hint pauses the game (age/drains frozen)");
-                        Assert.GreaterOrEqual(driver.Game.Age, 24f, "energy hint fires around age 25");
+                        Assert.IsTrue(driver.Game.Paused, "the energy modal pauses the game (age/drains frozen)");
+                        Assert.GreaterOrEqual(driver.Game.Age, 24f, "energy modal fires around age 25");
                         Assert.IsTrue(driver.Game.EnergyOpen, "energy scale opened");
-                        sawEnergyHint = true;
+                        Assert.AreEqual(GameDriver.EnergyTaskText, driver.NewScaleTaskText.text,
+                            "…and it carries the canon energy task (host-content §4)");
+                        sawEnergyModal = true;
                         break;
                     }
-                    fake.Confirm();                      // dismiss the earlier money hint and press on
-                    yield return null;                   // let Update clear the same-frame dismiss guard
+                    NewScaleTut.Clear(driver, fake);     // pass the earlier money/relations modals
+                    yield return null;
                     continue;
                 }
+                if (driver.TutorialShowing) { fake.Confirm(); yield return null; continue; }
                 fake.Fire(GameInput.MoneyTick);
                 driver.Game.Tick(0.25f);
                 if (driver.Game.CurrentCard != null && driver.Game.CardTimer < 3.5f)
                     fake.No();
             }
 
-            Assert.IsTrue(sawEnergyHint, "the energy tutorial appeared when energy opened at 25");
+            Assert.IsTrue(sawEnergyModal, "the energy modal appeared when energy opened at 25");
 
             // Same-card liveness (founder Gate-2): the energy bar had the same one-card reveal lag as
-            // the money pill — dismissing the hint must reveal the bar IMMEDIATELY, not one card later.
-            fake.Confirm();                              // Enter dismisses (the only dismiss key)
-            Assert.IsFalse(driver.TutorialShowing, "energy hint closed on Enter");
+            // the money pill — closing the screen must reveal the bar IMMEDIATELY, not one card later.
+            NewScaleTut.Clear(driver, fake);             // выполнить условие настоящим дыханием
+            Assert.IsFalse(driver.NewScaleShowing, "energy modal closed once the task was done");
             Assert.IsTrue(driver.EnergyGroup.activeSelf,
-                "energy bar visible the moment the hint closes — no one-card lag");
+                "energy bar visible the moment the screen closes — no one-card lag");
+            Assert.AreEqual(1f, ((RectTransform)driver.EnergyGroup.transform).localScale.x, 1e-3f,
+                "…and back at its ordinary HUD size");
 
             Object.Destroy(go);
             yield return null;
@@ -236,10 +242,12 @@ namespace ThanksNoThanks.Tests.PlayMode
             while (guard++ < 20000 && driver.Game.State == GameState.Playing && !atHealth)
             {
                 if (driver.HostBannerVisible) { driver.DebugPumpHost(GameDriver.BannerSeconds + 0.1f); continue; }
+                // §D-модалки открытий (18/20/25) проходятся своими контролами; хинт здоровья (30) остался S5.
+                if (driver.NewScaleShowing) { NewScaleTut.Clear(driver, fake); yield return null; continue; }
                 if (driver.TutorialShowing)
                 {
                     if (driver.TutorialText.text.Contains("ТАЯТЬ")) { atHealth = true; break; }
-                    fake.Confirm();                      // dismiss money/energy hint
+                    fake.Confirm();                      // dismiss any other hint
                     yield return null;                   // let Update clear the same-frame dismiss guard
                     continue;
                 }

@@ -266,7 +266,7 @@ namespace ThanksNoThanks
         /// the same point the moment it lifts. (Crisis and depression freeze the call even earlier — there
         /// <see cref="Tick"/> never reaches <see cref="IntegrateChild"/> at all.)
         /// </summary>
-        public bool ChildCallFrozen => Paused || Burnout;
+        public bool ChildCallFrozen => InputsFrozen || Burnout;
 
         /// <summary>Fired the instant the child scale opens (MD02=ДА, «свадьба+2») — drives the S5
         /// «ПОПОЛНЕНИЕ! жмите Enter по вспышке» hint + pause, one-shot per life.</summary>
@@ -372,6 +372,30 @@ namespace ThanksNoThanks
         /// Pure Game exposes it; the visual overlay lives in the driver.
         /// </summary>
         public bool Paused { get; set; }
+
+        /// <summary>
+        /// MODAL-TUTORIAL variant of <see cref="Paused"/> (increment «экран появления новой шкалы», D).
+        /// The D-screen does not close on a button: it closes only when the player actually WORKS the new
+        /// scale's control (crank a tick / breathe up / bring the marker into the zone / pick up a call).
+        /// So the freeze must be split in two:
+        /// <list type="bullet">
+        /// <item>time keeps standing still — <see cref="Tick"/> still returns on <see cref="Paused"/>, so age,
+        /// cost-of-living, all drains, the breakup timer and the card timer are frozen exactly as before;</item>
+        /// <item>but the four scale INPUTS stay live — the crank, the breath, the balancer axis and the child
+        /// press are no longer swallowed by the pause, otherwise the exit condition would be unreachable.</item>
+        /// </list>
+        /// The ONLY thing that still integrates under this flag is the balancer's held axis (see
+        /// <see cref="TickModalBalancer"/>): the marker has to MOVE while the player pushes the lever, or the
+        /// «hold it in the zone» task would be a dead control. Drift, the over-attention penalty and the
+        /// breakup clock stay frozen — this is a pause, not gameplay.
+        /// Ignored unless <see cref="Paused"/> is also set. Cleared by the driver together with the pause.
+        /// </summary>
+        public bool PausedInputsLive { get; set; }
+
+        /// <summary>True while the run is frozen AND the scale controls are frozen with it (the plain S5
+        /// hint / banner-beat pause). The D-modal pause (<see cref="PausedInputsLive"/>) is deliberately NOT
+        /// «input frozen» — that is the whole point of the screen.</summary>
+        private bool InputsFrozen => Paused && !PausedInputsLive;
 
         /// <summary>
         /// BLOCK$ state of the CURRENT card, fixed at draw time: true when the card is a BLOCK$ card and
@@ -595,7 +619,15 @@ namespace ThanksNoThanks
         public void Tick(float dt)
         {
             if (State != GameState.Playing) return;
-            if (Paused) return; // tutorial overlay up — freeze age, drains, cost-of-living and the card timer
+            if (Paused)
+            {
+                // Tutorial overlay up — age, drains, cost-of-living and the card timer stay frozen. The ONE
+                // exception is the D-modal (PausedInputsLive): there the balancer's held axis must still be
+                // integrated, or the «hold the marker in the zone» task would have a dead lever. Everything
+                // else about the freeze is unchanged.
+                if (PausedInputsLive) TickModalBalancer(dt);
+                return;
+            }
 
             // Crisis owns the whole tick while active: only the fast blitz/impulse timer runs. The 5 live
             // scales are DELIBERATELY paused during the crisis (see TickCrisis) — no passive drain, no
@@ -1270,6 +1302,7 @@ namespace ThanksNoThanks
             Money = 0;
             MoneyOpen = false;
             Paused = false;
+            PausedInputsLive = false;
             CurrentCardBlocked = false;
             _mults.Clear();
             _drains.Clear();
@@ -1278,7 +1311,7 @@ namespace ThanksNoThanks
         /// <summary>MONEY_TICK: +1₽ × multiplier. No-op unless money is open and the run is live/unpaused.</summary>
         private void Crank()
         {
-            if (!MoneyOpen || Paused) return;
+            if (!MoneyOpen || InputsFrozen) return;
             Money += MoneyTickIncome * IncomeMultiplier;
         }
 
@@ -1329,7 +1362,7 @@ namespace ThanksNoThanks
         // 100, and re-evaluate burnout (a good breath can lift you back out). No-op before energy opens.
         private void Breathe()
         {
-            if (!EnergyOpen || Paused) return;
+            if (!EnergyOpen || InputsFrozen) return;
             Scales.Energy = Math.Min(100, Scales.Energy + BreathEnergyGain);
             UpdateBurnout();
         }
@@ -1367,7 +1400,7 @@ namespace ThanksNoThanks
         // opener/finale/tutorial — HandleInput only routes it in Playing; this adds the open+pause guard).
         private void SetRelationAxis(int dir)
         {
-            if (!RelationshipsOpen || Paused) return;
+            if (!RelationshipsOpen || InputsFrozen) return;
             _relAxis = dir;
         }
 
@@ -1403,6 +1436,24 @@ namespace ThanksNoThanks
                 if (_relBelowZoneSeconds >= RelBreakupSeconds)
                     BreakUp();
             }
+        }
+
+        // D-MODAL ONLY (PausedInputsLive): integrate the HELD AXIS and nothing else. The drift, the
+        // over-attention penalty and the cumulative breakup clock all stay frozen with the rest of the run —
+        // this is still a pause. Its only job is that the balancer lever visibly moves the marker while the
+        // tutorial asks the player to bring it into the zone. Same rate and same fractional accumulator as
+        // the live integration, so the feel is identical.
+        private void TickModalBalancer(float dt)
+        {
+            if (!RelationshipsOpen) { _relAxis = 0; return; }
+            if (_relAxis == 0) return;
+
+            _relFrac += _relAxis * RelBalancerPerSec * dt;
+            _relAxis = 0;                                  // consume this tick's axis
+            int whole = (int)_relFrac;
+            if (whole == 0) return;
+            _relFrac -= whole;
+            Scales.Relationships = Math.Max(0, Math.Min(100, Scales.Relationships + whole));
         }
 
         // Partner leaves after too long below the zone. Resets the balancer (closed), clears marriage,
@@ -1441,6 +1492,25 @@ namespace ThanksNoThanks
             _childPressLockout = 0f;
             _childConsecutiveMiss = 0;
             // Scales.Reset() (in StartLife/ToOpener) has already restored Child = 0.
+        }
+
+        /// <summary>
+        /// D-MODAL hook: ring the handset RIGHT NOW (increment «экран появления новой шкалы»). The child
+        /// tutorial's exit condition is «pick up one call», so the tutorial has to have a call to pick up —
+        /// waiting out the ordinary 15–25 s scheduler under a frozen clock would never produce one. Opens the
+        /// normal press window through the normal fields, so the press is scored by the ordinary
+        /// <see cref="ChildPress"/> path (no tutorial-only scoring). The window itself does not run out while
+        /// the modal is up: <see cref="IntegrateChild"/> is not reached under the pause, exactly as during any
+        /// other freeze — the handset simply keeps ringing until the player answers.
+        /// No-op unless the child scale is open.
+        /// </summary>
+        public void RingChildNow()
+        {
+            if (!ChildOpen || State != GameState.Playing) return;
+            ChildFlashing = true;
+            _childWindowRemaining = ChildFlashWindow;
+            _childFlashElapsed = 0f;
+            _childPressLockout = 0f;   // the call starts NOW, so no anti-pre-spam debt carries into it
         }
 
         // MD02=ДА: open the child scale + button. Seeds the first flash interval, lifts the child scale to

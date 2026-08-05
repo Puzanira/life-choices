@@ -74,6 +74,7 @@ namespace ThanksNoThanks.Tests.PlayMode
             int guard = 0;
             while (guard++ < 12000 && g.Phase == CrisisPhase.None && g.State == GameState.Playing)
             {
+                if (driver.NewScaleShowing) { NewScaleTut.Clear(driver, fake); yield return null; continue; }
                 if (driver.TutorialShowing) { fake.Confirm(); yield return null; continue; }
                 g.Tick(0.2f);
             }
@@ -127,6 +128,7 @@ namespace ThanksNoThanks.Tests.PlayMode
             int guard = 0;
             while (guard++ < 12000 && g.Phase == CrisisPhase.None && g.State == GameState.Playing)
             {
+                if (driver.NewScaleShowing) { NewScaleTut.Clear(driver, fake); yield return null; continue; }
                 if (driver.TutorialShowing) { fake.Confirm(); yield return null; continue; }
                 g.Tick(0.2f);
             }

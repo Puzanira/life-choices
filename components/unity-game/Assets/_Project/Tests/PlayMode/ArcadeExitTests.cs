@@ -80,6 +80,7 @@ namespace ThanksNoThanks.Tests.PlayMode
             Assert.AreEqual(0f, _driver.Game.Age, 0.0001f, "a fresh life — age reset to 0");
             Assert.AreEqual(100, _driver.Game.Scales.Health, "scales reset on a clean exit");
             Assert.IsFalse(_driver.TutorialShowing, "no hint left hanging after exit");
+            Assert.IsFalse(_driver.NewScaleShowing, "…and no §D modal left hanging either");
             Assert.IsFalse(_driver.Game.Paused, "game unpaused after exit");
 
             // Re-entry through the REAL arcade path: GREEN starts the next life (no Confirm control exists).
@@ -104,6 +105,9 @@ namespace ThanksNoThanks.Tests.PlayMode
             int guard = 0;
             while (_driver.Game.State == GameState.Playing && guard++ < 600)
             {
+                // §D: открытие шкалы поднимает модалку, которую зелёная НЕ снимает — её проходят
+                // настоящим контролом кабинета (крутилка / джойстик / «!» / рычаг дыхания).
+                if (_driver.NewScaleShowing) { yield return NewScaleTut.ClearArcade(_driver, _fake); continue; }
                 if (_driver.TutorialShowing) { yield return Press(Green); continue; }
                 if (_driver.HostBannerVisible)
                 {
