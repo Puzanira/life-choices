@@ -379,10 +379,10 @@ namespace ThanksNoThanks.Tests.PlayMode
             yield return null;
         }
 
-        // ============================================================ S11/S12 finales
+        // ============================================================ S11/S12 finale (end.png канон)
 
-        // Worst-case necrolog: the parents line + the maximum number of long weighty lines (no ROND to drop),
-        // «весёлая старость» tone — the longest glued story the finale can ever have to render.
+        // Worst-case necrolog СИНТЕТИЧЕСКИЙ: 15 строк лимита, каждая — длиннейшая строка колоды.
+        // (Реальный худший случай, собранный из scenes.csv, живёт в LongestRealStory ниже.)
         private static NecrologResult LongStory()
         {
             const string longLine = "Рыжий кот из детства, его котята и их котята прожили с вами всю жизнь.";
@@ -392,70 +392,221 @@ namespace ThanksNoThanks.Tests.PlayMode
             return Necrolog.Build("весёлая старость", entries);
         }
 
+        /// <summary>
+        /// РЕАЛЬНЫЙ худший случай: 14 самых длинных строк некролога из живой колоды (`Resources/scenes.csv`,
+        /// кол. «Некролог ДА»/«Некролог НЕТ») + фиксированная строка родителей = лимит 15. Синтетика с
+        /// одной повторённой строкой не годится как приёмка: она короче реальной склейки и не ловит,
+        /// например, длинную причину поверх длинной истории.
+        /// </summary>
+        private static NecrologResult LongestRealStory()
+        {
+            var csv = Resources.Load<TextAsset>("scenes");
+            Assert.IsNotNull(csv, "колода читается из Resources (нужна для реального худшего случая)");
+            var lines = new List<string>();
+            foreach (var c in CardLoader.ParseAll(csv.text))
+            {
+                if (!string.IsNullOrEmpty(c.YesNecrolog) && c.YesNecrolog != "—") lines.Add(c.YesNecrolog);
+                if (!string.IsNullOrEmpty(c.NoNecrolog) && c.NoNecrolog != "—") lines.Add(c.NoNecrolog);
+            }
+            lines.Sort((a, b) => b.Length.CompareTo(a.Length));
+            var entries = new List<NecrologEntry>();
+            for (int i = 0; i < Necrolog.MaxLines - 1 && i < lines.Count; i++)
+                entries.Add(new NecrologEntry { Age = i, Order = i, Line = lines[i], IsRond = false });
+            Assert.AreEqual(Necrolog.MaxLines - 1, entries.Count,
+                "в колоде хватает строк, чтобы набрать лимит некролога целиком");
+            // Длиннейшая причина колоды тоже участвует: строка исхода делит с некрологом одну плашку.
+            return Necrolog.Build("вы сунули палец в розетку", entries);
+        }
+
+        /// <summary>
+        /// Кремовое поле ЗАПЕЧЁННОЙ плашки `end.png` (замер PIL, cover-посадка) — независимая копия
+        /// драйверных констант, чтобы тест реально СВЕРЯЛ посадку, а не сравнивал константу с собой.
+        /// (cx, cy-от-верха, w, h).
+        /// </summary>
+        private static readonly Vector4 BakedCreamField = new(958.94f, 585.00f, 1232.57f, 600.46f);
+
+        /// <summary>An AnchorPx-placed rect read back as (cx, cy-from-top, w, h) reference px.</summary>
+        private static Vector4 RectOf(RectTransform rt) => new(
+            rt.anchorMin.x * 1920f, (1f - rt.anchorMin.y) * 1080f, rt.sizeDelta.x, rt.sizeDelta.y);
+
+        /// <summary>Inner box ⊆ outer box, both (cx, cy-from-top, w, h) in reference px.</summary>
+        private static void AssertRefBoxInside(Vector4 inner, Vector4 outer, string what)
+        {
+            Assert.GreaterOrEqual(inner.x - inner.z / 2f, outer.x - outer.z / 2f, what + " (слева)");
+            Assert.LessOrEqual(inner.x + inner.z / 2f, outer.x + outer.z / 2f, what + " (справа)");
+            Assert.GreaterOrEqual(inner.y - inner.w / 2f, outer.y - outer.w / 2f, what + " (сверху)");
+            Assert.LessOrEqual(inner.y + inner.w / 2f, outer.y + outer.w / 2f, what + " (снизу)");
+        }
+
+        /// <summary>
+        /// Assert the DRAWN glyph mesh of a label sits inside a box given in 1920×1080 reference px
+        /// (cx, cy-from-top, w, h). Read through the label's own rect (authored in the same reference px by
+        /// AnchorPx), so a non-16:9 batch game view cannot make it pass/fail for the wrong reason.
+        /// </summary>
+        private static void AssertGlyphsInRefBox(Text t, Vector4 box, float tol, string what)
+        {
+            var settings = t.GetGenerationSettings(t.rectTransform.rect.size);
+            var tg = t.cachedTextGenerator;
+            tg.Populate(t.text, settings);
+            Assert.Greater(tg.characterCountVisible, 0, what + " renders glyphs (not empty/tofu-collapsed)");
+
+            float upp = 1f / t.pixelsPerUnit;
+            float minX = float.MaxValue, maxX = float.MinValue, minY = float.MaxValue, maxY = float.MinValue;
+            var verts = tg.verts;
+            for (int i = 0; i < verts.Count; i++)
+            {
+                float x = verts[i].position.x * upp, y = verts[i].position.y * upp;
+                if (x < minX) minX = x; if (x > maxX) maxX = x;
+                if (y < minY) minY = y; if (y > maxY) maxY = y;
+            }
+
+            // The rect's own centre in reference px (the exact inverse of AnchorPx).
+            var rt = t.rectTransform;
+            float cx = rt.anchorMin.x * 1920f, cyTop = (1f - rt.anchorMin.y) * 1080f;
+            // Glyph bounds are local to the rect (y up) → reference px (y down from the top).
+            float gLeft = cx + minX, gRight = cx + maxX;
+            float gTop = cyTop - maxY, gBottom = cyTop - minY;
+
+            float bLeft = box.x - box.z / 2f, bRight = box.x + box.z / 2f;
+            float bTop = box.y - box.w / 2f, bBottom = box.y + box.w / 2f;
+            Assert.GreaterOrEqual(gLeft, bLeft - tol, what + ": глифы внутри поля слева");
+            Assert.LessOrEqual(gRight, bRight + tol, what + ": глифы внутри поля справа");
+            Assert.GreaterOrEqual(gTop, bTop - tol, what + ": глифы внутри поля сверху");
+            Assert.LessOrEqual(gBottom, bBottom + tol, what + ": глифы внутри поля снизу");
+        }
+
         [UnityTest]
-        public IEnumerator Finale_CauseOnScreen_LongStoryInPlate_RestartLabel_ExactSprites()
+        public IEnumerator Finale_IsEndPng_TextInsideTheBakedPlate_GreenCta_ExactSprites()
         {
             var driver = Boot(out var go, out var fake);
             yield return null;
 
-            driver.DebugRenderFinale(LongStory());
+            driver.DebugRenderFinale(LongStory(), 100);
             yield return null;
 
             Assert.IsTrue(driver.FinalePanel.activeSelf, "the finale panel is up");
-            var canvas = driver.CanvasRect;
 
-            // (1) Cause line (yellow) is on-screen AND its drawn glyphs fit its dark pill (solid, high-contrast).
-            StringAssert.Contains("Причина конца", driver.FinaleCauseText.text, "cause line reads «Причина конца»");
-            AssertOnScreen(driver.FinaleCauseText, canvas, "finale cause");
-            var causePlate = driver.FinaleCauseText.transform.parent.GetComponent<Image>();
-            AssertGeneratedInPill(driver.FinaleCauseText, causePlate, BarTrackPill, "finale cause on its dark pill");
+            // (1) Фон — `end.png` целиком, на весь кадр по ЗАПОЛНЕНИЮ (никаких полос сверху/снизу).
+            Assert.IsNotNull(driver.FinaleBackground, "у финала есть фон-Image");
+            Assert.AreEqual("finale-bg-v2", driver.FinaleBackground.sprite.name,
+                "фон финала = импорт `end.png` (asset-map §11-12), а не общий санбёрст");
+            var bgRt = driver.FinaleBackground.rectTransform;
+            Assert.AreEqual(GameDriver.FinaleBgW, bgRt.sizeDelta.x, 1f, "фон покрывает кадр по ширине");
+            Assert.AreEqual(GameDriver.FinaleBgH, bgRt.sizeDelta.y, 1f, "…и по высоте (cover, без полос)");
+            Assert.GreaterOrEqual(bgRt.sizeDelta.x, 1920f, "фон не уже кадра");
+            Assert.GreaterOrEqual(bgRt.sizeDelta.y, 1080f, "фон не ниже кадра");
+            Assert.AreEqual(0, driver.FinaleBackground.transform.GetSiblingIndex(),
+                "фон — ПЕРВЫЙ слой панели: он перекрывает вращающийся санбёрст HUD");
 
-            // (2) The worst-case LONG glued story fits INSIDE the dark story plate's visible pill — assert the
-            // DRAWN glyph mesh (best-fit honoured), not just the rect, so a vertical spill past the pill fails.
-            AssertGeneratedInPill(driver.FinaleStoryText, driver.FinaleStoryPlate, BarTrackPill, "long finale story");
+            // (2) Строка исхода: «Ты дожил до N лет» + причина, глифы ВНУТРИ запечённого кремового поля.
+            StringAssert.Contains("Ты дожил до 100 лет", driver.FinaleOutcomeText.text,
+                "строка исхода называет возраст (build-spec §4-H)");
+            StringAssert.Contains("Причина конца", driver.FinaleOutcomeText.text, "…и причину");
+            AssertGlyphsInRefBox(driver.FinaleOutcomeText, BakedCreamField, 0f, "строка исхода");
 
-            // (3) «НАЧАТЬ ЗАНОВО / ЖМИ ЗЕЛЁНУЮ» two-line label — drawn glyphs land on the green restart pill.
+            // (3) Худший СИНТЕТИЧЕСКИЙ некролог — тоже целиком в запечённом поле (best-fit честно ужимает).
+            AssertGlyphsInRefBox(driver.FinaleStoryText, BakedCreamField, 0f, "длинный некролог");
+
+            // (4) «НАЧАТЬ ЗАНОВО — ЖМИ ЗЕЛЁНУЮ» — одной строкой, через ТИРЕ, ровно как CTA опенера.
             var again = driver.FinalePanel.transform.Find("AgainPlate").GetComponent<Image>();
             var againText = again.transform.Find("AgainText").GetComponent<Text>();
-            StringAssert.Contains("НАЧАТЬ ЗАНОВО", againText.text, "restart button reads «НАЧАТЬ ЗАНОВО»");
-            AssertGeneratedInPill(againText, again, BarTrackPill, "«НАЧАТЬ ЗАНОВО» two-line label");
-
-            // (3b) …and the pill is the GREEN TOKEN itself, not «some green»: the label names the green
-            // cabinet button, so a paler plate (plate-yes' own #5CBF5F) makes the hint point at a colour the
-            // cabinet does not have (design gate 2026-07-31). Asserted on the RENDERED colour — uGUI
-            // multiplies the tint by the sprite's own fill — exactly as the opener CTA is asserted below.
+            Assert.AreEqual("НАЧАТЬ ЗАНОВО — ЖМИ ЗЕЛЁНУЮ", againText.text,
+                "CTA финала — та же формула управления, что у опенера, и через «—» (U+2014)");
+            AssertGeneratedInPill(againText, again, BarTrackPill, "«НАЧАТЬ ЗАНОВО — ЖМИ ЗЕЛЁНУЮ»");
             AssertTokenGreen(again, "finale restart CTA");
 
-            // (4) Exhaustive enumeration: exactly the cause pill + the story plate + the restart plate
-            //     (rim + green, built like the opener CTA so both confirm plates carry the same token).
-            var expected = new List<string> { "bar-track", "bar-track", "bar-track", "bar-track" };
-            CollectionAssert.AreEqual(expected, SpriteNames(driver.FinalePanel),
-                "the finale renders exactly the cause pill + story plate + restart rim+plate — no stray Image");
+            // (4b) …и CTA стоит НИЖЕ запечённой плашки, не накрывая её (место выбрано по композиции).
+            var ctaRt = again.rectTransform;
+            float ctaTop = (1f - ctaRt.anchorMin.y) * 1080f - ctaRt.sizeDelta.y / 2f;
+            float ctaBottom = (1f - ctaRt.anchorMin.y) * 1080f + ctaRt.sizeDelta.y / 2f;
+            Assert.GreaterOrEqual(ctaTop, GameDriver.FinalePlateBottom,
+                "CTA не перекрывает запечённую плашку");
+            Assert.LessOrEqual(ctaBottom, 1080f, "…и не свисает за нижний край кадра");
 
-            // (5) Exhaustive Text enumeration: title + cause + story + restart label; no stray/tofu text.
-            AssertExactTexts(driver.FinalePanel, 4, "finale");
+            // (4c) Цепочка боксов: оба текстовых ректа ⊆ безопасный бокс ⊆ ЗАМЕРЕННОЕ кремовое поле.
+            // Кремового поля мало как приёмки: оно не прямоугольник (скруглённые углы + три запечённые
+            // звезды-выкуса), и текст, легший на выкус, читался бы «на звезде», а не на креме.
+            AssertRefBoxInside(RectOf(driver.FinaleOutcomeText.rectTransform), GameDriver.FinaleTextBox,
+                "рект строки исхода — в безопасном боксе плашки");
+            AssertRefBoxInside(RectOf(driver.FinaleStoryText.rectTransform), GameDriver.FinaleTextBox,
+                "рект некролога — в безопасном боксе плашки");
+            AssertRefBoxInside(GameDriver.FinaleTextBox, BakedCreamField,
+                "безопасный бокс — внутри замеренного кремового поля end.png");
+
+            // (5) Перепись спрайтов: фон + кант CTA + сама CTA. Второй плашки НЕ рисуется (она запечена).
+            var expected = new List<string> { "bar-track", "bar-track", "finale-bg-v2" };
+            CollectionAssert.AreEqual(expected, SpriteNames(driver.FinalePanel),
+                "финал рисует ровно фон + кант и плашку CTA — никакого второго слоя плашки/заголовка");
+
+            // (6) Перепись текстов: исход + некролог + подпись CTA. Заголовка НЕТ — он запечён в фоне.
+            AssertExactTexts(driver.FinalePanel, 3, "finale");
 
             Object.Destroy(go);
             yield return null;
         }
 
+        /// <summary>
+        /// Лимит строк против ВЫСОТЫ запечённого поля: длиннейший РЕАЛЬНЫЙ некролог колоды (15 строк
+        /// лимита scenes-table кол.11–12) обязан влезть в плашку целиком и при этом не упереться в пол
+        /// ужатия — иначе «влез» означало бы «нечитаемо».
+        /// </summary>
         [UnityTest]
-        public IEnumerator Finale_ShortFatalStory_FitsPlate()
+        public IEnumerator Finale_LongestRealNecrolog_FitsTheBakedPlate_AboveTheLegibilityFloor()
         {
             var driver = Boot(out var go, out var fake);
             yield return null;
 
-            var fatal = Necrolog.Build("вы сунули палец в розетку", new List<NecrologEntry>());
-            driver.DebugRenderFinale(fatal);
+            var worst = LongestRealStory();
+            Assert.AreEqual(Necrolog.MaxLines, worst.StoryLines.Count,
+                "худший случай действительно упирается в лимит строк");
+            driver.DebugRenderFinale(worst, 100);
             yield return null;
 
-            AssertOnScreen(driver.FinaleCauseText, driver.CanvasRect, "fatal cause");
-            var causePlate = driver.FinaleCauseText.transform.parent.GetComponent<Image>();
-            AssertGeneratedInPill(driver.FinaleCauseText, causePlate, BarTrackPill, "fatal cause on its dark pill");
-            AssertGeneratedInPill(driver.FinaleStoryText, driver.FinaleStoryPlate, BarTrackPill, "short fatal story");
-            // No-tofu teeth for both finale labels (this test does not run the exhaustive Text enumeration).
-            AssertNoTofu(driver.FinaleCauseText, "fatal cause");
-            AssertNoTofu(driver.FinaleStoryText, "short fatal story");
+            AssertGlyphsInRefBox(driver.FinaleOutcomeText, BakedCreamField, 0f, "исход (худший случай)");
+            AssertGlyphsInRefBox(driver.FinaleStoryText, BakedCreamField, 0f, "длиннейший реальный некролог");
+            AssertNoTofu(driver.FinaleStoryText, "длиннейший реальный некролог");
+
+            // …и best-fit НЕ УПЁРСЯ в пол читаемости. Проверяем прямо: набираем ту же строку кеглем
+            // ПОЛА в тот же бокс и меряем нужную высоту. Влезло → best-fit (он берёт САМЫЙ КРУПНЫЙ
+            // влезающий кегль) заведомо выбрал ≥ пола. Не влезло бы — «влез» означало бы «нечитаемо»,
+            // и резать надо лимит строк, а не кегль.
+            var t = driver.FinaleStoryText;
+            float boxW = t.rectTransform.rect.width, boxH = t.rectTransform.rect.height;
+            bool bf = t.resizeTextForBestFit;
+            int fs = t.fontSize;
+            t.resizeTextForBestFit = false;
+            t.fontSize = GameDriver.FinaleStoryMinSize;
+            var floorSettings = t.GetGenerationSettings(new Vector2(boxW, 0f));
+            float needed = t.cachedTextGeneratorForLayout.GetPreferredHeight(t.text, floorSettings)
+                           / t.pixelsPerUnit;
+            t.fontSize = fs;
+            t.resizeTextForBestFit = bf;
+            Assert.LessOrEqual(needed, boxH,
+                $"на пороге читаемости {GameDriver.FinaleStoryMinSize} px худший некролог всё ещё влезает "
+                    + $"в поле плашки (нужно {needed:0.#} px из {boxH:0.#}) — значит best-fit взял кегль КРУПНЕЕ порога");
+
+            Object.Destroy(go);
+            yield return null;
+        }
+
+        /// <summary>Каждый тип конца доводится до финала и печатает СВОЮ причину в запечённой плашке.</summary>
+        [UnityTest]
+        public IEnumerator Finale_EveryCauseKind_LandsInTheBakedPlate(
+            [Values("весёлая старость", "спокойная старость", "одинокая старость",
+                    "вы выгорели", "вы сунули палец в розетку", "вас бросили")] string cause)
+        {
+            var driver = Boot(out var go, out var fake);
+            yield return null;
+
+            driver.DebugRenderFinale(Necrolog.Build(cause, new List<NecrologEntry>()), 41);
+            yield return null;
+
+            StringAssert.Contains(cause, driver.FinaleOutcomeText.text, "причина этого конца на экране");
+            StringAssert.Contains("Ты дожил до 41 года", driver.FinaleOutcomeText.text,
+                "…и возраст исхода стоит в родительном падеже, которого требует «до»");
+            AssertGlyphsInRefBox(driver.FinaleOutcomeText, BakedCreamField, 0f, "исход «" + cause + "»");
+            AssertGlyphsInRefBox(driver.FinaleStoryText, BakedCreamField, 0f, "короткая история «" + cause + "»");
+            AssertNoTofu(driver.FinaleOutcomeText, "исход «" + cause + "»");
 
             Object.Destroy(go);
             yield return null;

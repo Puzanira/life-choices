@@ -141,9 +141,39 @@ namespace ThanksNoThanks.Tests.PlayMode
             Assert.IsNotNull(driver.CardPricePlate, "a plate sits behind the price sub-line");
             Assert.IsTrue(driver.CardPricePlate.gameObject.activeSelf, "the plate is shown with the text");
 
-            // Plate colour is dark (the S10 block-tag): every channel well below mid-grey.
+            // Plate colour is dark (the S10 block-tag) — asserted on the RENDERED colour, because uGUI
+            // MULTIPLIES the tint by bar-track's own fill and the raw tint would lie. Three teeth now:
+            //  (a) it is EXACTLY the DEEP COBALT token #1F3A96 — pinned to the hex, because a comment
+            //      claiming one hex while the code drew another is how this drifted in the first place
+            //      (Codex MINOR 2026-08-05). OnBarTrack divides the token by bar-track's fill and uGUI
+            //      multiplies it back, so the rendered colour round-trips to the token itself. On the
+            //      captured frame the same chip measures #1D3996 — Δ≤2/255, because the project renders
+            //      in LINEAR colour space while this model multiplies in sRGB (the identical ≤2/255
+            //      shift shows on every other OnBarTrack plate); the frame value is documented at the
+            //      chip's construction site in GameDriver.
+            //  (b) it really is a DARK tag (light text on it reads) — luminance well below mid-grey;
+            //  (c) it is NOT the same colour as its own black keyline. The chip used to be tinted with
+            //      the very INK its keyline is drawn in, so the keyline added in the polish increment
+            //      rendered invisible («обводка есть, а глазом её нет»).
             var c = driver.CardPricePlate.color;
-            Assert.Less(Mathf.Max(c.r, Mathf.Max(c.g, c.b)), 0.3f, "the plate is dark, not light/gold");
+            var rendered = new Color(GameDriver.BarTrackFillToken.r * c.r,
+                                     GameDriver.BarTrackFillToken.g * c.g,
+                                     GameDriver.BarTrackFillToken.b * c.b);
+            var cobaltDeep = GameDriver.CobaltDeepToken;   // #1F3A96
+            Assert.AreEqual(cobaltDeep.r, rendered.r, 1f / 255f, "chip renders the DEEP COBALT token: R of #1F3A96");
+            Assert.AreEqual(cobaltDeep.g, rendered.g, 1f / 255f, "chip renders the DEEP COBALT token: G of #1F3A96");
+            Assert.AreEqual(cobaltDeep.b, rendered.b, 1f / 255f, "chip renders the DEEP COBALT token: B of #1F3A96");
+            Assert.AreEqual(0x1F, Mathf.RoundToInt(rendered.r * 255f), "…and the token itself is still #1F3A96");
+            Assert.AreEqual(0x3A, Mathf.RoundToInt(rendered.g * 255f), "…and the token itself is still #1F3A96");
+            Assert.AreEqual(0x96, Mathf.RoundToInt(rendered.b * 255f), "…and the token itself is still #1F3A96");
+
+            float lum = 0.2126f * rendered.r + 0.7152f * rendered.g + 0.0722f * rendered.b;
+            Assert.Less(lum, 0.35f, "the price chip renders DARK (light text on it reads)");
+            var ink = GameDriver.InkToken;
+            float delta = Mathf.Abs(rendered.r - ink.r) + Mathf.Abs(rendered.g - ink.g)
+                          + Mathf.Abs(rendered.b - ink.b);
+            Assert.Greater(delta, 0.15f,
+                "the chip is distinguishable from its own INK keyline (else the keyline is invisible)");
 
             // Plate is drawn BEHIND the text (lower sibling index → earlier in the draw order).
             Assert.Less(driver.CardPricePlate.transform.GetSiblingIndex(),

@@ -1,5 +1,20 @@
 # Спрайты P0 — «Спасибо, не надо»
 
+> ⚠ **АРХИВ (2026-08-05).** Этот пак — программерский арт P0 от 2026-07-18. Игра целиком
+> перешла на арт-пак `docs/assets/assets_new/` (импорты `*-v2` в
+> `components/unity-game/Assets/_Project/Art/Resources/Sprites/`), и инкремент «полировка»
+> снял из Unity-ресурсов ВСЕ файлы этого пака, у которых не осталось ни одного потребителя
+> в `Scripts/` и `Tests/`:
+> `age-badge` · `balancer-marker` · `balancer-track` · `bar-energy-fill` · `bar-health-fill` ·
+> `bubble` · `icon-coin` · `icon-heart` · `icon-lightning` · `marquee-frame` ·
+> `marquee-frame-bulbs` · `money-pill` · `spark` · `star-outline` · `timer-ring` ·
+> `timer-ring-track` (плюс промежуточный `sunburst-bg-v2`).
+>
+> Из этого пака в игре ОСТАЛИСЬ и не трогаются: `bar-track` (несущая 9-slice плашка всех
+> кодовых плашек), `plate-yes` / `plate-no` (перелейбл кризиса), `marquee-bulb` (лампочки
+> опенера), `star-white`, `sunburst-bg` (лучи выгорания). Сами исходники здесь сохранены —
+> это референс и заготовка на перегенерацию, а не мёртвый груз.
+
 Ответ на `docs/design-tasks/2026-07-18-p0-assets-and-csv.md` (Задача 1).
 Стиль — `docs/assets/style/styleframe-03.png`; раскладка/размеры — мокапы в
 `docs/screens/index.html` (#assets, #kit). Все PNG, sRGB, прозрачный альфа

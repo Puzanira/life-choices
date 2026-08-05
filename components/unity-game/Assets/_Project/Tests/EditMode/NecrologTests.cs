@@ -119,5 +119,48 @@ namespace ThanksNoThanks.Tests
             Assert.AreEqual("weighty1", r.StoryLines[1], "the childhood opening survives");
             Assert.AreEqual("weighty20", r.StoryLines[^1], "the late-life ending survives");
         }
+
+        // ---- S11: строка исхода в запечённой плашке финала (build-spec §4-H) -------------------------
+
+        // Родительный падеж после «до». Таблица покрывает обе ветки правила и обе ловушки:
+        // 11 (единица, но «лет») и её сотенный повтор 111, против 101 (единица → «года»).
+        [TestCase(1, "года")]      // до 1 года
+        [TestCase(2, "лет")]       // до 2 лет — НЕ «до 2 года»: счётное «2 года» здесь не действует
+        [TestCase(5, "лет")]
+        [TestCase(11, "лет")]      // 11 — исключение из правила единиц
+        [TestCase(21, "года")]     // до 21 года
+        [TestCase(41, "года")]
+        [TestCase(78, "лет")]
+        [TestCase(100, "лет")]
+        [TestCase(101, "года")]    // 101 — единица, «до 101 года»
+        [TestCase(111, "лет")]     // 111 — сотенный повтор 11, «до 111 лет»
+        public void GenitiveYears_IsTheCaseThePrepositionДоDemands(int n, string expected)
+        {
+            Assert.AreEqual(expected, Necrolog.GenitiveYears(n));
+        }
+
+        [Test]
+        public void GenitiveYears_NeverLeavesAnAgeWithoutAWord()
+        {
+            for (int a = 0; a <= 120; a++) Assert.IsNotEmpty(Necrolog.GenitiveYears(a), "возраст " + a);
+        }
+
+        [Test]
+        public void AgeLine_ReadsAsARealSentence_AndNeverPrintsZero()
+        {
+            // ⚠ «до» требует РОДИТЕЛЬНОГО падежа: «до 41 года», не «до 41 год» (Codex MAJOR 2026-08-05).
+            Assert.AreEqual("Ты дожил до 41 года", Necrolog.AgeLine(41));
+            Assert.AreEqual("Ты дожил до 100 лет", Necrolog.AgeLine(100));
+            Assert.AreEqual("Ты дожил до 1 года", Necrolog.AgeLine(0),
+                "FATAL до старта счётчика возраста не печатает «до 0 лет»");
+        }
+
+        [Test]
+        public void OutcomeBlock_IsAgeLine_ThenTheCauseLine()
+        {
+            var r = Necrolog.Build("вы сунули палец в розетку", new List<NecrologEntry>());
+            Assert.AreEqual("Ты дожил до 7 лет\nПричина конца: вы сунули палец в розетку",
+                r.OutcomeBlock(7), "две строки исхода: возраст, затем причина");
+        }
     }
 }

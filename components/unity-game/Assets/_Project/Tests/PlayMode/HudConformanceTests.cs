@@ -45,8 +45,11 @@ namespace ThanksNoThanks.Tests.PlayMode
         // Jar box = the EXPLAINER, not the asset-map §2 row (design gate round 2: the table is wrong here).
         private static readonly ArtBox MoneyJar =
             new("деньги (банка)", 126, 103, 772, 835, 1024, 1024, 1664, 65, 173, 185);
+        // Coin box = ПОСАДКА В ГОРЛОВИНУ (долг гейта 2026-08-05), а не эталонный бокс 1714,6: наш бокс
+        // банки садится ниже эталонного, и монета по старому боксу висела над крышкой с голой прорезью.
+        // Отношения «монета ↔ прорезь» проверяет отдельный тест ниже; здесь — сам бокс.
         private static readonly ArtBox Coin =
-            new("монета", 1, 0, 858, 868, 860, 869, 1714, 6, 68, 68);
+            new("монета", 1, 0, 858, 868, 860, 869, 1716.5f, 9.1f, 68, 68);
         private static readonly ArtBox AgeBadge =
             new("возраст (бейдж)", 35, 63, 947, 923, 1024, 1024, 1639, 392, 212, 207);
         private static readonly ArtBox CardPlate =
@@ -256,6 +259,41 @@ namespace ThanksNoThanks.Tests.PlayMode
             AssertDrawnBox(canvas, driver.MoneyCoin.rectTransform, Coin);
             AssertDrawnBox(canvas, driver.AgeBadgeImage.rectTransform, AgeBadge);
             AssertDrawnBox(canvas, driver.CardFrameImage.rectTransform, CardPlate);
+
+            Object.Destroy(go);
+            yield return null;
+        }
+
+        /// <summary>
+        /// ДОЛГ ГЕЙТА 2026-08-05: монета СИДИТ В ГОРЛОВИНЕ банки, а не висит над ней. Бокса монеты для
+        /// этого мало — он был «в допуске» и когда между монетой и крышкой читался зазор ~4 px, а прорезь
+        /// (синяя щель в крышке) оставалась голой во всю ширину. Проверяются ОТНОШЕНИЯ монеты и прорези,
+        /// снятые с самих спрайтов (GameDriver.JarSlotCavity / JarSlotInk):
+        ///   • оси по X совпадают (раньше монета стояла на 2.5 px левее);
+        ///   • низ монеты дошёл до полости прорези — зазор к крышке ≤0, т.е. в пределах требуемых 2 px;
+        ///   • монета не утонула глубже прорези (иначе она читалась бы «внутри банки»);
+        ///   • по ширине монета перекрывает прорезь целиком — голой середины не остаётся.
+        /// </summary>
+        [UnityTest]
+        public IEnumerator MoneyCoin_SitsInTheJarThroat_SlotNotBare()
+        {
+            var driver = BootToAdult(out var go);
+            yield return ToAdult(driver);
+            var canvas = driver.CanvasRect;
+
+            var (l, t, r, b) = DrawnRefBox(canvas, driver.MoneyCoin.rectTransform, Coin);
+            var cavity = GameDriver.JarSlotCavity;   // x0, yTop, x1, yBottom
+            var ink = GameDriver.JarSlotInk;
+            float cavityCx = (cavity.x + cavity.z) / 2f;
+
+            Assert.AreEqual(cavityCx, (l + r) / 2f, 3f,
+                "монета соосна прорези крышки (было — на 2.5 px левее)");
+            Assert.GreaterOrEqual(b, cavity.y - 2f,
+                $"низ монеты дошёл до прорези (зазор к крышке ≤2 px): низ {b:0.##}, верх полости {cavity.y:0.##}");
+            Assert.LessOrEqual(b, ink.w + 2f,
+                $"монета не утонула глубже прорези: низ {b:0.##}, низ обводки прорези {ink.w:0.##}");
+            Assert.LessOrEqual(l, cavity.x, "монета перекрывает прорезь слева — щель не оголена");
+            Assert.GreaterOrEqual(r, cavity.z, "…и справа");
 
             Object.Destroy(go);
             yield return null;
@@ -1122,8 +1160,12 @@ namespace ThanksNoThanks.Tests.PlayMode
             // (2) card: frame → question → BLOCK$ banner → price plate → price text.
             var card = driver.CardRect;
             Below(card.Find("CardFrame"), card.Find("CardText"), "вопрос рисуется поверх плашки карточки");
-            Below(card.Find("CardText"), card.Find("BlockBanner"), "BLOCK$-баннер рисуется поверх вопроса");
-            Below(card.Find("BlockBanner"), card.Find("CardPricePlate"), "плашка цены — поверх баннера");
+            Below(card.Find("CardText"), card.Find("BlockBannerInk"), "кант BLOCK$-баннера — поверх вопроса");
+            Below(card.Find("BlockBannerInk"), card.Find("BlockBanner"),
+                "чёрный keyline BLOCK$-баннера — ПОД красной плашкой (виден кантом снаружи)");
+            Below(card.Find("BlockBanner"), card.Find("CardPriceInk"), "кант чипа цены — поверх баннера");
+            Below(card.Find("CardPriceInk"), card.Find("CardPricePlate"),
+                "чёрный keyline чипа цены — ПОД тёмной плашкой чипа");
             Below(card.Find("CardPricePlate"), card.Find("CardPrice"), "текст цены — поверх своей плашки");
 
             // (3) §5b: звонящая трубка — слой 5 «оверлеи» (build-spec §1.3), т.е. ВЫШЕ ряда HUD и выше

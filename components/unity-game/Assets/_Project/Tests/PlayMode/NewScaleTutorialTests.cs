@@ -453,6 +453,36 @@ namespace ThanksNoThanks.Tests.PlayMode
             yield return null;
         }
 
+        /// <summary>
+        /// ДОЛГ ГЕЙТА 2026-08-05: «культя» купола. Под §D-модалкой время заморожено, и замерший полукруг
+        /// таймера торчал над затемнением обрубком — читался как недорисованный элемент. Купол обязан быть
+        /// СКРЫТ, пока модалка поднята, и вернуться сам, как только она ушла. Проверяем на всех четырёх
+        /// шкалах и по ЖИВОМУ пути (SetupTo доводит до модалки её собственным OPEN).
+        /// </summary>
+        [UnityTest]
+        public IEnumerator TimerDome_IsHiddenWhileTheModalIsUp_AndBackAfter(
+            [Values(NewScale.Money, NewScale.Relations, NewScale.Energy, NewScale.Child)] NewScale which)
+        {
+            var driver = Boot(out var go, out var fake);
+            yield return null;                                   // Start подписал ввод
+
+            Assert.IsTrue(driver.TimerDome.activeInHierarchy || driver.Game.State != GameState.Playing,
+                "до игры купол живёт вместе с игровой панелью");
+
+            SetupTo(driver, fake, which);
+            Assert.IsTrue(driver.NewScaleShowing, which + ": модалка поднята");
+            Assert.IsFalse(driver.TimerDome.activeInHierarchy,
+                which + ": под модалкой купола на экране НЕТ (иначе торчит замерший обрубок)");
+
+            NewScaleTut.Clear(driver, fake);                     // выполнить условие — модалка уходит штатно
+            Assert.IsFalse(driver.NewScaleShowing, which + ": модалка ушла");
+            Assert.IsTrue(driver.TimerDome.activeInHierarchy,
+                which + ": купол вернулся сам, как только модалка снялась");
+
+            Object.Destroy(go);
+            yield return null;
+        }
+
         [UnityTest]
         public IEnumerator Child_RingsUnderTheModal_AndOnlyPickingUpCloses()
         {

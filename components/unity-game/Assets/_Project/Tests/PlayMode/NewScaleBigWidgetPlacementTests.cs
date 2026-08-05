@@ -76,6 +76,28 @@ namespace ThanksNoThanks.Tests.PlayMode
             });
         }
 
+        /// <summary>
+        /// ДОЛГ ГЕЙТА 2026-08-05: правая колонка модалки денег — бейдж возраста НАД крупной банкой —
+        /// стояла двумя несоосными наклейками. Бейдж на месте (он живой HUD на эталонном боксе), банка
+        /// выровнена по его оси. Считаем по НАРИСОВАННЫМ фигурам, а не по ректам.
+        /// </summary>
+        [UnityTest]
+        public IEnumerator MoneyModal_BigJar_ShareTheAgeBadgeAxis()
+        {
+            yield return ShowModal(NewScale.Money, driver =>
+            {
+                var dst = GameDriver.BigScaleDst(NewScale.Money);
+                var badge = GameDriver.AgeBadgeDrawnBox;
+                Assert.AreEqual(badge.x, dst.x, 4f,
+                    $"ось крупной банки совпадает с осью бейджа возраста (бейдж {badge.x:0.#}, банка {dst.x:0.#})");
+
+                // …и это действительно та ось, на которой стоит НАСТОЯЩИЙ бейдж в кадре.
+                var badgeRt = driver.AgeBadgeImage.rectTransform;
+                Assert.AreEqual(badge.x, badgeRt.anchorMin.x * 1920f, 6f,
+                    "бейдж возраста не двигали — он на своём эталонном месте");
+            });
+        }
+
         [UnityTest]
         public IEnumerator BigWidget_SurvivesACanvasResize_AfterTheModalIsUp(
             [ValueSource(nameof(All))] NewScale which)

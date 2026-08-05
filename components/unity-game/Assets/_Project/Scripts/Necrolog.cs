@@ -29,6 +29,13 @@ namespace ThanksNoThanks
         }
 
         public string CauseLine => "Причина конца: " + Cause;
+
+        /// <summary>
+        /// Строка исхода для запечённой плашки финала (build-spec §4-H «Ты дожил до N лет / Причина: …»):
+        /// возраст первой строкой, причина — второй. Причина берётся ИЗ <see cref="CauseLine"/>, т.е.
+        /// формулировка «Причина конца: …» остаётся единственной в проекте (её же читают EditMode-тесты).
+        /// </summary>
+        public string OutcomeBlock(int age) => Necrolog.AgeLine(age) + "\n" + CauseLine;
     }
 
     /// <summary>
@@ -42,6 +49,30 @@ namespace ThanksNoThanks
         public const string StoryIntro = "Но не переживайте! Ведь вы…";
         public const string ParentsLine = "…родились у прекрасных родителей.";
         public const int MaxLines = 15;
+
+        /// <summary>
+        /// «Ты дожил до N лет» — первая строка исхода на плашке финала. Возраст ЗАЖИМАЕТСЯ снизу
+        /// единицей: FATAL-карта может прилететь ещё до того, как счётчик возраста пошёл (он стартует
+        /// на I03), и «дожил до 0 лет» — не текст, а баг на экране.
+        /// </summary>
+        public static string AgeLine(int age)
+        {
+            int a = age < 1 ? 1 : age;
+            return "Ты дожил до " + a + " " + GenitiveYears(a);
+        }
+
+        /// <summary>
+        /// Слово «год» в РОДИТЕЛЬНОМ падеже — том, которого требует предлог «до»: «до 1 года»,
+        /// «до 41 года», «до 78 лет». ⚠ Это НЕ обычное счётное склонение (1 год · 2–4 года · 5+ лет):
+        /// после «до» именительный давал «дожил до 41 год», а «2–4 года» здесь совпадает с «лет»
+        /// («до 2 лет», не «до 2 года»). Правило родительного проще счётного: единица (кроме 11 и
+        /// её сотенных повторов) → «года», всё остальное → «лет». Чистая функция, покрыта юнит-тестом.
+        /// </summary>
+        public static string GenitiveYears(int n)
+        {
+            int abs = n < 0 ? -n : n;
+            return abs % 10 == 1 && abs % 100 != 11 ? "года" : "лет";
+        }
 
         /// <summary>
         /// Glues one story fragment onto the running text and NORMALISES THE SEAM. The intro ends with

@@ -143,6 +143,48 @@ namespace ThanksNoThanks.Tests.PlayMode
 
         // Exhaustive active-Image enumeration: the set of active Image object NAMES under `root` must equal
         // `expected` EXACTLY — a stray/placeholder Image (leaked overlay, orphan sprite) fails the state.
+        /// <summary>
+        /// Чёрный keyline арт-пака вокруг плашки: отдельный `bar-track` СОСЕДОМ И НИЖЕ, соосный, ровно на
+        /// <see cref="GameDriver.BlockKeylineInk"/> шире с каждой стороны, и РЕНДЕРЯЩИЙСЯ в INK (uGUI
+        /// умножает тинт на собственную заливку спрайта — сырой тинт соврал бы).
+        /// </summary>
+        private static void AssertInkKeyline(Image keyline, Image plate, string what)
+        {
+            Assert.IsNotNull(keyline, what + ": у плашки есть чёрный кант");
+            Assert.IsTrue(keyline.gameObject.activeInHierarchy, what + ": кант поднят вместе с плашкой");
+            Assert.AreEqual("bar-track", keyline.sprite.name, what + ": кант — тот же скруглённый спрайт");
+            Assert.AreSame(plate.transform.parent, keyline.transform.parent,
+                what + ": кант — СОСЕД плашки (ребёнок рисовался бы поверх неё)");
+            Assert.Less(keyline.transform.GetSiblingIndex(), plate.transform.GetSiblingIndex(),
+                what + ": кант рисуется ПОД плашкой — виден кольцом снаружи");
+
+            float pad = 2f * GameDriver.BlockKeylineInk;
+            Assert.AreEqual(plate.rectTransform.sizeDelta.x + pad, keyline.rectTransform.sizeDelta.x, 0.5f,
+                what + $": кант шире плашки ровно на {GameDriver.BlockKeylineInk} px с каждой стороны");
+            Assert.AreEqual(plate.rectTransform.sizeDelta.y + pad, keyline.rectTransform.sizeDelta.y, 0.5f,
+                what + ": …и выше на столько же");
+            Assert.AreEqual(plate.rectTransform.anchorMin, keyline.rectTransform.anchorMin,
+                what + ": кант соосен плашке");
+
+            var rendered = new Color(GameDriver.BarTrackFillToken.r * keyline.color.r,
+                                     GameDriver.BarTrackFillToken.g * keyline.color.g,
+                                     GameDriver.BarTrackFillToken.b * keyline.color.b);
+            var ink = GameDriver.InkToken;
+            Assert.AreEqual(ink.r, rendered.r, 1f / 255f, what + ": кант рендерится в INK (R)");
+            Assert.AreEqual(ink.g, rendered.g, 1f / 255f, what + ": кант рендерится в INK (G)");
+            Assert.AreEqual(ink.b, rendered.b, 1f / 255f, what + ": кант рендерится в INK (B)");
+
+            // …и кант ВИДЕН: заливка плашки не совпадает с ним. Чип цены был закрашен ровно тем же INK,
+            // и добавленный кант рисовался «в цвет» — обводка формально есть, глазом её нет.
+            var plateRendered = new Color(GameDriver.BarTrackFillToken.r * plate.color.r,
+                                          GameDriver.BarTrackFillToken.g * plate.color.g,
+                                          GameDriver.BarTrackFillToken.b * plate.color.b);
+            float delta = Mathf.Abs(plateRendered.r - rendered.r) + Mathf.Abs(plateRendered.g - rendered.g)
+                          + Mathf.Abs(plateRendered.b - rendered.b);
+            Assert.Greater(delta, 0.15f,
+                what + ": заливка плашки отличается от канта — иначе обводки не видно");
+        }
+
         private static void AssertExactImages(GameObject root, string what, params string[] expected)
         {
             var imgs = root.GetComponentsInChildren<Image>(includeInactive: false).Select(i => i.name).ToList();
@@ -367,6 +409,13 @@ namespace ThanksNoThanks.Tests.PlayMode
             AssertGeneratedInPill(bannerText, bannerImg, BarTrackPill, "S10 red banner");
             AssertNoTofu(bannerText, "S10 red banner");
 
+            // ДОЛГ ГЕЙТА 2026-08-05: у баннера и у чипа цены есть ЧЁРНЫЙ KEYLINE арт-пака — они были
+            // единственными фигурами экрана без канта. Кант — отдельный `bar-track` под плашкой, ровно на
+            // BlockKeylineInk шире с каждой стороны, и он РЕНДЕРИТСЯ в INK (uGUI умножает тинт на заливку
+            // спрайта, поэтому сверяем результат, а не сырой тинт).
+            AssertInkKeyline(driver.BlockBannerInk.GetComponent<Image>(), bannerImg, "BLOCK$-баннер");
+            AssertInkKeyline(driver.CardPriceInk, driver.CardPricePlate, "чип цены");
+
             // Both answer plates are MUTED while blocked (not the full-bright white of a normal card).
             Assert.Less(driver.YesPlateImage.color.g, 0.9f, "the ДА plate is muted while blocked");
             Assert.Less(driver.NoPlateImage.color.r, 0.9f, "the «СПАСИБО, НЕ НАДО» plate is muted while blocked");
@@ -377,7 +426,7 @@ namespace ThanksNoThanks.Tests.PlayMode
             // on the block card fails.
             var card = driver.CardRect.gameObject;
             AssertExactImages(card, "blocked card",
-                "CardFrame", "BlockBanner", "CardPricePlate");
+                "CardFrame", "BlockBannerInk", "BlockBanner", "CardPriceInk", "CardPricePlate");
             AssertExactTexts(card, "blocked card", "CardText", "BlockText", "CardPrice");
             // …and the dim is a real frame tint (the S10 fix), not the full-bright white of a normal card.
             Assert.Less(driver.CardFrameImage.color.b, 0.9f, "the blocked card frame is dimmed (tinted, not full-bright)");

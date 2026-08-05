@@ -57,7 +57,12 @@ namespace ThanksNoThanks
     {
         // ---- palette tokens (#kit) — used for text only; sprites carry their own colour ----
         private static readonly Color Cobalt = new(0.184f, 0.329f, 0.784f);    // #2f54c8
-        private static readonly Color CobaltDeep = new(0.122f, 0.227f, 0.588f);// #1f3a96
+        private static readonly Color CobaltDeep = new(0.122f, 0.227f, 0.588f);// #1F3A96
+        /// <summary>
+        /// The DEEP COBALT token, exposed so a test can pin the rendered colour of the price chip to the
+        /// exact hex instead of only asserting «dark and not INK».
+        /// </summary>
+        public static Color CobaltDeepToken => CobaltDeep;
         // INK is the build-spec §2 token #0B0F1A, re-affirmed as canon by the founder (asset-map §12-4):
         // the dark text/outline colour comes from the TOKENS, never sampled off an explainer PNG.
         private static readonly Color Ink = new(11f / 255f, 15f / 255f, 26f / 255f);   // #0B0F1A
@@ -190,18 +195,31 @@ namespace ThanksNoThanks
         //   rel-bar-v2        (18,11,1136,286/1172,309) 413,35,523,132     → 674.50, 101.23, 539.57, 142.62
         //   health-bar-v2     (18,11,1136,286/1172,309) 1042,38,504,127    → 1294.00, 101.72, 519.97, 137.21
         //   money-jar-v2      (126,103,772,835/1024²)   1664,65,173,185    → 1750.50, 155.62, 229.47, 226.87
-        //   coin-v2           (1,0,858,868/860,869)     1714,6,68,68       → 1748.00, 40.04, 68.16, 68.08
+        //   coin-v2           (1,0,858,868/860,869)     1716.5,9.1,68,68   → 1750.54, 43.12, 68.16, 68.08
         //   age-badge-v2      (35,63,947,923/1024²)     1639,392,212,207   → 1745.78, 492.70, 229.24, 229.65
         //   choice-plate-v2   (34,26,1468,968/1536,1024) 413,229,1093,721  → 959.50, 590.99, 1143.63, 762.71
         // The JAR box is NOT the asset-map §2 row (design gate round 2: the table is wrong for the jar and
         // the explainer wins) — the jar's own drawn glass, measured on the reference without the coin, is
-        // 1664,65,173,185. The COIN is unchanged (it was already within 2 px), and moving the jar UP is what
-        // seats the coin IN the lid slot the way the reference draws it.
+        // 1664,65,173,185.
+        // ⚠ КОИН — ДОЛГ ГЕЙТА (2026-08-05). Раньше монета стояла по своему боксу с эталона (1714,6),
+        // но НАШ бокс банки садится на ~2 px ниже эталонного, и в кадре монета висела НАД крышкой:
+        // прорезь (синяя щель в крышке) оставалась голой во всю ширину, а между низом монеты и крышкой
+        // читался зазор ~4 px. Монета пересчитана ПО СВОЕЙ БАНКЕ, а не по эталонному кадру:
+        //   прорезь `money-jar-v2` в кадре = ink 1721.4…1779.4 × 73.2…79.8, СИНЯЯ полость 1728.1…1772.9
+        //   × 75.6…77.6, центр по X 1750.50 (замер PIL по спрайту через бокс банки);
+        //   монета сдвинута так, что её центр по X = центру прорези (было 1748.0 — «левее» на 2.5 px),
+        //   а нижняя кромка её обводки = 77.0, т.е. она СИДИТ в полости прорези: зазор к крышке 0
+        //   (перекрытие), середина прорези закрыта монетой, а её концы торчат по бокам — ровно так, как
+        //   рисует эталон. Тест сверяет эти отношения, а не только бокс (см. HudConformanceTests).
+        /// <summary>Прорезь-полость в крышке банки (синяя щель) в кадре: x0, yTop, x1, yBottom.</summary>
+        public static readonly Vector4 JarSlotCavity = new(1728.09f, 75.64f, 1772.91f, 77.63f);
+        /// <summary>Та же прорезь ВМЕСТЕ с её чёрной обводкой — в неё монета и «вставляется».</summary>
+        public static readonly Vector4 JarSlotInk = new(1721.37f, 73.19f, 1779.41f, 79.83f);
         private static readonly Vector4 BatteryRect = new(184.75f, 168.14f, 126.33f, 230.94f);
         private static readonly Vector4 RelBarRect = new(674.50f, 101.23f, 539.57f, 142.62f);
         private static readonly Vector4 HealthBarRect = new(1294.00f, 101.72f, 519.97f, 137.21f);
         private static readonly Vector4 MoneyJarRect = new(1750.50f, 155.62f, 229.47f, 226.87f);
-        private static readonly Vector4 CoinRect = new(1748.00f, 40.04f, 68.16f, 68.08f);
+        private static readonly Vector4 CoinRect = new(1750.54f, 43.12f, 68.16f, 68.08f);
         private static readonly Vector4 AgeBadgeRect = new(1745.78f, 492.70f, 229.24f, 229.65f);
         private static readonly Vector4 CardPlateRect = new(959.50f, 590.99f, 1143.63f, 762.71f);
 
@@ -278,6 +296,11 @@ namespace ThanksNoThanks
         /// арта. Углы соосны (тот же спрайт, тот же радиус); на диагонали кольцо шире в √2 — это
         /// геометрия раздутия скруглённого прямоугольника с постоянным радиусом, а не рассинхрон.</summary>
         public const float AlarmKantInk = 4f;
+        /// <summary>Толщина чёрного keyline вокруг BLOCK$-баннера и чипа цены, реф-px (долг гейта
+        /// 2026-08-05: это были единственные фигуры экрана без канта арт-пака). Та же цифра и та же
+        /// причина, что у <see cref="AlarmKantInk"/> — 3 px на мягком крае `bar-track` дают одну
+        /// сплошную чёрную строку, 4 px дают две, как у собственного keyline арта.</summary>
+        public const float BlockKeylineInk = 4f;
         // НАРИСОВАННЫЕ боксы баров (asset-map §2) — кант строится от них, а не от рект-боксов: у спрайтов
         // прозрачные поля, и кант от ректа висел бы в воздухе, не касаясь плашки.
         public const float RelBarDrawnCx = 674.5f, RelBarDrawnCy = 101f, RelBarDrawnW = 523f, RelBarDrawnH = 132f;
@@ -526,11 +549,11 @@ namespace ThanksNoThanks
         private Sprite _domeSprite;       // процедурный полукруг (плоской стороной вверх), общий на 3 слоя
         private Sprite _domeHandSprite;   // процедурная полоска с мягкими краями — тело стрелки
 
-        // Finale
-        private Text _finaleTitle;
-        private Text _finaleCause;
-        private Text _finaleStory;
-        private Image _finaleStoryPlate;
+        // Finale (S11) — `end.png` целиком: заголовок и плашка ЗАПЕЧЕНЫ в фоне, драйвер рисует только
+        // текст В запечённой плашке + зелёную CTA под ней (asset-map §11-12).
+        private Image _finaleBg;
+        private Text _finaleOutcome;   // «Ты дожил до N лет» + «Причина конца: …», Arimo Bold
+        private Text _finaleStory;     // склеенный некролог, Rubik
 
         // Tutorial modal widgets (S5) — captured for Layer-2 conformance.
         private Image _tutorialModal;
@@ -540,6 +563,8 @@ namespace ThanksNoThanks
         // BLOCK$ (S10): the card is dimmed by tinting its OWN frame sprite (exact rounded silhouette — a
         // separate veil rect showed straight edges cutting across the sunburst), plus a red block-tag banner.
         private GameObject _blockBanner;
+        private GameObject _blockBannerInk;   // чёрный keyline вокруг баннера (сосед НИЖЕ него)
+        private Image _cardPriceInk;          // тот же keyline вокруг чипа цены
         // BLOCK$ price sub-line on the card: «СТОИТ N ₽» when affordable, «НУЖНО N ₽» when blocked.
         // Above the veil (drawn after it), so it stays legible in the dimmed/blocked state too.
         // Sits on a dark rounded plate (_cardPricePlate) so the gold/light text never reads as
@@ -631,7 +656,9 @@ namespace ThanksNoThanks
         // ИСТОЧНИК — бокс НАРИСОВАННОГО виджета в HUD (замер по кадру hud-phonering, канвас ровно 1920×1080).
         private static readonly Vector4 BigEnergySrc = new(183.5f, 166.5f, 114f, 218f);
         private static readonly Vector4 BigRelSrc = new(674f, 100.5f, 523f, 130f);
-        private static readonly Vector4 BigMoneySrc = new(1750f, 127.5f, 173f, 244f);   // банка + монета над ней
+        // Банка + монета над ней. Пересчитан после посадки монеты в горловину (монета опустилась на 3.1 px,
+        // поэтому верх объединённого бокса ушёл с 6.0 на 9.1): 1663.8…1837.0 × 9.08…250.0.
+        private static readonly Vector4 BigMoneySrc = new(1750.4f, 129.54f, 173.2f, 240.92f);
         private static readonly Vector4 BigChildSrc = new(144f, 540f, 411.3f, 444.2f);  // = PhoneRingRect, рисунок его заполняет
         // ЦЕЛЬ. Энергия — С ЭТАЛОНА: подобрана так, чтобы ВНУТРЕННЯЯ КРОМКА ОБВОДКИ батареи легла в
         // x 207…412, y 145…546 (см. BatteryInnerStrokeSrc и NewScaleBigWidgetLayoutTests). Остальные три
@@ -639,7 +666,16 @@ namespace ThanksNoThanks
         // полем ≥16 px, мимо текстовых полей обоих окон и мимо бейджа возраста.
         private static readonly Vector4 BigEnergyDst = new(309.5f, 326.442f, 255.60f, 488.78f);   // k=2.2421
         private static readonly Vector4 BigRelDst = new(515f, 178f, 993.70f, 247.00f);            // k=1.90
-        private static readonly Vector4 BigMoneyDst = new(1764.5f, 835f, 273.34f, 385.52f);       // k=1.58
+        // ДЕНЬГИ — долг гейта 2026-08-05: «ось банка↔бейдж». Крупная банка стояла на 1764.5, бейдж возраста
+        // прямо над ней — на 1745 (его НАРИСОВАННЫЙ центр, asset-map §2), и правая колонка модалки читалась
+        // как две несоосные наклейки. Бейдж не трогаем (он — живой HUD на своём эталонном месте), двигаем
+        // банку: dst.x = 1745, ровно ось бейджа.
+        // ⚠ Сдвиг влево упирается в кремовое поле окна-задачи (оно кончается на x=1625.5, и тест
+        // BigWidget_ClearsTheCreamPlates_WhereItCan требует, чтобы деньги были с ним разведены). Поэтому
+        // вместе с осью пересчитан и масштаб: ширина 227 даёт левый край 1631.5, т.е. 6 px чистого поля до
+        // плашки. k упал с 1.58 до 1.31 — копия по-прежнему крупнее HUD-виджета (173→227) и вдобавок села
+        // по ширине бейджа (212), отчего колонка «бейдж над банкой» читается как один блок.
+        private static readonly Vector4 BigMoneyDst = new(1745f, 869.85f, 227f, 315.71f);         // k=1.3106
         private static readonly Vector4 BigChildDst = new(234f, 540f, 431.87f, 466.41f);          // k=1.05
 
         /// <summary>Бокс ВНУТРЕННЕЙ КРОМКИ обводки батареи в HUD (замер по кадру, 1920×1080). Именно этот
@@ -687,6 +723,9 @@ namespace ThanksNoThanks
             StoryFieldRect.z - 2f * StoryTextPadX, StoryFieldRect.w - 2f * StoryTextPadY);
         /// <summary>Бейдж возраста — крупная шкала на него не налезает.</summary>
         public static Vector4 AgeBadgeBox => AgeBadgeRect;
+        /// <summary>НАРИСОВАННЫЙ бокс бейджа возраста (asset-map §2: 1639,392,212,207) — ось правой
+        /// колонки модалки, по которой выравнивается крупная банка.</summary>
+        public static readonly Vector4 AgeBadgeDrawnBox = new(1745f, 495.5f, 212f, 207f);
 
         // ---- КАНОН-ТЕКСТЫ D (docs/new_concept/host-content.md §4, выбор основательницы 2026-07-29) ----
         // Дословно. Проверяются против самого документа (NewScaleTutorialTests), чтобы копия не разъехалась
@@ -943,13 +982,19 @@ namespace ThanksNoThanks
         public Image TutorialModal => _tutorialModal;
         public Image TutorialButton => _tutorialButton;
         public Text TutorialButtonText => _tutorialButtonText;
-        public Text FinaleTitleText => _finaleTitle;
-        public Text FinaleCauseText => _finaleCause;
+        /// <summary>S11: фон финала — `end.png` целиком (кулисы + запечённые «ИТОГИ ШОУ» и плашка).</summary>
+        public Image FinaleBackground => _finaleBg;
+        /// <summary>S11: строка исхода («Ты дожил до N лет» + причина) в запечённой кремовой плашке.</summary>
+        public Text FinaleOutcomeText => _finaleOutcome;
+        /// <summary>S11: склеенный некролог в той же запечённой плашке, под строкой исхода.</summary>
         public Text FinaleStoryText => _finaleStory;
-        public Image FinaleStoryPlate => _finaleStoryPlate;
         public GameObject BlockBanner => _blockBanner;
+        /// <summary>S10: чёрный keyline вокруг BLOCK$-баннера (сосед НИЖЕ него).</summary>
+        public GameObject BlockBannerInk => _blockBannerInk;
         public Text CardPriceText => _cardPriceText;
         public Image CardPricePlate => _cardPricePlate;
+        /// <summary>S10: чёрный keyline вокруг чипа цены (сосед НИЖЕ него).</summary>
+        public Image CardPriceInk => _cardPriceInk;
         public GameObject BurnoutPlate => _burnoutPlate;
         public GameObject BreakupPlate => _breakupPlate;
         public GameObject BalancerMarker => _balancerMarker != null ? _balancerMarker.gameObject : null;
@@ -991,11 +1036,6 @@ namespace ThanksNoThanks
             ReflectRelationsMarker(relations, relRedZone);
         }
 
-        /// <summary>
-        /// Test hook: force the finale panel visible and render an arbitrary necrolog (title/cause/story)
-        /// into it, without driving a whole life — so a Layer-2 test can stress a worst-case LONG story
-        /// against the story plate. Mirrors the finale branch of <see cref="Refresh"/>.
-        /// </summary>
         /// <summary>Test/screenshot hook: raise a tutorial modal with the given body over live gameplay.</summary>
         public void DebugShowTutorial(string text)
         {
@@ -1056,12 +1096,17 @@ namespace ThanksNoThanks
             enabled = false;
         }
 
-        public void DebugRenderFinale(NecrologResult n)
+        /// <summary>
+        /// Test hook: force the finale panel visible and render an arbitrary necrolog into the baked plate,
+        /// without driving a whole life — so a Layer-2 test can stress a worst-case LONG story against the
+        /// measured cream field. Mirrors the finale branch of <see cref="Refresh"/>.
+        /// </summary>
+        public void DebugRenderFinale(NecrologResult n, int age = 100)
         {
             _openerPanel.SetActive(false);
             _gamePanel.SetActive(false);
             _finalePanel.SetActive(true);
-            RenderFinaleTexts(n);
+            RenderFinaleTexts(n, age);
         }
 
         // ---- Design-gate Layer-3 screenshot hooks: render a state overlay in a representative pose over the
@@ -1182,7 +1227,7 @@ namespace ThanksNoThanks
             ApplyAgeGates(58f);
             _cardText.text = "Пора подлечиться!";
             SetCardBlockedDim(true);
-            _blockBanner.SetActive(true);
+            SetBlockBannerVisible(true);
             ApplyPriceLabel(true, 100, blocked: true);
             _yesPlate.color = PlateMute; _noPlate.color = PlateMute;
             enabled = false;
@@ -1254,7 +1299,7 @@ namespace ThanksNoThanks
             _moneyText.text = FormatMoneyJar(0);
             _cardText.text = "Пора подлечиться!";
             SetCardBlockedDim(true);
-            _blockBanner.SetActive(true);
+            SetBlockBannerVisible(true);
             ApplyPriceLabel(true, 100, blocked: true);
             _yesPlate.color = PlateMute; _noPlate.color = PlateMute;
             for (int i = 0; i < AlarmCount; i++)
@@ -1328,33 +1373,12 @@ namespace ThanksNoThanks
         /// <summary>Layer-2 seam: продвинуть летящие звёзды на dt (проверка самоочистки).</summary>
         public void DebugAdvanceStars(float dt) => AdvanceStars(dt);
 
-        // Set the three finale texts and size the story plate to its content (short story → compact plate).
-        private void RenderFinaleTexts(NecrologResult n)
+        // Set the two finale labels that go INTO the baked plate. The plate itself is part of `end.png`, so
+        // nothing here resizes a plate any more — best-fit is what makes a 15-line necrolog fit the field.
+        private void RenderFinaleTexts(NecrologResult n, int age)
         {
-            _finaleTitle.text = n.Title;
-            _finaleCause.text = n.CauseLine;
+            _finaleOutcome.text = n.OutcomeBlock(age);
             _finaleStory.text = n.ComposeStory();
-            FitStoryPlate();
-        }
-
-        // Size the story plate HEIGHT to its content: a short story gets a compact plate (no stranded text in
-        // a huge navy box), a long story keeps the full clamped height and best-fit wraps inside the pill.
-        private void FitStoryPlate()
-        {
-            const float inset = 60f, minH = 170f, maxH = 360f;
-            var rt = _finaleStoryPlate.rectTransform;
-            var t = _finaleStory;
-            float textW = rt.rect.width - 2f * inset;
-            bool bf = t.resizeTextForBestFit;
-            int fs = t.fontSize;
-            t.resizeTextForBestFit = false;
-            t.fontSize = t.resizeTextMaxSize;   // measure at the largest size the plate would ever use
-            var settings = t.GetGenerationSettings(new Vector2(textW, 0f));
-            float ph = t.cachedTextGeneratorForLayout.GetPreferredHeight(t.text, settings) / t.pixelsPerUnit;
-            t.fontSize = fs;
-            t.resizeTextForBestFit = bf;
-            float h = Mathf.Clamp(ph + 2f * inset, minH, maxH);
-            rt.sizeDelta = new Vector2(rt.sizeDelta.x, h);
         }
 
         private void Awake()
@@ -1701,7 +1725,7 @@ namespace ThanksNoThanks
 
             // BLOCK$ visuals never apply during a crisis.
             SetCardBlockedDim(false);
-            _blockBanner.SetActive(false);
+            SetBlockBannerVisible(false);
             _cardPriceText.gameObject.SetActive(false);
             _cardPricePlate.gameObject.SetActive(false);
             ReflectCardTextBand();          // band free again → the thought/impulse text gets the full box
@@ -1856,7 +1880,11 @@ namespace ThanksNoThanks
             if (_cardRoot.gameObject.activeSelf != show) _cardRoot.gameObject.SetActive(show);
             if (_yesPlate.gameObject.activeSelf != show) _yesPlate.gameObject.SetActive(show);
             if (_noPlate.gameObject.activeSelf != show) _noPlate.gameObject.SetActive(show);
-            if (_timerGroup != null && _timerGroup.activeSelf != show) _timerGroup.SetActive(show);
+            // Купол прячется НЕ ТОЛЬКО на баннер-бите, но и под §D-модалкой (долг гейта 2026-08-05): время
+            // под ней и так заморожено, поэтому замерший полукруг торчал над затемнением «культёй» — читался
+            // как недорисованный элемент. Скрываем целиком; возвращается сам, как только модалка ушла.
+            bool dome = show && !_nsShowing;
+            if (_timerGroup != null && _timerGroup.activeSelf != dome) _timerGroup.SetActive(dome);
             // S4: the banner is a clean beat — the whole HUD row is hidden too (re-shown, age-gated, after).
             if (_hudRow != null && _hudRow.activeSelf != show) _hudRow.SetActive(show);
             // …и трубка вместе с рядом: она живёт на слое оверлеев (не в _hudRow), поэтому прячется явно.
@@ -2304,6 +2332,20 @@ namespace ThanksNoThanks
             // straight edges cutting across the sunburst rays (design-gate S10 fix).
             // Rounded red banner (bar-track 9-slice tinted red, navy-outlined white text) low on the card so
             // the dimmed «Пора подлечиться!» question still reads above it (S10). One sentence-case line.
+            // ЧЁРНЫЙ KEYLINE (долг гейта 2026-08-05): весь арт-пак несёт чёрный кант, и красный баннер с
+            // чипом цены были ЕДИНСТВЕННЫМИ фигурами экрана без него — голая заливка упиралась прямо в
+            // кремовое поле карточки. Кант строится тем же приёмом, что кант тревоги шкал: отдельный
+            // `bar-track`, покрашенный в INK, СОСЕДОМ и НИЖЕ (меньший siblingIndex) — он торчит кольцом
+            // из-под плашки на BlockKeylineInk со всех сторон. Толщина 4 px = верх коридора 3–4 из
+            // задания: у `bar-track` край мягкий (~1 px AA с каждой стороны), и на 3 px в кадре остаётся
+            // ОДНА сплошная чёрная строка — вдвое тоньше собственного keyline арта; на 4 их две.
+            var blockBannerInkImg = NewSprite("BlockBannerInk", _cardRoot, Sprite("bar-track"));
+            blockBannerInkImg.type = Image.Type.Sliced;
+            blockBannerInkImg.color = OnBarTrack(Ink);
+            _blockBannerInk = blockBannerInkImg.gameObject;
+            Anchor(blockBannerInkImg.rectTransform, new Vector2(0.5f, 0.2784f),
+                new Vector2(900 + 2f * BlockKeylineInk, 110 + 2f * BlockKeylineInk));
+
             var blockBannerImg = NewSprite("BlockBanner", _cardRoot, Sprite("bar-track"));
             blockBannerImg.type = Image.Type.Sliced;
             blockBannerImg.color = new Color(0.90f, 0.18f, 0.14f);   // punchy saturated red (S10 banner)
@@ -2317,7 +2359,7 @@ namespace ThanksNoThanks
             Inset(blockTxt.rectTransform, 40f);
             blockTxt.resizeTextForBestFit = true; blockTxt.resizeTextMinSize = 20; blockTxt.resizeTextMaxSize = 44;
             DisplayFx(blockTxt);
-            _blockBanner.SetActive(false);
+            SetBlockBannerVisible(false);
 
             // ---- BLOCK$ price sub-line (S10): the required amount, on any BLOCK$-priced card ----
             // A dark rounded plate (bar-track 9-slice, tinted Ink) BEHIND the text, sat just BELOW the
@@ -2326,9 +2368,31 @@ namespace ThanksNoThanks
             // Plate is created first (lower sibling index → drawn behind the text). Both are sized to the
             // text and shown/hidden together in ApplyPriceLabel.
             // «СТОИТ N ₽» (gold) when affordable · «НУЖНО N ₽» (light) when blocked.
+            // Тот же чёрный keyline, что у баннера (см. блок выше): сосед НИЖЕ чипа, размер = чип + 2×кант,
+            // пересчитывается вместе с чипом в ApplyPriceLabel (чип растёт по тексту).
+            _cardPriceInk = NewSprite("CardPriceInk", _cardRoot, Sprite("bar-track"));
+            _cardPriceInk.type = Image.Type.Sliced;
+            _cardPriceInk.color = OnBarTrack(Ink);
+            Anchor(_cardPriceInk.rectTransform, new Vector2(0.5f, 0.1604f),
+                new Vector2(360 + 2f * BlockKeylineInk, 78 + 2f * BlockKeylineInk));
+
             _cardPricePlate = NewSprite("CardPricePlate", _cardRoot, Sprite("bar-track"));
             _cardPricePlate.type = Image.Type.Sliced;
-            _cardPricePlate.color = Ink;                     // dark navy plate (S10 block-tag)
+            // ⚠ Заливка чипа — DEEP COBALT, а не INK. Чип был закрашен ровно тем же INK, что и его
+            // чёрный keyline, и кант получался НЕВИДИМЫМ (замер по кадру: и заливка, и кант рисовались
+            // как [10,10,27] — «обводка есть, а глазом её нет»). Тёмная плашка S10 при этом сохраняется:
+            // тёмный синий тег со светлым текстом, ровно тот же тон, каким в проекте уже нарисованы
+            // тёмные подложки (CobaltDeep), только теперь с настоящим чёрным кантом.
+            // ЦВЕТ ЧИПА, три числа — чтобы их больше не путали (Codex MINOR 2026-08-05):
+            //   • сырой тинт Image.color  = #22409C — токен, ПОДЕЛЁННЫЙ на заливку спрайта (OnBarTrack);
+            //   • рендер по модели sRGB   = #1F3A96 — тинт × заливка `bar-track`, т.е. РОВНО токен
+            //     CobaltDeep: OnBarTrack делит на заливку, uGUI умножает обратно (это и пинит тест);
+            //   • пиксель на кадре        = #1D3996 (замер по `inc7-blocked.png`, сплошная середина чипа).
+            // Расхождение ≤2/255 — не ошибка тинта: проект рендерит в ЛИНЕЙНОМ цветовом пространстве
+            // (ProjectSettings m_ActiveColorSpace: 1), а модель теста перемножает в sRGB. Тот же сдвиг
+            // ≤2/255 виден на красном баннере (модель #D02A22 → кадр #D02920) и на всех прочих
+            // OnBarTrack-плашках, поэтому тест пинит МОДЕЛЬ, а фактический пиксель задокументирован тут.
+            _cardPricePlate.color = OnBarTrack(CobaltDeep);
             // Bottom of the cream field (screen y≈850), under the block banner — the art-pack plate reaches
             // y≈972, so the old below-the-card anchor would now sit on the answer plates.
             Anchor(_cardPricePlate.rectTransform, new Vector2(0.5f, 0.1604f), new Vector2(360, 78));
@@ -2339,6 +2403,7 @@ namespace ThanksNoThanks
             // the «₽» onto a second line that hung off the dark plate. Overflow makes that unreachable.
             _cardPriceText.horizontalOverflow = HorizontalWrapMode.Overflow;
             DisplayFx(_cardPriceText);
+            _cardPriceInk.gameObject.SetActive(false);
             _cardPricePlate.gameObject.SetActive(false);
             _cardPriceText.gameObject.SetActive(false);
 
@@ -3226,47 +3291,103 @@ namespace ThanksNoThanks
             _childGroup.SetActive(false);
         }
 
+        // ---- S11 ФИНАЛ «ИТОГИ ШОУ»: посадка снята ИНСТРУМЕНТАЛЬНО с `end.png` (PIL) -------------------
+        // Решение asset-map §11-12: фон = `end.png` ЦЕЛИКОМ, вместе с запечёнными «ИТОГИ ШОУ» и кремовой
+        // плашкой; второй слой плашки НЕ рисуется, заголовок НЕ рисуется. Драйвер кладёт в плашку только
+        // текст (исход + некролог) и вешает зелёную CTA под ней.
+        //
+        // ⚠ ПОСАДКА ФОНА. Эталон/ассет — 2752×1536, это аспект 1.7917, а кадр 16:9 = 1.7778. Значит один
+        // общий множитель «эталон ×0.6977» даёт 1920×1071.6 — сверху и снизу остались бы полосы по 4.2 px,
+        // сквозь которые светили бы вращающиеся лучи HUD. Поэтому фон садится ПО ЗАПОЛНЕНИЮ (cover):
+        //   k = max(1920/2752, 1080/1536) = 0.703125 → спрайт 1935×1080 по центру кадра,
+        //   за левый и правый край уходит по 7.75 px (там только кулисы, ни одного смыслового элемента).
+        // Расхождение с табличной сверкой ×0.6977 при этом ≤4.7 px по X и ≤2.6 px по Y — внутри допуска
+        // ±10 гейта, а полос в кадре нет.
+        /// <summary>Множитель посадки эталона финала в кадр (cover, см. блок выше).</summary>
+        public const float FinaleBgScale = 0.703125f;
+        /// <summary>Размер спрайта `finale-bg-v2` в кадре: 2752×1536 × <see cref="FinaleBgScale"/>.</summary>
+        public const float FinaleBgW = 1935f, FinaleBgH = 1080f;
+
+        // ЗАПЕЧЁННОЕ КРЕМОВОЕ ПОЛЕ плашки — залив-заполнением по `end.png`: заливка занимает 498…2251 по X
+        // и 405…1259 по Y в файле; через cover-посадку это (cx, cy-от-верха, w, h) ниже. Именно это поле, а
+        // не внешний бокс плашки `343,70,1233,816` из asset-map §5.8 (тот снят с загрязнённого bbox: его
+        // верх 70 попал на глифы запечённого заголовка, реальный верх кремового поля — 285).
+        /// <summary>Кремовое поле запечённой плашки на экране (cx, cy-от-верха, w, h).</summary>
+        public static readonly Vector4 FinaleCreamField = new(958.94f, 585.00f, 1232.57f, 600.46f);
+        // БЕЗОПАСНЫЙ ТЕКСТОВЫЙ БОКС внутри поля. Поле не прямоугольник: у него скруглённые «срезанные»
+        // углы, слева в него вгрызается запечённая звезда (до x≈403 на y 474…556), справа-внизу — ещё две
+        // (x 1411…1439 на y 833…865). Бокс ниже — крупнейший прямоугольник по оси поля, который целиком
+        // лежит на креме, с запасом от всех трёх выкусов (проверено попиксельно по `end.png`).
+        /// <summary>Текстовый бокс внутри кремового поля (cx, cy-от-верха, w, h).</summary>
+        public static readonly Vector4 FinaleTextBox = new(959f, 576f, 1058f, 492f);
+        // Раскладка внутри бокса повторяет эталон: строка исхода вверху, некролог — ниже.
+        //   эталон: исход  y 334…442 (2 строки, шаг 60, кегль ≈56) · некролог y 476…820 (шаг 40, кегль ≈33)
+        private static readonly Vector4 FinaleOutcomeRect = new(959f, 391f, 1058f, 122f);   // y 330…452
+        private static readonly Vector4 FinaleStoryRect = new(959f, 644f, 1058f, 356f);     // y 466…822
+        /// <summary>Кегли строки исхода (Arimo Bold): верх — с эталона, низ — предел ужатия.</summary>
+        public const int FinaleOutcomeMaxSize = 56, FinaleOutcomeMinSize = 34;
+        /// <summary>
+        /// Кегли некролога (Rubik). Верх 34 — кегль эталона. НИЗ 24 — задокументированный порог
+        /// читаемости: длиннейший реальный некролог колоды (15 строк лимита scenes-table кол.11–12,
+        /// самые длинные строки CSV, ≈820 знаков склейки) садится в бокс на ≈28 px, т.е. с запасом над
+        /// полом; ниже 24 px на кабинетном экране текст перестаёт читаться, и упор в пол здесь означал бы
+        /// не «ужали», а «контент перерос плашку» — тогда режется лимит строк, а не кегль.
+        /// </summary>
+        public const int FinaleStoryMaxSize = 34, FinaleStoryMinSize = 24;
+
+        // CTA рестарта. На эталоне кнопки НЕТ (как и на опенере) — место выбрано по композиции: плашка
+        // кончается на y≈929.5 (внешний синий кант, замер по `end.png`), ниже до края кадра 150 px чистой
+        // сцены. CTA встаёт по центру этой полосы (центр y 1005), соосно плашке, с полем 17.5 px сверху
+        // до плашки и 17 px снизу до края. Пропорции — ровно как у CTA опенера (кант 116 / плашка 104).
+        private static readonly Vector4 FinaleCtaRect = new(959f, 1005f, 860f, 104f);
+        private static readonly Vector4 FinaleCtaEdgeRect = new(959f, 1005f, 872f, 116f);
+        /// <summary>Низ запечённой плашки (внешний синий кант) на экране — CTA обязана быть НИЖЕ.</summary>
+        public const float FinalePlateBottom = 929.5f;
+
+        /// <summary>CTA финала — называет ФИЗИЧЕСКИЙ контрол, ОДНОЙ строкой через «—», ровно как опенер
+        /// (<see cref="OpenerStartHintText"/>): раньше здесь стоял перенос строки вместо тире, и одна и та
+        /// же формула управления печаталась в игре двумя разными способами.</summary>
+        public const string FinaleRestartHintText = "НАЧАТЬ ЗАНОВО — ЖМИ ЗЕЛЁНУЮ";
+
         private void BuildFinale(Transform parent)
         {
             _finalePanel = NewGroup("Finale", parent);
 
-            _finaleTitle = NewText("FinaleTitle", _finalePanel.transform,
-                "СПАСИБО ЗА ИГРУ!", 92, TextAnchor.MiddleCenter, Energy, _display);
-            AnchorPx(_finaleTitle.rectTransform, 960f, 185f, 1700f, 175f);
-            DisplayFx(_finaleTitle);
+            // (1) Фон — `end.png` целиком (кулисы, софит, запечённые «ИТОГИ ШОУ» и кремовая плашка).
+            // ПЕРВЫМ ребёнком панели: он же перекрывает общий вращающийся санбёрст HUD, поэтому на финале
+            // фон статичный, как и требует спек §4-H.
+            _finaleBg = NewSprite("FinaleBg", _finalePanel.transform, Sprite("finale-bg-v2"));
+            _finaleBg.type = Image.Type.Simple;
+            var brt = _finaleBg.rectTransform;
+            brt.anchorMin = brt.anchorMax = new Vector2(0.5f, 0.5f);
+            brt.pivot = new Vector2(0.5f, 0.5f);
+            brt.anchoredPosition = Vector2.zero;
+            brt.sizeDelta = new Vector2(FinaleBgW, FinaleBgH);
 
-            // Cause line (S11/S12): yellow, seated on a DARK navy pill. Bare on the multicolour sunburst the
-            // thin yellow fill washed out and read as hollow/outline-only; on a solid dark plate the fill is
-            // high-contrast and solid. bar-track 9-slice tinted Ink; best-fit so a long phrase never clips.
-            var causePlate = NewSprite("CausePlate", _finalePanel.transform, Sprite("bar-track"));
-            causePlate.type = Image.Type.Sliced;
-            causePlate.color = Ink;
-            AnchorPx(causePlate.rectTransform, 960f, 340f, 1300f, 108f);
-            _finaleCause = NewText("FinaleCause", causePlate.transform,
-                "", 44, TextAnchor.MiddleCenter, Bulb, _body);
-            var crt = _finaleCause.rectTransform;
-            crt.anchorMin = Vector2.zero; crt.anchorMax = Vector2.one;
-            crt.offsetMin = new Vector2(56f, 20f); crt.offsetMax = new Vector2(-56f, -20f);   // inside the pill, padded
-            _finaleCause.resizeTextForBestFit = true; _finaleCause.resizeTextMinSize = 26; _finaleCause.resizeTextMaxSize = 46;
-            _finaleCause.verticalOverflow = VerticalWrapMode.Truncate;
-            DisplayFx(_finaleCause);
+            // (2) Строка исхода — В запечённую плашку, вверх её кремового поля. Arimo Bold, INK
+            // (канон §12-4), БЕЗ DisplayFx: тёмная обводка по тёмным глифам на светлом креме только
+            // мажет их в кляксу (та же причина, что у вопроса карточки).
+            _finaleOutcome = NewText("FinaleOutcome", _finalePanel.transform,
+                "", FinaleOutcomeMaxSize, TextAnchor.UpperCenter, Ink, _display);
+            AnchorPx(_finaleOutcome.rectTransform, FinaleOutcomeRect.x, FinaleOutcomeRect.y,
+                FinaleOutcomeRect.z, FinaleOutcomeRect.w);
+            _finaleOutcome.resizeTextForBestFit = true;
+            _finaleOutcome.resizeTextMinSize = FinaleOutcomeMinSize;
+            _finaleOutcome.resizeTextMaxSize = FinaleOutcomeMaxSize;
+            _finaleOutcome.verticalOverflow = VerticalWrapMode.Truncate;   // best-fit честно держит и ВЫСОТУ
 
-            // Glued necrolog story INSIDE a dark navy plate (S11/S12) — never bare on the background.
-            // bar-track 9-slice tinted deep cobalt; best-fit shrinks a long (up to 15-line) story to fit the
-            // plate's visible pill. FitStoryPlate() then sizes the plate HEIGHT to the content so a short
-            // story doesn't float in a huge empty plate (a long story keeps the full clamped height).
-            _finaleStoryPlate = NewSprite("StoryBox", _finalePanel.transform, Sprite("bar-track"));
-            _finaleStoryPlate.type = Image.Type.Sliced;
-            _finaleStoryPlate.color = CobaltDeep;
-            AnchorPx(_finaleStoryPlate.rectTransform, 960f, 620f, 1400f, 360f);
-            _finaleStory = NewText("FinaleStory", _finaleStoryPlate.transform,
-                "", 32, TextAnchor.MiddleCenter, TextLight, _body);
-            Inset(_finaleStory.rectTransform, 60f);
-            _finaleStory.resizeTextForBestFit = true; _finaleStory.resizeTextMinSize = 18; _finaleStory.resizeTextMaxSize = 34;
-            _finaleStory.verticalOverflow = VerticalWrapMode.Truncate;  // best-fit now honours HEIGHT → the worst-case long story shrinks to fit inside the pill instead of spilling past the plate
-            DisplayFx(_finaleStory);
+            // (3) Некролог — туда же, под строкой исхода. Rubik, INK, по центру своего бокса (короткая
+            // FATAL-история встаёт в середину поля, а не жмётся к строке исхода).
+            _finaleStory = NewText("FinaleStory", _finalePanel.transform,
+                "", FinaleStoryMaxSize, TextAnchor.MiddleCenter, Ink, _body);
+            AnchorPx(_finaleStory.rectTransform, FinaleStoryRect.x, FinaleStoryRect.y,
+                FinaleStoryRect.z, FinaleStoryRect.w);
+            _finaleStory.resizeTextForBestFit = true;
+            _finaleStory.resizeTextMinSize = FinaleStoryMinSize;
+            _finaleStory.resizeTextMaxSize = FinaleStoryMaxSize;
+            _finaleStory.verticalOverflow = VerticalWrapMode.Truncate;
 
-            // Restart CTA. The plate IS the green cabinet button its label names, so its fill must be the
+            // (4) Restart CTA. The plate IS the green cabinet button its label names, so its fill must be the
             // GREEN token #05CE51 — `plate-yes` carries its own paler art green (#5CBF5F), and a uGUI tint
             // only ever MULTIPLIES, so no tint on that sprite can reach the token (design gate 2026-07-31:
             // «зелёный финала бледнее опенера»). Built exactly like the opener CTA instead — dark Ink rim +
@@ -3274,17 +3395,18 @@ namespace ThanksNoThanks
             var againEdge = NewSprite("AgainPlateEdge", _finalePanel.transform, Sprite("bar-track"));
             againEdge.type = Image.Type.Sliced;
             againEdge.color = OnBarTrack(Ink);
-            AnchorPx(againEdge.rectTransform, 960f, 936f, 614f, 224f);
+            AnchorPx(againEdge.rectTransform, FinaleCtaEdgeRect.x, FinaleCtaEdgeRect.y,
+                FinaleCtaEdgeRect.z, FinaleCtaEdgeRect.w);
 
             var again = NewSprite("AgainPlate", _finalePanel.transform, Sprite("bar-track"));
             again.type = Image.Type.Sliced;
             again.color = OnBarTrack(GoGreen);
-            AnchorPx(again.rectTransform, 960f, 936f, 600f, 210f);   // taller pill + comfortable bottom margin
+            AnchorPx(again.rectTransform, FinaleCtaRect.x, FinaleCtaRect.y, FinaleCtaRect.z, FinaleCtaRect.w);
             var againText = NewText("AgainText", again.transform,
-                "НАЧАТЬ ЗАНОВО\nЖМИ ЗЕЛЁНУЮ", 40, TextAnchor.MiddleCenter, Ink, _display);
-            Inset(againText.rectTransform, 34f);   // text rect well INSIDE the visible pill (bar-track cuts ~16px corners) → padding all sides
-            againText.resizeTextForBestFit = true; againText.resizeTextMinSize = 26; againText.resizeTextMaxSize = 40;
-            againText.verticalOverflow = VerticalWrapMode.Truncate;  // best-fit now honours HEIGHT → both rows fit the pill
+                FinaleRestartHintText, 46, TextAnchor.MiddleCenter, Ink, _display);
+            Inset(againText.rectTransform, 26f);   // ≥ видимого скругления bar-track (16) → глифы всегда на плашке
+            againText.resizeTextForBestFit = true; againText.resizeTextMinSize = 28; againText.resizeTextMaxSize = 46;
+            againText.verticalOverflow = VerticalWrapMode.Truncate;
             // No DisplayFx: dark Ink text on the green pill needs no dark outline (it muddies it to a blob).
         }
 
@@ -3625,6 +3747,7 @@ namespace ThanksNoThanks
             _nsOverlay.SetActive(true);
             ReflectNewScaleHold();
             SyncPause();
+            ReflectBannerBeat();   // купол уходит ЭТИМ же кадром (иначе «культя» мигала бы один кадр)
 
             // Ребёнок: условие — ПОДНЯТЬ ЗВОНОК, поэтому звонок заводится принудительно (обычный планировщик
             // 15–25 с под замороженным временем не сработал бы никогда). Трубка выезжает и звонит, пока не
@@ -3724,6 +3847,7 @@ namespace ThanksNoThanks
             _nsFade.alpha = 1f;
             if (reward) StarBurst();      // §6-салют «всё сделано верно» — ПОСЛЕ фейда, ДО снятия паузы
             SyncPause();
+            ReflectBannerBeat();          // …и купол возвращается тем же кадром, что снялась модалка
             // Та же причина, что у DismissTutorial: открытие происходит СЕРЕДИНОЙ карточки, поэтому
             // возрастные гейты и значения HUD пересчитываются прямо здесь — виджет живой сразу.
             if (_game != null && _game.State == GameState.Playing)
@@ -3937,7 +4061,9 @@ namespace ThanksNoThanks
             }
             else if (finale && _game.Necrolog != null)
             {
-                RenderFinaleTexts(_game.Necrolog);
+                // Возраст исхода — тот же счётчик, что рисует бейдж HUD (FloorToInt), т.е. «дожил до N»
+                // совпадает с последним числом, которое игрок видел на экране.
+                RenderFinaleTexts(_game.Necrolog, Mathf.FloorToInt(_game.Age));
             }
         }
 
@@ -3948,7 +4074,7 @@ namespace ThanksNoThanks
             _cardText.text = c != null ? c.Question : "";
             bool blocked = _game.CurrentCardBlocked;
             SetCardBlockedDim(blocked);           // S10: dim the card (frame tint) + red banner when unaffordable
-            _blockBanner.SetActive(blocked);
+            SetBlockBannerVisible(blocked);
             RefreshPriceLabel();                  // S10: show the required amount on any BLOCK$ card
             // Rubric banner (S4): announce on a TIMELINE milestone; clear it on any non-milestone card
             // (so it never lingers onto the card after the milestone). The bubble is answer-driven and
@@ -4023,12 +4149,21 @@ namespace ThanksNoThanks
             ApplyPriceLabel(has, has ? _game.CurrentCardPrice : 0, _game.CurrentCardBlocked);
         }
 
+        // BLOCK$ banner + its black keyline go up and down together (the keyline is a separate sibling
+        // BELOW the banner, so it can never be toggled independently and leave a bare red plate).
+        private void SetBlockBannerVisible(bool show)
+        {
+            if (_blockBannerInk != null && _blockBannerInk.activeSelf != show) _blockBannerInk.SetActive(show);
+            if (_blockBanner != null && _blockBanner.activeSelf != show) _blockBanner.SetActive(show);
+        }
+
         private void ApplyPriceLabel(bool hasPrice, double price, bool blocked)
         {
             if (!hasPrice)
             {
                 _cardPriceText.gameObject.SetActive(false);
                 _cardPricePlate.gameObject.SetActive(false);
+                _cardPriceInk.gameObject.SetActive(false);
                 ReflectCardTextBand();   // band may now be free → the question gets its full box back
                 return;
             }
@@ -4042,7 +4177,12 @@ namespace ThanksNoThanks
             float th = _cardPriceText.preferredHeight;
             _cardPriceText.rectTransform.sizeDelta = new Vector2(tw + 4f, th);   // +4: metric rounding slack
             _cardPricePlate.rectTransform.sizeDelta = new Vector2(tw + 64f, th + 28f);
+            // …и keyline вокруг чипа — ровно на BlockKeylineInk шире с каждой стороны (чип растёт по тексту,
+            // поэтому кант пересчитывается здесь же, а не остаётся на размере из BuildGamePanel).
+            _cardPriceInk.rectTransform.sizeDelta =
+                _cardPricePlate.rectTransform.sizeDelta + new Vector2(2f * BlockKeylineInk, 2f * BlockKeylineInk);
 
+            _cardPriceInk.gameObject.SetActive(true);
             _cardPricePlate.gameObject.SetActive(true);
             _cardPriceText.gameObject.SetActive(true);
             ReflectCardTextBand();   // band occupied → the question box ends above it

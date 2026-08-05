@@ -33,6 +33,32 @@ namespace ThanksNoThanks.Tests.PlayMode
             return Necrolog.Build("спокойная старость", entries);
         }
 
+        // The WORST case the finale can ever have to draw: the 14 longest necrolog lines of the live deck
+        // + the fixed parents line (= the 15-line cap of scenes-table кол.11–12) under the longest cause.
+        // The design gate reads this frame to judge the legibility floor of the best-fit shrink.
+        private static NecrologResult LongestRealNecrolog()
+        {
+            var csv = Resources.Load<TextAsset>("scenes");
+            var lines = new System.Collections.Generic.List<string>();
+            foreach (var c in CardLoader.ParseAll(csv.text))
+            {
+                if (!string.IsNullOrEmpty(c.YesNecrolog)) lines.Add(c.YesNecrolog);
+                if (!string.IsNullOrEmpty(c.NoNecrolog)) lines.Add(c.NoNecrolog);
+            }
+            lines.Sort((a, b) => b.Length.CompareTo(a.Length));
+            var entries = new System.Collections.Generic.List<NecrologEntry>();
+            for (int i = 0; i < Necrolog.MaxLines - 1 && i < lines.Count; i++)
+                entries.Add(new NecrologEntry { Age = i, Order = i, Line = lines[i], IsRond = false });
+            return Necrolog.Build("вы сунули палец в розетку", entries);
+        }
+
+        /// <summary>Death age for the finale poses — LIFECHOICES_SHOT_AGE, else the pose's own default.</summary>
+        private static int ShotAge(int fallback)
+        {
+            var raw = Environment.GetEnvironmentVariable("LIFECHOICES_SHOT_AGE");
+            return !string.IsNullOrEmpty(raw) && int.TryParse(raw, out var a) ? a : fallback;
+        }
+
         [UnityTest]
         public IEnumerator Capture_Arcade_Frame_NoMagenta()
         {
@@ -79,9 +105,17 @@ namespace ThanksNoThanks.Tests.PlayMode
                     driver.enabled = false;
                     break;
                 case "finale":
-                    // S11: the payoff screen with a real necrolog, so the design gate can read the
-                    // «НАЧАТЬ ЗАНОВО — ЖМИ ЗЕЛЁНУЮ» restart CTA against the founder's control language.
-                    driver.DebugRenderFinale(SampleNecrolog());
+                    // S11: the payoff screen (end.png + text in the baked plate) with an ordinary death —
+                    // the design gate reads the seating against `explainers/Экран концовка.png`.
+                    // LIFECHOICES_SHOT_AGE overrides the death age, so the gate can also LOOK at the other
+                    // branch of the genitive-after-«до» rule («до 41 года» vs the default «до 78 лет»).
+                    driver.DebugRenderFinale(SampleNecrolog(), ShotAge(78));
+                    driver.enabled = false;
+                    break;
+                case "finalelong":
+                    // …and the same screen with the LONGEST necrolog the deck can produce (15-line cap):
+                    // the frame the legibility floor of the best-fit shrink is judged on.
+                    driver.DebugRenderFinale(LongestRealNecrolog(), 100);
                     driver.enabled = false;
                     break;
                 default: driver.DebugPreviewArcadeShot(); break;
