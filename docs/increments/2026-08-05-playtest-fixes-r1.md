@@ -224,4 +224,4 @@
 ## 6. Playtest verdict
 
 `Playtest ok:` —
-`Landed:` —
+`Landed:` 7d133eb (2026-08-05)
