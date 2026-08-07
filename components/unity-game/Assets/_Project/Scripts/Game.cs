@@ -92,12 +92,23 @@ namespace ThanksNoThanks
 
         // ---- live energy (tunable; canon §Энергия) ----
         public const int EnergyOpenAge = 25;              // энергия открывается в 25 (YA05)
-        // Drain is INTENTIONALLY steeper than health's: energy REQUIRES active breathing (founder
-        // Gate-2 r3). Passive → burnout mid-adulthood → «полное выгорание» if ignored. A valid breath
-        // cadence (≤1.5s apart, +3% each) recovers ≥2%/s, more than offsetting this — so it's doable,
-        // it just costs hand-time vs cranking+answering. #1 energy tunable the founder will feel-tune.
+        // Drain is INTENTIONALLY steeper than health's: energy REQUIRES active input (founder Gate-2 r3).
+        // Passive → burnout mid-adulthood → «полное выгорание» if ignored.
         public const double EnergyDrainPerSec = 1.7;      // дренаж ≈1.7%/сек, пока энергия открыта
-        public const int BreathEnergyGain = 3;            // корректный ритм-цикл дыхания → +3%
+        // ⚠ РЕДИЗАЙН 2026-08-07 (живой плейтест, дословно: «просто зажать датчик высоты, пока батарейка не
+        // заполнится»). Ритм-механика (импульс на подъёме + окно 0.4–3.0 с, +3% за валидный вдох) СНЯТА.
+        // Теперь энергия — УДЕРЖАНИЕ: пока датчик физически поднят, батарея наполняется с этой скоростью.
+        // Число выведено из контракта инкремента, а не «на глаз»: туториал стартует с
+        // <see cref="EnergyOpenValue"/> = 20 %, а его условие — ПОЛНАЯ батарея, значит 80 пунктов должны
+        // набираться за обещанные 4–6 с ⇒ 13.3…20 %/с; берём середину, 16 %/с (ровно 5.0 с под модалкой,
+        // где дренаж заморожен, и ≈5.6 с в живой игре, где он вычитается).
+        public const double EnergyRegenPerSec = 16.0;
+        // Значение шкалы В МОМЕНТ ОТКРЫТИЯ (25, карточка YA05 «первая усталость»). До 2026-08-07 энергия
+        // открывалась ПОЛНОЙ (100 %), и задача «держи, пока батарейка не заполнится» была бы уже выполнена
+        // на первом кадре — экран ушёл бы, не потребовав ничего. Открытие на 20 % и буквально, и по смыслу
+        // канона: устал — вот тебе шкала. Берётся МИНИМУМ с текущим значением, чтобы открытие никогда не
+        // ДАРИЛО энергию игроку, которого карточки уже просадили ниже.
+        public const int EnergyOpenValue = 20;
 
         // ---- burnout (temporary; canon §Энергия §Выгорание) ----
         public const int BurnoutEnterEnergyAtOrBelow = 10; // входит при энергии ≤10%
@@ -105,7 +116,7 @@ namespace ThanksNoThanks
         public const double BurnoutIncomeMult = 0.5;       // крутилка «тяжелеет» — доход ×0.5
 
         // ---- live relationships balancer (tunable; canon §Отношения) ----
-        // The fourth live scale: a balancer to hold inside a zone while cranking/breathing/answering.
+        // The fourth live scale: a balancer to hold inside a zone while cranking/holding the sensor/answering.
         // Opens at 20 (YA03 «первая любовь»), starts at 55% (Scales.Reset), target zone 40–75%.
         public const int RelationshipsOpenAge = 20;        // балансир открывается в 20 (YA03, OPEN:Отн)
         public const int RelZoneMin = 40;                  // ниже зелёной зоны (жёлтый) — начинает дрейфовать/рисковать
@@ -157,7 +168,7 @@ namespace ThanksNoThanks
 
         // ---- depression / «тёмная полоса» (CR09) mini-game (tunable; canon crisis-content.md §1) ----
         // After the crisis resolves, a RANDOM_TRIGGER roll may drop the show into depression: a HARD
-        // grayscale «собраться» mini-game DELIBERATELY OPPOSITE to the energy breathing (fast even rhythm).
+        // grayscale «собраться» mini-game DELIBERATELY OPPOSITE to the energy sensor (a steady HOLD).
         // Here the pulse is SLOW and SPARSE — wait and catch, don't mash. All values are dt/seed-injected.
         public const double DepressionChance = 0.5;        // per-life probability the crisis tail → depression
         public const int DepressionGraySteps = 5;          // 5 gray steps: 5 = full B&W, 0 = full colour (exit)
@@ -203,7 +214,12 @@ namespace ThanksNoThanks
         //      authoritative for card Δ, this layer decays/drains it in real time via a fractional
         //      accumulator so sub-1%-per-second steps integrate exactly and legacy Δ tests are untouched) ----
         private double _healthDecayFrac;    // accumulated fractional health decay pending a whole −1
-        private double _energyDrainFrac;    // accumulated fractional energy drain pending a whole −1
+        // ЗНАКОВЫЙ аккумулятор энергии: минус — дренаж, плюс — реген под поднятым датчиком. Один на оба
+        // направления, чтобы «дожал полсекунды и отпустил» не терялось в округлении до целого процента.
+        private double _energyFrac;
+        // УДЕРЖИВАЕМЫЙ сигнал «датчик высоты поднят» на ЭТОТ тик (см. GameInput.EnergyHold). Ставится
+        // вводом, гасится в начале каждого Tick — ровно модель оси балансира (_relAxis).
+        private bool _breathHeld;
         private double _healthDecayMult = 1.0; // set by LT01 (×2 забросил / ×0.5 занялся)
         private Card _lt08;                  // condition-triggered system heal card (from DeckPlan)
         private bool _lt08Triggered;         // single-shot per life
@@ -376,7 +392,8 @@ namespace ThanksNoThanks
         /// <summary>
         /// MODAL-TUTORIAL variant of <see cref="Paused"/> (increment «экран появления новой шкалы», D).
         /// The D-screen does not close on a button: it closes only when the player actually WORKS the new
-        /// scale's control (crank a tick / breathe up / bring the marker into the zone / pick up a call).
+        /// scale's control (crank ticks / hold the height sensor until the battery fills / bring the marker into
+        /// the zone / pick up a call).
         /// So the freeze must be split in two:
         /// <list type="bullet">
         /// <item>time keeps standing still — <see cref="Tick"/> still returns on <see cref="Paused"/>, so age,
@@ -384,10 +401,11 @@ namespace ThanksNoThanks
         /// <item>but the four scale INPUTS stay live — the crank, the breath, the balancer axis and the child
         /// press are no longer swallowed by the pause, otherwise the exit condition would be unreachable.</item>
         /// </list>
-        /// The ONLY thing that still integrates under this flag is the balancer's held axis (see
-        /// <see cref="TickModalBalancer"/>): the marker has to MOVE while the player pushes the lever, or the
-        /// «hold it in the zone» task would be a dead control. Drift, the over-attention penalty and the
-        /// breakup clock stay frozen — this is a pause, not gameplay.
+        /// The only things that still INTEGRATE under this flag are the two HELD controls: the balancer's
+        /// axis (<see cref="TickModalBalancer"/>) — the marker has to MOVE while the player pushes the lever —
+        /// and the height sensor (<see cref="TickModalBreath"/>) — the battery has to FILL while the player
+        /// holds it, that being the literal task of the energy screen. Drift, the over-attention penalty, the
+        /// breakup clock and the energy DRAIN stay frozen — this is a pause, not gameplay.
         /// Ignored unless <see cref="Paused"/> is also set. Cleared by the driver together with the pause.
         /// </summary>
         public bool PausedInputsLive { get; set; }
@@ -461,7 +479,7 @@ namespace ThanksNoThanks
         public event Action<Card, AnswerSide> AnswerResolved;
         /// <summary>Fired the first time money opens in a life (drives the S5 tutorial overlay + pause).</summary>
         public event Action MoneyOpened;
-        /// <summary>Fired the first time energy opens (Age 25) — drives the S5 «дыхание» hint + pause.</summary>
+        /// <summary>Fired the first time energy opens (Age 25) — drives the §D «датчик высоты» screen + pause.</summary>
         public event Action EnergyOpened;
         /// <summary>Fired the first time health starts decaying (Age 30) — drives the S5 health hint + pause.</summary>
         public event Action HealthOpened;
@@ -539,8 +557,24 @@ namespace ThanksNoThanks
         public int DeckCount => _deck.Count;
         public int CardIndex => _index;
 
-        /// <summary>Route a semantic input into the current state. The ONLY entry point for input.</summary>
-        public void HandleInput(GameInput input)
+        /// <summary>
+        /// Route a semantic input into the current state. The ONLY entry point for input.
+        ///
+        /// ВОЗВРАЩАЕТ «ПРИНЯТО ШКАЛОЙ»: true — только если ввод действительно ушёл в живую механику СВОЕЙ
+        /// шкалы (ответ на карточку → здоровье, крутилка → деньги, датчик высоты → энергия, ось → отношения),
+        /// то есть игрок прямо сейчас поработал этой шкалой. Именно по этому признаку драйвер открывает
+        /// §6-окно «недавнего ввода» (салют даётся за КАЛИБРОВКУ, а не за нажатие).
+        ///
+        /// FALSE отдают все остальные исходы, и это НЕ мелочь:
+        ///  • кризис и депрессия ГЛУШАТ шкальные контролы (крутилка/датчик/ось инертны) либо ПЕРЕНАЗНАЧАЮТ
+        ///    рычаги ДА/НЕТ под блиц/импульс — это не ответ на карточку и не калибровка шкалы;
+        ///  • шкала ещё не открыта или идёт «глухая» пауза (<see cref="InputsFrozen"/>) — ввод отвергнут;
+        ///  • служебные вводы без шкалы: подтверждение на опенере/финале, ловля импульса в депрессии,
+        ///    кнопка ребёнка.
+        /// Без этого «нажал, но механика отвергла» открывало бы окно §6 — и рост шкалы КАРТОЧКОЙ внутри
+        /// окна выдавал бы салют за чужую работу.
+        /// </summary>
+        public bool HandleInput(GameInput input)
         {
             switch (State)
             {
@@ -571,18 +605,23 @@ namespace ThanksNoThanks
                         else if (input == GameInput.AnswerYes) ResolveImpulse(true);
                         break;
                     }
-                    if (input == GameInput.AnswerYes) Answer(true);
-                    else if (input == GameInput.AnswerNo) Answer(false);
-                    else if (input == GameInput.MoneyTick) Crank();
-                    else if (input == GameInput.EnergyPulse) Breathe(); // already rhythm-validated by the driver
-                    else if (input == GameInput.RelationUp) SetRelationAxis(+1);
-                    else if (input == GameInput.RelationDown) SetRelationAxis(-1);
-                    else if (input == GameInput.ChildPress) ChildPress();
+                    if (input == GameInput.AnswerYes || input == GameInput.AnswerNo)
+                    {
+                        if (CurrentCard == null) return false;   // колода исчерпана / докат — отвечать нечем
+                        Answer(input == GameInput.AnswerYes);
+                        return true;
+                    }
+                    if (input == GameInput.MoneyTick) return Crank();
+                    if (input == GameInput.EnergyHold) return HoldBreath();  // датчик поднят ЭТОТ кадр
+                    if (input == GameInput.RelationUp) return SetRelationAxis(+1);
+                    if (input == GameInput.RelationDown) return SetRelationAxis(-1);
+                    if (input == GameInput.ChildPress) ChildPress();
                     break;
                 case GameState.Finale:
                     if (input == GameInput.Confirm) ToOpener();
                     break;
             }
+            return false;
         }
 
         public void StartLife()
@@ -618,14 +657,30 @@ namespace ThanksNoThanks
         /// <summary>Advance injected time: event-age progression + card countdown (timeout = random answer).</summary>
         public void Tick(float dt)
         {
+            // Потребляем УДЕРЖИВАЕМЫЙ сигнал датчика ровно за этот тик (модель оси балансира): источник
+            // переиздаёт его каждый кадр, пока рука держит датчик, поэтому «залипнуть» латч не может — если
+            // игрок отпустил, следующий тик уже видит false. Гасим ДО всех ранних return'ов (кризис/
+            // депрессия/пауза/не-Playing), чтобы сигнал не пронёсся в следующий тик.
+            //
+            // …но ТОЛЬКО на тике, который реально ИНТЕГРИРУЕТ время (dt > 0). Tick(0) — это кадр, за который
+            // не прошло ни секунды: он не вправе ни вырастить батарею, ни СЪЕСТЬ удержание. Иначе кадр с
+            // нулевым dt (пауза кадра, первый кадр после загрузки, ручной Tick(0) в тесте) молча съедал бы
+            // поднятый датчик, и игрок терял бы удержание, которое честно держал.
+            bool breathHeld = false;
+            if (dt > 0f)
+            {
+                breathHeld = _breathHeld;
+                _breathHeld = false;
+            }
+
             if (State != GameState.Playing) return;
             if (Paused)
             {
                 // Tutorial overlay up — age, drains, cost-of-living and the card timer stay frozen. The ONE
-                // exception is the D-modal (PausedInputsLive): there the balancer's held axis must still be
-                // integrated, or the «hold the marker in the zone» task would have a dead lever. Everything
-                // else about the freeze is unchanged.
-                if (PausedInputsLive) TickModalBalancer(dt);
+                // exception is the D-modal (PausedInputsLive): there the balancer's held axis and the height
+                // sensor must still be integrated, or «hold the marker in the zone» / «держи, пока батарейка
+                // не заполнится» would be dead controls. Everything else about the freeze is unchanged.
+                if (PausedInputsLive) { TickModalBalancer(dt); TickModalBreath(dt, breathHeld); }
                 return;
             }
 
@@ -650,7 +705,7 @@ namespace ThanksNoThanks
                     // open keep draining below; an unopened scale has no drain to compete with anyway.
                     IntegrateMoney(dt);
                     IntegrateHealth(dt);               // live drains keep running while coasting —
-                    IntegrateEnergy(dt);               // the reckoning doesn't freeze your body
+                    IntegrateEnergy(dt, breathHeld);   // the reckoning doesn't freeze your body
                     // Deaths compete by first threshold crossed. TIE-BREAK (documented): when a scale
                     // hits zero within the SAME tick the scheduled age is reached, the scale death wins —
                     // it «happened» during the coast, before the knock on the door.
@@ -676,7 +731,7 @@ namespace ThanksNoThanks
 
                 if (CheckMoneyOpen()) return;      // open money (18) → tutorial pause may freeze this frame
                 if (CheckRelationshipsOpen()) return; // open relationships balancer (20) → hint + pause
-                if (CheckEnergyOpen()) return;     // open energy (25) → «дыхание» hint + pause
+                if (CheckEnergyOpen()) return;     // open energy (25) → «датчик высоты» screen + pause
                 if (CheckHealthDecayOpen()) return;// health starts decaying (30) → hint + pause
                 if (CheckCrisisTrigger()) return;  // кризис среднего возраста (45–50) → blitz, one-shot
                 if (CheckScheduledFatal()) return; // «за вами пришли» once age crosses card.Age+n
@@ -684,7 +739,7 @@ namespace ThanksNoThanks
 
             IntegrateMoney(dt);                    // cost-of-living + installment drains (real-time)
             IntegrateHealth(dt);                   // decay from 30 (×LT01 modifier), real-time
-            IntegrateEnergy(dt);                   // drain from 25 + burnout enter/exit, real-time
+            IntegrateEnergy(dt, breathHeld);       // дренаж с 25 + реген под поднятым датчиком + выгорание
             IntegrateRelationships(dt);            // drift + RELATION_AXIS + breakup (no death), real-time
             IntegrateChild(dt);                    // flash scheduler + missed-flash bad-parent penalty (no death)
 
@@ -707,12 +762,18 @@ namespace ThanksNoThanks
             return Paused;
         }
 
-        // Opens the energy scale the first time Age reaches 25 (YA05 «первая усталость»). Fires the
-        // «дыхание» hint; energy starts draining from here. Returns true if a listener paused the frame.
+        // Opens the energy scale the first time Age reaches 25 (YA05 «первая усталость»). Fires the §D
+        // modal; energy starts draining from here. Returns true if a listener paused the frame.
+        //
+        // ⚠ Шкала открывается ПРОСЕВШЕЙ (<see cref="EnergyOpenValue"/>), а не полной — иначе задача экрана
+        // «держи, пока батарейка не заполнится» была бы выполнена ещё до того, как игрок коснулся датчика
+        // (2026-08-07). Минимум с текущим значением: открытие не может подарить энергию.
         private bool CheckEnergyOpen()
         {
             if (EnergyOpen || Age < EnergyOpenAge) return false;
             EnergyOpen = true;
+            Scales.Energy = Math.Min(Scales.Energy, EnergyOpenValue);
+            _energyFrac = 0;
             EnergyOpened?.Invoke();
             return Paused;
         }
@@ -1309,11 +1370,13 @@ namespace ThanksNoThanks
             _drains.Clear();
         }
 
-        /// <summary>MONEY_TICK: +1₽ × multiplier. No-op unless money is open and the run is live/unpaused.</summary>
-        private void Crank()
+        /// <summary>MONEY_TICK: +1₽ × multiplier. No-op unless money is open and the run is live/unpaused.
+        /// Returns whether the tick was ACCEPTED (see <see cref="HandleInput"/>).</summary>
+        private bool Crank()
         {
-            if (!MoneyOpen || InputsFrozen) return;
+            if (!MoneyOpen || InputsFrozen) return false;
             Money += MoneyTickIncome * IncomeMultiplier;
+            return true;
         }
 
         // ================================================================ live health / energy
@@ -1324,7 +1387,8 @@ namespace ThanksNoThanks
             HealthDecaying = false;
             Burnout = false;
             _healthDecayFrac = 0;
-            _energyDrainFrac = 0;
+            _energyFrac = 0;
+            _breathHeld = false;
             _healthDecayMult = 1.0;
             _lt08Triggered = false;
             // Scales.Reset() (in StartLife/ToOpener) has already restored Health/Energy = 100.
@@ -1342,30 +1406,64 @@ namespace ThanksNoThanks
             Scales.Health = Math.Max(0, Scales.Health - whole);
         }
 
-        // Energy drain from 25 (real-time, fractional accumulator) + burnout enter/exit tracking.
-        private void IntegrateEnergy(float dt)
+        /// <summary>
+        /// Живая энергия за один тик: дренаж идёт ВСЕГДА (с 25), реген — ТОЛЬКО пока датчик высоты физически
+        /// поднят (<paramref name="held"/>). Складываются в одно НЕТТО и интегрируются знаковым дробным
+        /// аккумулятором, поэтому и «держал полсекунды», и «отпустил на полсекунды» считаются точно, без
+        /// потерь на округление до целого процента.
+        ///
+        /// Инвариант «живая шкала требует ввода» (memory 2026-07) держится буквально: без поднятого датчика
+        /// нетто всегда отрицательное — пассивный игрок выгорает и умирает ровно как раньше.
+        /// </summary>
+        private void IntegrateEnergy(float dt, bool held)
         {
             if (!EnergyOpen) return;
-            if (Scales.Energy > 0)
+            double net = (held ? EnergyRegenPerSec : 0.0) - EnergyDrainPerSec;
+            if (Scales.Energy > 0 || net > 0)
             {
-                _energyDrainFrac += EnergyDrainPerSec * dt;
-                int whole = (int)_energyDrainFrac;
-                if (whole > 0)
+                _energyFrac += net * dt;
+                int whole = (int)_energyFrac;      // усечение К НУЛЮ — симметрично для обоих знаков
+                if (whole != 0)
                 {
-                    _energyDrainFrac -= whole;
-                    Scales.Energy = Math.Max(0, Scales.Energy - whole);
+                    _energyFrac -= whole;
+                    Scales.Energy = Math.Max(0, Math.Min(100, Scales.Energy + whole));
                 }
             }
             UpdateBurnout();
         }
 
-        // ENERGY_PULSE (a rhythm-VALID breath, already filtered by the driver): restore +3%, clamped to
-        // 100, and re-evaluate burnout (a good breath can lift you back out). No-op before energy opens.
-        private void Breathe()
+        /// <summary>
+        /// Тот же реген, но ПОД §D-модалкой (<see cref="PausedInputsLive"/>): время стоит, дренажа нет — но
+        /// датчик живой, и батарея наполняется, пока его держат. Это и есть задача экрана энергии («держи,
+        /// пока батарейка не заполнится»); без этого условие выхода было бы недостижимо, ровно как у оси
+        /// балансира в <see cref="TickModalBalancer"/>. Пауза остаётся паузой: ничего, кроме роста, не идёт.
+        /// </summary>
+        private void TickModalBreath(float dt, bool held)
         {
-            if (!EnergyOpen || InputsFrozen) return;
-            Scales.Energy = Math.Min(100, Scales.Energy + BreathEnergyGain);
+            if (!EnergyOpen || !held) return;
+            _energyFrac += EnergyRegenPerSec * dt;
+            int whole = (int)_energyFrac;
+            if (whole > 0)
+            {
+                _energyFrac -= whole;
+                Scales.Energy = Math.Min(100, Scales.Energy + whole);
+            }
             UpdateBurnout();
+        }
+
+        /// <summary>
+        /// ENERGY_HOLD: датчик высоты поднят ЭТОТ кадр. Только латч — вся арифметика живёт в
+        /// <see cref="IntegrateEnergy"/>/<see cref="TickModalBreath"/>, чтобы рост шёл ПО ВРЕМЕНИ, а не по
+        /// числу кадров (иначе частота кадров стала бы балансом). Инертен до открытия энергии и под
+        /// «глухой» S5-паузой (<see cref="InputsFrozen"/>); под §D-модалкой — живой, это её задача.
+        /// Возвращает, ПРИНЯТО ли удержание (см. <see cref="HandleInput"/>): отвергнутое удержание не
+        /// открывает §6-окно недавнего ввода.
+        /// </summary>
+        private bool HoldBreath()
+        {
+            if (!EnergyOpen || InputsFrozen) return false;
+            _breathHeld = true;
+            return true;
         }
 
         // Temporary «выгорание»: latch on at energy ≤10%, release above 40% (hysteresis, re-enterable).
@@ -1399,10 +1497,13 @@ namespace ThanksNoThanks
         // RELATION_AXIS ↑/↓: latch the held direction for the NEXT integration tick, which consumes and
         // clears it. No-op unless relationships are open and the run is live/unpaused (inert in the
         // opener/finale/tutorial — HandleInput only routes it in Playing; this adds the open+pause guard).
-        private void SetRelationAxis(int dir)
+        // Returns whether the axis input was ACCEPTED (see HandleInput) — an ignored lever must not open the
+        // §6 recent-input window.
+        private bool SetRelationAxis(int dir)
         {
-            if (!RelationshipsOpen || InputsFrozen) return;
+            if (!RelationshipsOpen || InputsFrozen) return false;
             _relAxis = dir;
+            return true;
         }
 
         // Relationships balancer integration (real-time, fractional accumulator like health/energy):

@@ -8,15 +8,14 @@ using UnityEngine.TestTools;
 namespace ThanksNoThanks.Tests.PlayMode
 {
     /// <summary>
-    /// Плейтест основательницы 2026-08-05, пункты 2 и 5.
+    /// ПОДСКАЗКИ КЛАВИШ (плейтест основательницы 2026-08-05 §2). Пока ввод идёт от клавиатурной эмуляции,
+    /// каждый экран-объяснение показывает ВТОРОЙ строкой клавишу своего контрола — прочитанную ИЗ КОНФИГА
+    /// ПАКЕТА (<see cref="KeyboardHints"/> поверх <see cref="KeyboardMapping"/>), а не из зашитой в игре
+    /// буквы. Стоит плате ответить — строка исчезает: на стойке дев-клавиш быть не должно.
     ///
-    ///  • §2 ПОДСКАЗКИ КЛАВИШ. Пока ввод идёт от клавиатурной эмуляции, каждый экран-объяснение показывает
-    ///    ВТОРОЙ строкой клавишу своего контрола — прочитанную ИЗ КОНФИГА ПАКЕТА
-    ///    (<see cref="KeyboardHints"/> поверх <see cref="KeyboardMapping"/>), а не из зашитой в игре буквы.
-    ///    Стоит плате ответить — строка исчезает: на стойке дев-клавиш быть не должно.
-    ///  • §5 ОТКЛИК НА НЕВАЛИДНЫЙ ВДОХ. Вдох, отбитый ритм-гейтом, обязан быть ВИДЕН: подпись «не в ритм»
-    ///    на окне энергии + короткое затемнение батареи. Молчание в ответ на нажатие — ровно то, из-за
-    ///    чего плейтест и остановился.
+    /// У ДАТЧИКА ВЫСОТЫ строка вдобавок называет ЖЕСТ: «эмуляция: зажми Q» (редизайн 2026-08-07 — механика
+    /// «зажми и держи»). Отклик «не в ритм» и вздрагивание батареи из r1 сняты вместе с ритм-гейтом:
+    /// отвергать больше нечего, обратная связь — сама наполняющаяся батарея.
     /// </summary>
     public class KeyHintAndBreathFeedbackTests
     {
@@ -56,8 +55,8 @@ namespace ThanksNoThanks.Tests.PlayMode
         private static string ExpectedHint(ArcadeControlId control)
         {
             string key = KeyboardHints.PrimaryFor(KeyboardMapping.LoadDefault(), control);
-            return GameDriver.KeyHintPrefix + key
-                 + (control == ArcadeControlId.HeightA ? GameDriver.BreathKeyHintTail : "");
+            return (control == ArcadeControlId.HeightA ? GameDriver.BreathKeyHintPrefix
+                                                       : GameDriver.KeyHintPrefix) + key;
         }
 
         // ---------------------------------------------------------------- §2
@@ -117,7 +116,7 @@ namespace ThanksNoThanks.Tests.PlayMode
         }
 
         [UnityTest]
-        public IEnumerator BurnoutHint_NamesTheBreathKeyToo()
+        public IEnumerator BurnoutHint_NamesTheSensorKeyToo()
         {
             yield return null;
             _driver.DebugShowTutorial("ВЫГОРАНИЕ!", ArcadeControlId.HeightA);
@@ -125,7 +124,7 @@ namespace ThanksNoThanks.Tests.PlayMode
 
             Assert.IsTrue(_driver.TutorialShowing);
             Assert.AreEqual(ExpectedHint(ArcadeControlId.HeightA), _driver.TutorialHintLine.text,
-                "S5-подсказка про дыхание тоже называет клавишу при эмуляции");
+                "S5-подсказка про датчик тоже называет клавишу при эмуляции");
 
             // …а подсказка БЕЗ контрола (здоровье) второй строки не получает — лишнего шума нет.
             _driver.DebugDismissTutorial();
@@ -217,51 +216,56 @@ namespace ThanksNoThanks.Tests.PlayMode
             return 0.2126f * l.r + 0.7152f * l.g + 0.0722f * l.b;
         }
 
-        // ---------------------------------------------------------------- §5
+        // ---------------------------------------------------------------- механика в текстах
 
         [UnityTest]
-        public IEnumerator RejectedBreath_IsVisible_OnTheEnergyScreen()
+        public IEnumerator BreathHint_TellsYouToHoldTheKey_NotToPumpIt()
         {
+            // ⚠ ГАРД НА ЖЕСТ. r1 просил «нажимай и отпускай, раз в ~2 секунды»; r2 (основательница дословно:
+            // «просто зажать датчик высоты, пока батарейка не заполнится») перевернул это в «зажми».
+            // Строка обязана называть ровно ТЕКУЩИЙ жест, иначе игрок снова делает не то, что игра ждёт.
             yield return null;
-            _fake.Yes();                       // opener → playing (иначе дыхание инертно)
+            _fake.Yes();
             yield return null;
             _driver.DebugShowNewScale(NewScale.Energy);
             yield return null;
 
-            Assert.IsFalse(_driver.BreathRejectShowing, "до вдоха откликов нет");
-            float restingAlpha = _driver.EnergyDimAmount;
-            Assert.AreEqual(1f, restingAlpha, 1e-3f, "батарея в покое не затемнена");
-
-            // ПЕРВЫЙ импульс только засевает каденцию — за него не ругают (иначе игрок получал бы
-            // «не в ритм» за самый первый вдох в жизни).
-            _fake.Fire(GameInput.EnergyPulse);
-            Assert.IsFalse(_driver.BreathRejectShowing, "первый вдох жизни — не «не в ритм»");
-
-            // ВТОРОЙ приходит тем же кадром, интервал 0 — это ровно «заколачивание», и гейт его отбивает.
-            _fake.Fire(GameInput.EnergyPulse);
-            Assert.IsTrue(_driver.BreathRejectShowing, "отбитый вдох обязан дать видимый отклик");
-            yield return null;
-            Assert.AreEqual(GameDriver.BreathOffRhythmText, _driver.NewScaleHintLine.text,
-                "на окне энергии подпись сменяется откликом «не в ритм»");
-            Assert.Less(_driver.EnergyDimAmount, 1f, "…и батарея коротко темнеет");
-
-            // Отклик короткий: он мигает, а не залипает.
-            yield return new WaitForSeconds(GameDriver.BreathRejectSeconds + 0.3f);
-            Assert.IsFalse(_driver.BreathRejectShowing, "отклик гаснет сам");
-            Assert.AreEqual(ExpectedHint(ArcadeControlId.HeightA), _driver.NewScaleHintLine.text,
-                "…и строка возвращается к подсказке клавиши");
-            Assert.AreEqual(1f, _driver.EnergyDimAmount, 1e-3f, "…а батарея — к полной яркости");
+            StringAssert.Contains("зажми", _driver.NewScaleHintLine.text,
+                "подсказка датчика обязана просить ЗАЖАТЬ клавишу");
+            StringAssert.DoesNotContain("отпускай", _driver.NewScaleHintLine.text,
+                "…и не звать отпускать её — ритм-механика снята 2026-08-07");
+            StringAssert.DoesNotContain("секунд", _driver.NewScaleHintLine.text,
+                "…и не называть темп: темпа больше нет");
         }
 
         [UnityTest]
-        public IEnumerator EnergyTaskText_NamesTheRhythm_InWords()
+        public IEnumerator EnergyTaskText_NamesTheHoldAndTheGoal()
         {
             yield return null;
-            StringAssert.Contains("2 секунд", GameDriver.EnergyTaskText,
-                "задача энергии обязана называть ТЕМП словами (плейтест §5)");
             StringAssert.Contains("датчик высоты", GameDriver.EnergyTaskText,
-                "…не потеряв при этом имя физического контрола");
+                "задача энергии называет физический контрол");
+            StringAssert.Contains("держи", GameDriver.EnergyTaskText,
+                "…и жест: держать (а не «дышать размеренно»)");
+            StringAssert.Contains("батарейка", GameDriver.EnergyTaskText,
+                "…и условие выхода словами основательницы: пока батарейка не заполнится");
+            Assert.IsFalse(GameDriver.EnergyTaskText.Contains("секунд"),
+                "…и НИ СЛОВА про темп: «не понимаю про две секунды» — плейтест 2026-08-07");
             yield break;
+        }
+
+        [UnityTest]
+        public IEnumerator TheOffRhythmFeedback_IsGone_NoApiLeftToShowIt()
+        {
+            // Гард отсутствия: отклик «не в ритм» и вздрагивание батареи сняты ЦЕЛИКОМ — вместе с их
+            // публичной поверхностью, чтобы «временно вернуть» их было нечем.
+            yield return null;
+            var t = typeof(GameDriver);
+            Assert.IsNull(t.GetProperty("BreathRejectShowing"), "отклика «не в ритм» больше нет");
+            Assert.IsNull(t.GetProperty("EnergyDimAmount"), "…и вздрагивания батареи тоже");
+            Assert.IsNull(t.GetField("BreathOffRhythmText"), "…и его текста");
+            Assert.IsNull(t.GetField("BreathKeyHintTail"), "…и ритмического хвоста подсказки");
+            Assert.IsNull(t.GetProperty("NewScaleHoldTrack"), "…и полосы прогресса удержания");
+            Assert.IsNull(t.GetProperty("NewScaleHoldFill"), "…и её заполнения");
         }
     }
 }

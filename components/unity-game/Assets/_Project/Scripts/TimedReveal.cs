@@ -5,7 +5,7 @@ namespace ThanksNoThanks
     /// host speech-bubble (~2s) and the rubric banner (~1.5s). <see cref="Show"/> makes it visible with a
     /// text and arms the countdown; <see cref="Advance"/> (driver Update / tests) ticks the clock and
     /// hides it once <see cref="Duration"/> elapses. Deterministic — never touches the wall clock, so the
-    /// «auto-hide after N seconds» behaviour is unit-testable, mirroring <see cref="BreathRhythm"/>.
+    /// «auto-hide after N seconds» behaviour is unit-testable, mirroring <see cref="MoneyTickThrottle"/>.
     /// </summary>
     public sealed class TimedReveal
     {

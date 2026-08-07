@@ -24,13 +24,18 @@ namespace ThanksNoThanks
         MoneyTickRepeat,
 
         /// <summary>
-        /// ENERGY_PULSE — «дыхание» (keyboard: E; later a physical breathing lever). The RAW key press
-        /// goes to the driver, which validates the RHYTHM (a pure <see cref="BreathRhythm"/> with an
-        /// injectable clock) and forwards this value to <see cref="Game"/> ONLY on a valid breath cycle.
-        /// So the value <see cref="Game"/> receives always means «a well-timed breath happened» → +energy;
-        /// mashing / sparse presses never reach the logic. Keeps <see cref="Game"/> semantic-only.
+        /// ENERGY_HOLD — «датчик высоты ПОДНЯТ» (кабинет: HeightA выше середины хода; эмуляция: зажатая
+        /// клавиша датчика). Как и <see cref="RelationUp"/>, это НЕ дискретное событие, а УДЕРЖИВАЕМЫЙ
+        /// сигнал: источник переиздаёт его КАЖДЫЙ кадр, пока датчик поднят, а <see cref="Game"/> латчит его
+        /// и применяет ровно один такт роста энергии, после чего гасит латч (модель «потребить за тик»).
+        /// Держишь — батарея наполняется <see cref="Game.EnergyRegenPerSec"/> %/с; отпустил — рост встал, а
+        /// обычный дренаж продолжается. Инертен, пока энергия не открыта и пока идёт S5-пауза.
+        ///
+        /// ⚠ Заменил прежний ENERGY_PULSE (импульс на подъёме + ритм-гейт «раз в ~2 секунды») по слову
+        /// основательницы, живой плейтест 2026-08-07: «просто зажать датчик высоты, пока батарейка не
+        /// заполнится». Ритма в игре больше нет — ни гейта, ни отклика «не в ритм».
         /// </summary>
-        EnergyPulse,
+        EnergyHold,
 
         /// <summary>
         /// RELATION_AXIS ↑ — «держать балансир отношений вверх» (keyboard: ↑; later a physical balance

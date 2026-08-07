@@ -8,8 +8,9 @@ namespace ThanksNoThanks.Tests
     /// <summary>
     /// The live health + energy layer on the pure <see cref="Game"/> spine (dt-injected, never wall-clock):
     /// health decay from 30 (×LT01 modifier, KEK04 bonus), the LT08 system trigger and LT02 eligibility,
-    /// energy drain from 25 + «дыхание» restore, burnout enter/income/exit/re-enter, the two burnout
-    /// endings, clean-run survival calibration, the open events at 25/30 + hint-pause freeze, and restart.
+    /// energy drain from 25 + HELD-sensor regen («зажми и держи», редизайн 2026-08-07), burnout
+    /// enter/income/exit/re-enter, the two burnout endings, clean-run survival calibration, the open events
+    /// at 25/30 + hint-pause freeze, and restart.
     /// </summary>
     public class GameHealthEnergyTests
     {
@@ -49,7 +50,41 @@ namespace ThanksNoThanks.Tests
         private static void Yes(Game g) => g.HandleInput(GameInput.AnswerYes);
         private static void No(Game g) => g.HandleInput(GameInput.AnswerNo);
         private static void Crank(Game g) => g.HandleInput(GameInput.MoneyTick);
-        private static void Pulse(Game g) => g.HandleInput(GameInput.EnergyPulse);
+        /// <summary>Датчик высоты поднят В ЭТОМ такте (сигнал непрерывный — латч живёт ровно один Tick).</summary>
+        private static void Hold(Game g) => g.HandleInput(GameInput.EnergyHold);
+
+        /// <summary>
+        /// Колода, на которой ВОЗРАСТ ОСТАЁТСЯ НИЗКИМ (26…40): возраст событийный, он замирает на возрасте
+        /// текущей карточки, поэтому за секунды теста нельзя случайно доехать до кризиса (45) и заморозить
+        /// им энергию. Нужна каждому тесту, который РЕАЛЬНО тикает время с открытой энергией.
+        /// </summary>
+        private static Card[] EnergyFiller()
+        {
+            var cards = new List<Card>();
+            for (int a = 26; a <= 40; a++) cards.Add(Plain("F" + a, a));
+            return cards.ToArray();
+        }
+
+        /// <summary>
+        /// Довести жизнь до ОТКРЫТОЙ энергии МЕЛКИМИ тактами. Один жирный Tick(2.2f) сюда не годится:
+        /// открытие и дренаж случаются в ОДНОМ такте, и шкала стартовала бы уже просевшей на пару процентов.
+        /// </summary>
+        private static void OpenEnergy(Game g)
+        {
+            int guard = 0;
+            while (!g.EnergyOpen && guard++ < 4000) g.Tick(0.05f);
+            Assert.IsTrue(g.EnergyOpen, "сим обязан дойти до открытия энергии");
+        }
+
+        /// <summary>Держать датчик <paramref name="seconds"/> секунд подряд, тактами по 0.1 с.</summary>
+        private static void HoldFor(Game g, float seconds)
+        {
+            for (float t = 0; t < seconds && g.State == GameState.Playing; t += 0.1f)
+            {
+                Hold(g);
+                g.Tick(0.1f);
+            }
+        }
 
         // ================================================================ health decay
 
@@ -266,18 +301,116 @@ namespace ThanksNoThanks.Tests
         }
 
         [Test]
-        public void Energy_Opens25_Drains_AndValidBreathRestoresThree()
+        public void Energy_Opens25_AtTheTiredValue_AndDrainsWhileTheSensorIsDown()
         {
-            var drain = WithNoDelta(Plain("D", 26), Scale.Energy, DeltaKind.Add, -20);
-            var g = NewGame(() => false, drain, Plain("C", 90));
+            var g = NewGame(() => false, EnergyFiller());
             g.StartLife(); No(g);
-            g.Tick(2.2f);                        // age ≈ 26.4 → energy open + draining
+            OpenEnergy(g);
             Assert.IsTrue(g.EnergyOpen, "energy opens at 25");
-            No(g);                               // D → −20 energy
+            // ⚠ РЕДИЗАЙН 2026-08-07: шкала открывается ПРОСЕВШЕЙ («первая усталость»), а не полной —
+            // иначе задача экрана «держи, пока батарейка не заполнится» была бы выполнена ещё до касания.
+            Assert.AreEqual(Game.EnergyOpenValue, g.Scales.Energy, "энергия открывается на 20 %");
+
             int e = g.Scales.Energy;
-            Assert.LessOrEqual(e, 97, "energy well below full (drain + card hit)");
-            Pulse(g);                            // a rhythm-valid breath (Game trusts the driver's gate)
-            Assert.AreEqual(e + Game.BreathEnergyGain, g.Scales.Energy, "valid breath restores +3%");
+            g.Tick(2f);                          // датчик НЕ поднят → только дренаж
+            Assert.Less(g.Scales.Energy, e, "с опущенным датчиком энергия только убывает");
+        }
+
+        [Test]
+        public void HeldSensor_FillsTheBattery_ReleasingStopsTheGrowth()
+        {
+            var g = NewGame(() => false, EnergyFiller());
+            g.StartLife(); No(g);
+            OpenEnergy(g);
+
+            int e0 = g.Scales.Energy;
+            HoldFor(g, 1f);                      // секунда удержания
+            int afterHold = g.Scales.Energy;
+            Assert.Greater(afterHold, e0 + 10,
+                "секунда удержания обязана дать ДВУЗНАЧНЫЙ прирост — рост видно на глазах");
+
+            g.Tick(1f);                          // отпустили — рост встал, дренаж пошёл
+            Assert.Less(g.Scales.Energy, afterHold, "отпустил → рост прекращается, дренаж продолжается");
+        }
+
+        [Test]
+        public void HeldSensor_FillsToFull_InAboutFiveSeconds_AndClampsAtHundred()
+        {
+            var g = NewGame(() => false, EnergyFiller());
+            g.StartLife(); No(g);
+            OpenEnergy(g);
+            Assert.AreEqual(Game.EnergyOpenValue, g.Scales.Energy);
+
+            HoldFor(g, 6f);
+            Assert.AreEqual(100, g.Scales.Energy,
+                "6 с удержания с типового старта заполняют батарею ДО КОНЦА (контракт: ~4–6 с)");
+            HoldFor(g, 2f);
+            Assert.AreEqual(100, g.Scales.Energy, "…и выше 100 % не уходит");
+        }
+
+        // Латч удержания потребляется ТОЛЬКО тиком, который реально интегрирует время. Tick(0) — кадр, за
+        // который не прошло ни секунды: он не вправе съесть поднятый датчик. Иначе кадр с нулевым dt молча
+        // крал бы удержание, которое игрок честно держал (скептик, MINOR 2026-08-07).
+        [Test]
+        public void HeldSensor_SurvivesAZeroDtTick_AndIsSpentExactlyOnceOnTheNextRealTick()
+        {
+            var g = NewGame(() => false, EnergyFiller());
+            g.StartLife(); No(g);
+            OpenEnergy(g);
+
+            // Опорная величина: то же удержание за 0.1 с БЕЗ вклинившегося Tick(0).
+            var reference = NewGame(() => false, EnergyFiller());
+            reference.StartLife(); No(reference);
+            OpenEnergy(reference);
+            int refBefore = reference.Scales.Energy;
+            Hold(reference);
+            reference.Tick(0.1f);
+            int refGain = reference.Scales.Energy - refBefore;
+            Assert.Greater(refGain, 0, "0.1 с удержания даёт измеримый прирост (иначе тест ничего не ловит)");
+
+            int before = g.Scales.Energy;
+            Hold(g);
+            g.Tick(0f);                          // кадр без прошедшего времени
+            Assert.AreEqual(before, g.Scales.Energy, "Tick(0) ничего не интегрирует");
+            g.Tick(0.1f);                        // датчик так и не отпускали — рост ровно за 0.1 с
+            Assert.AreEqual(refGain, g.Scales.Energy - before,
+                "удержание пережило Tick(0) и выросло ровно за 0.1 с — ни больше, ни меньше");
+
+            // …и потрачено оно РОВНО ОДИН раз: дальше датчик считается отпущенным. Мерим СЕКУНДОЙ, а не
+            // тактом: за 0.1 с дренаж (1.7 %/с) не набирает целого процента, и целочисленная шкала не
+            // сдвинулась бы даже при честно отпущенном датчике.
+            int afterSpent = g.Scales.Energy;
+            g.Tick(1f);
+            Assert.Less(g.Scales.Energy, afterSpent, "латч не залип — без нового Hold идёт только дренаж");
+        }
+
+        // ================================================================ ввод ПРИНЯТ / ОТВЕРГНУТ
+        // HandleInput отдаёт «поработал ли игрок ЭТОЙ шкалой» — по этому признаку драйвер открывает
+        // §6-окно недавнего ввода (салют за калибровку). Кризис и депрессия шкальные контролы ГЛУШАТ.
+
+        [Test]
+        public void HandleInput_ReportsAccepted_OnlyWhenTheScaleMechanicReallyTookIt()
+        {
+            var g = NewGame(() => false, EnergyFiller());
+            g.StartLife(); No(g);
+
+            Assert.IsFalse(g.EnergyOpen, "энергия ещё закрыта");
+            Assert.IsFalse(g.HandleInput(GameInput.EnergyHold),
+                "до открытия шкалы удержание ОТВЕРГНУТО — работой по шкале оно не является");
+
+            OpenEnergy(g);
+            Assert.IsTrue(g.HandleInput(GameInput.EnergyHold), "открытая шкала принимает удержание");
+
+            g.Paused = true;                     // «глухая» S5-пауза: контролы мертвы
+            Assert.IsFalse(g.HandleInput(GameInput.EnergyHold), "под глухой паузой удержание отвергнуто");
+            g.Paused = false;
+
+            Assert.AreEqual(g.MoneyOpen, g.HandleInput(GameInput.MoneyTick),
+                "крутилка принимается ровно тогда, когда деньги открыты");
+            Assert.AreEqual(g.RelationshipsOpen, g.HandleInput(GameInput.RelationUp),
+                "ось отношений принимается ровно тогда, когда балансир открыт");
+            Assert.IsFalse(g.HandleInput(GameInput.Confirm),
+                "подтверждение — не шкальный ввод, окно §6 оно открывать не должно");
         }
 
         // ================================================================ burnout
@@ -285,12 +418,16 @@ namespace ThanksNoThanks.Tests
         [Test]
         public void Burnout_Enters_HalvesIncome_ExitsAbove40_ReEnterable()
         {
-            var d1 = WithNoDelta(Plain("D1", 26), Scale.Energy, DeltaKind.Add, -95);
-            var d2 = WithNoDelta(Plain("D2", 45), Scale.Energy, DeltaKind.Add, -40);
+            // ⚠ Δ карточки задаются SET, а не ADD: с 2026-08-07 энергия открывается на 20 %, и прежний
+            // «−95» утащил бы шкалу в минус — Answer убил бы забег ещё до того, как выгорание защёлкнется.
+            // D2 сидит на 28, а не на 45: тест реально ТИКАЕТ время (удержание), а возраст 45 завёл бы
+            // кризис и заморозил им энергию.
+            var d1 = WithNoDelta(Plain("D1", 26), Scale.Energy, DeltaKind.Set, 4);
+            var d2 = WithNoDelta(Plain("D2", 28), Scale.Energy, DeltaKind.Set, 3);
             var g = NewGame(() => true, d1, d2, Plain("C", 90));
             g.StartLife(); No(g);
-            g.Tick(2.2f);                        // age ≈ 26.4, energy open, money open
-            No(g);                               // D1 → energy ≈ 4 (card Δ doesn't latch burnout yet)
+            OpenEnergy(g);                       // age ≈ 26, energy open, money open
+            No(g);                               // D1 → energy = 4 (card Δ doesn't latch burnout yet)
             Assert.IsFalse(g.Burnout, "card Δ alone hasn't latched burnout");
             g.Tick(0.1f);                        // integrate → burnout latches at ≤10%
             Assert.IsTrue(g.Burnout, "burnout entered at ≤10% energy");
@@ -299,11 +436,11 @@ namespace ThanksNoThanks.Tests
             Crank(g);
             Assert.AreEqual(m0 + 0.5, g.Money, Eps, "a tick pays only +0.5 during burnout");
 
-            for (int i = 0; i < 13; i++) Pulse(g); // breathe back up past 40%
-            Assert.IsFalse(g.Burnout, "burnout releases above 40%");
+            HoldFor(g, 3f);                      // зажали датчик — выгорание выходится за несколько секунд
+            Assert.IsFalse(g.Burnout, "burnout releases above 40% (удержанием, за ~2-3 с)");
             Assert.AreEqual(1.0, g.IncomeMultiplier, Eps, "income back to full after recovery");
 
-            No(g);                               // D2 → energy back down ≈ 3
+            No(g);                               // D2 → energy back down to 3
             g.Tick(0.1f);                        // integrate → burnout again
             Assert.IsTrue(g.Burnout, "burnout is re-enterable");
         }
@@ -475,51 +612,49 @@ namespace ThanksNoThanks.Tests
         }
 
         [Test]
-        public void NoBreathing_SlidesIntoBurnout_ThenEnergyDeath()
+        public void NeverTouchingTheSensor_SlidesIntoBurnout_ThenEnergyDeath()
         {
-            // A player who NEVER breathes must burn out mid-adulthood and, ignoring it, die of energy.
-            // «Дыхание» is a real cost, not decoration — the third hand has to be worked.
+            // ИНВАРИАНТ «живая шкала требует ввода» (memory 2026-07), несмотря на смену механики: игрок,
+            // который НИ РАЗУ не поднял датчик, обязан выгореть и, проигнорировав это, умереть от энергии.
+            // Удержание — реальная цена (рука уходит с крутилки), а не декорация.
             var g = NewGame(() => false, AdultFiller().ToArray());
             g.StartLife(); No(g);
             bool sawBurnout = false;
             int guard = 0;
             while (g.State == GameState.Playing && guard++ < 100000)
             {
-                g.Tick(0.25f);                       // no EnergyPulse — ignoring the breathing lever
+                g.Tick(0.25f);                       // датчик не поднят НИ РАЗУ
                 if (g.Burnout) sawBurnout = true;
             }
             Assert.AreEqual(GameState.Finale, g.State);
             Assert.IsTrue(sawBurnout, "passive player hits burnout (income ×0.5) partway through adult life");
             Assert.AreEqual("полное выгорание", g.Cause,
-                "ignoring the breathing lever is fatal — energy death is reachable by neglect");
+                "ignoring the height sensor is fatal — energy death is reachable by neglect");
         }
 
         [Test]
-        public void ModestBreathing_StaysAboveBurnout_ToANonEnergyEnding()
+        public void ModestHolding_StaysAboveBurnout_ToANonEnergyEnding()
         {
-            // A modest, sustainable cadence (a valid breath every ~1.25s) more than offsets the drain:
-            // the player stays comfortably above burnout and reaches a non-energy ending. Doable — it
-            // just costs hand-time. (Health still survives on its own 0.7%/s calibration → the run ends
-            // naturally, proving neither scale kills a competent, no-bad-choices player.)
+            // Компетентный игрок: замечает просевшую батарею и ДЕРЖИТ датчик, пока она не наберётся снова.
+            // Такой игрок держится комфортно выше выгорания и доходит до не-энергетического финала. Доступно
+            // — просто стоит рабочего времени рук. (Здоровье выживает на своей калибровке 0.7 %/с → забег
+            // кончается сам собой, значит ни одна шкала не убивает грамотного игрока без плохих выборов.)
             var g = NewGame(() => false, AdultFiller().ToArray());
             g.StartLife(); No(g);
-            int sinceBreath = 0, guard = 0;
+            int guard = 0;
             int minEnergyWhileOpen = 100;
             while (g.State == GameState.Playing && guard++ < 100000)
             {
+                // Держим, пока батарея ниже 60 %: это «поднял руку и подождал», а не метроном.
+                if (g.EnergyOpen && g.Scales.Energy < 60) Hold(g);
                 g.Tick(0.25f);
-                if (g.EnergyOpen && ++sinceBreath >= 5)   // ≈ every 1.25s (a valid rhythm cadence)
-                {
-                    Pulse(g);
-                    sinceBreath = 0;
-                }
                 if (g.EnergyOpen) minEnergyWhileOpen = System.Math.Min(minEnergyWhileOpen, g.Scales.Energy);
             }
             Assert.AreEqual(GameState.Finale, g.State);
-            Assert.AreNotEqual("полное выгорание", g.Cause, "modest breathing prevents the energy death");
+            Assert.AreNotEqual("полное выгорание", g.Cause, "работа датчиком снимает энергетическую смерть");
             Assert.IsFalse(g.Burnout, "never left in burnout at the end");
             Assert.Greater(minEnergyWhileOpen, BurnoutEnterEnergyReadable(),
-                "energy stayed comfortably above the burnout threshold the whole adult life");
+                "энергия всю взрослую жизнь держалась выше порога выгорания");
             CollectionAssert.Contains(new[] { "спокойная старость", "весёлая старость", "одинокая старость" },
                 g.Cause, $"reaches a natural old-age ending (got «{g.Cause}»)");
         }
@@ -564,10 +699,10 @@ namespace ThanksNoThanks.Tests
         [Test]
         public void Restart_ResetsHealthEnergyBurnout_AndReArmsOpens()
         {
-            var d1 = WithNoDelta(Plain("D1", 26), Scale.Energy, DeltaKind.Add, -95);
+            var d1 = WithNoDelta(Plain("D1", 26), Scale.Energy, DeltaKind.Set, 4);
             var g = NewGame(() => false, d1, Plain("C", 90));
             g.StartLife(); No(g);
-            g.Tick(2.2f); No(g); g.Tick(0.1f);   // burnout on
+            OpenEnergy(g); No(g); g.Tick(0.1f);  // burnout on
             Assert.IsTrue(g.Burnout);
             No(g);                               // finish the deck → finale (burnout still on)
             Assert.AreEqual(GameState.Finale, g.State);

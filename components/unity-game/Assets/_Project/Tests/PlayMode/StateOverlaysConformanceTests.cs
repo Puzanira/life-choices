@@ -226,7 +226,11 @@ namespace ThanksNoThanks.Tests.PlayMode
             var title = plate.transform.Find("BurnoutText").GetComponent<Text>();
             var sub = plate.transform.Find("BurnoutSubtitle").GetComponent<Text>();
             StringAssert.Contains("ВЫГОРАНИЕ", title.text, "the S7 title reads «ВЫГОРАНИЕ!»");
-            StringAssert.Contains("подышите", sub.text, "the S7 subtitle reads the mockup line");
+            // ⚠ 2026-08-07: подпись S7 называет НОВЫЙ жест — «зажмите датчик высоты». Прежнее «подышите
+            // рычагом» ушло вместе с ритм-механикой (основательница: «просто зажать датчик высоты»).
+            StringAssert.Contains("зажмите датчик высоты", sub.text,
+                "the S7 subtitle names the CURRENT gesture — hold the height sensor");
+            StringAssert.DoesNotContain("подыш", sub.text, "…и не зовёт «дышать»: ритма в игре больше нет");
 
             // Both draw inside the full-screen cobalt backing AND fully on-screen (never clipped by the edge).
             AssertGeneratedInPill(title, backing, 0f, "burnout title on the full-screen backing");

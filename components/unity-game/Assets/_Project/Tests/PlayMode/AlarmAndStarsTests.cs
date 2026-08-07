@@ -46,6 +46,68 @@ namespace ThanksNoThanks.Tests.PlayMode
             driver.DebugApplyAgeGates(40f);          // батарея + оба бара + банка на экране
         }
 
+        /// <summary>
+        /// То же, что <see cref="ToFrozenAdult"/>, но шкалы открыты НЕ ТОЛЬКО на HUD, а и в самой
+        /// <see cref="Game"/>: жизнь реально доезжает до 25 лет (деньги 18, энергия 25), а §D-модалки
+        /// снимаются своими контролами.
+        /// ⚠ Нужна каждому тесту, который проверяет ПРИНЯТЫЙ ввод: <c>DebugApplyAgeGates</c> рисует
+        /// виджеты, но НЕ открывает шкалы в Game, а ЗАКРЫТАЯ шкала свой ввод ОТВЕРГАЕТ. Пока драйвер
+        /// отмечал §6-окно, не спрашивая Game, это расхождение было незаметно — и тест «принятый тик»
+        /// на деле проверял «нажатый тик».
+        /// ⚠ ОТНОШЕНИЙ здесь нет намеренно: балансир открывает не возраст, а СВАДЬБА — то есть ответы,
+        /// а колода живая и монетка не сидированная. Ждать его в цикле = ждать до конца жизни.
+        /// </summary>
+        private static IEnumerator ToFrozenAdultWithLiveScales(GameDriver driver, PlayFakeInputSource fake)
+        {
+            yield return null;                       // Start wires input + subscriptions
+            fake.Confirm();                          // opener → playing
+            yield return null;
+            var g = driver.Game;
+            int guard = 0;
+            while (guard++ < 4000 && g.State == GameState.Playing)
+            {
+                if (driver.NewScaleShowing) { NewScaleTut.Clear(driver, fake); yield return null; continue; }
+                if (driver.TutorialShowing) { fake.Confirm(); yield return null; continue; }
+                if (g.MoneyOpen && g.EnergyOpen) break;
+                if (g.EnergyOpen && g.Scales.Energy < 60) fake.Fire(GameInput.EnergyHold);  // не выгореть по пути
+                g.Tick(0.2f);
+                if (g.CurrentCard != null && g.CardTimer < 3f) fake.No();   // не отдавать ход таймауту
+            }
+            Assert.AreEqual(GameState.Playing, g.State, "жизнь дожила до открытых шкал");
+            Assert.IsTrue(g.MoneyOpen && g.EnergyOpen, "деньги и энергия открыты В ИГРЕ, а не только на HUD");
+            Assert.IsFalse(driver.NewScaleShowing, "…и ни одна §D-модалка не осталась на экране");
+            driver.enabled = false;                  // дальше время подаём вручную
+            driver.DebugApplyAgeGates(40f);
+            FlushStarSky(driver);
+        }
+
+        /// <summary>Догасить салюты, которыми §D-туториалы наградили сам проход фикстуры: тесты ниже
+        /// считают ТОЛЬКО новые звёзды, а закрытие каждой модалки — это законный бёрст (§6).</summary>
+        private static void FlushStarSky(GameDriver driver)
+        {
+            driver.DebugAdvanceStars(2f);            // максимальный полёт звезды — 0.9 с
+            Assert.AreEqual(0, driver.ActiveStarCount, "небо чистое: салюты фикстуры догорели");
+        }
+
+        /// <summary>Довести жизнь до РЕАЛЬНО открытых денег (возраст 18) и снять §D-модалку её же
+        /// контролом. Без этого <see cref="Game"/> отвергает крутилку (<c>MoneyOpen == false</c>), и
+        /// «принятый тик» ниже проверял бы только кэп дохода, а не приём механикой.</summary>
+        private static IEnumerator OpenMoneyInGame(GameDriver driver, PlayFakeInputSource fake)
+        {
+            var g = driver.Game;
+            int guard = 0;
+            while (guard++ < 2000 && g.State == GameState.Playing)
+            {
+                if (driver.NewScaleShowing) { NewScaleTut.Clear(driver, fake); yield return null; continue; }
+                if (driver.TutorialShowing) { fake.Confirm(); yield return null; continue; }
+                if (g.MoneyOpen) break;
+                g.Tick(0.1f);
+            }
+            Assert.IsTrue(g.MoneyOpen, "деньги открыты В ИГРЕ (возраст 18)");
+            Assert.IsFalse(driver.NewScaleShowing, "…и §D-модалка денег снята своим контролом");
+            FlushStarSky(driver);
+        }
+
         private static void SetScale(GameDriver d, AlarmScale s, int v)
         {
             switch (s)
@@ -607,16 +669,19 @@ namespace ThanksNoThanks.Tests.PlayMode
             yield return null;
             driver.DebugReplaceGame(BlockDeck());
             fake.Confirm();
-            fake.No();                                   // → FILL
-            fake.No();                                   // → MD03 (заблокирована)
+            fake.No();                                   // → FILL (18)
+            yield return OpenMoneyInGame(driver, fake);  // …возраст доезжает до 18: деньги открыты В ИГРЕ
+            fake.No();                                   // → MD03 (цена 60₽ ≫ туториальных монет: блокировка)
             driver.DebugApplyAgeGates(40f);
             driver.DebugPumpAlarms(0.02f);
+            Assert.IsTrue(driver.Game.CurrentCardBlocked, "MD03 действительно заблокирована ценой");
             Assert.IsTrue(driver.AlarmActive(AlarmScale.Money));
             int before = driver.StarBurstCount;
 
             if (cranked)
             {
-                fake.Fire(GameInput.MoneyTick);          // ПРИНЯТЫЙ тик (кэп пуст — это первый)
+                driver.DebugAdvanceInputClocks(1f);      // кэп дохода перезаряжен после туториала
+                fake.Fire(GameInput.MoneyTick);          // ПРИНЯТЫЙ тик: и кэп пропустил, и Game засчитал
                 Assert.Less(driver.SinceScaleInput(AlarmScale.Money), GameDriver.AlarmRecentInputSeconds,
                     "принятый тик крутилки действительно открыл окно §6 по деньгам");
             }
@@ -638,7 +703,8 @@ namespace ThanksNoThanks.Tests.PlayMode
         public IEnumerator MoneyWindow_OpensOnAnAcceptedCrankTick_NotOnOneTheIncomeCapRejected()
         {
             var driver = Boot(out var go, out var fake);
-            yield return ToFrozenAdult(driver, fake);    // драйвер заморожен: часы кэпа подаём вручную
+            // Шкалы открыты В ИГРЕ: «принятый тик» — это тик, который засчитал и кэп дохода, и Game.Crank.
+            yield return ToFrozenAdultWithLiveScales(driver, fake);   // драйвер заморожен: часы кэпа вручную
             const AlarmScale money = AlarmScale.Money;
 
             driver.DebugAdvanceInputClocks(1f);          // окно кэпа открыто
@@ -658,13 +724,15 @@ namespace ThanksNoThanks.Tests.PlayMode
             yield return null;
         }
 
-        // То же по энергии: окно открывает только импульс, ПРОПУЩЕННЫЙ ритм-гейтом дыхания. Мэшинг
-        // энергии не восстанавливает, значит и салют за подъём шкалы (её вытянула карточка) не положен.
+        // То же по энергии: окно §6 открывает ПОДНЯТЫЙ ДАТЧИК — то есть реальная работа шкалой. Шкалу,
+        // вытянутую КАРТОЧКОЙ, салют не награждает: салют даётся за калибровку руками, а не за подарок.
+        // (До 2026-08-07 роль «настоящего ввода» играл импульс, пропущенный ритм-гейтом; гейт снят.)
         [UnityTest]
-        public IEnumerator StarBurst_DoesNotFire_WhenTheBreathTapsWereRejectedByTheRhythmGate()
+        public IEnumerator StarBurst_DoesNotFire_WhenTheScaleWasLiftedByACard_NotByTheSensor()
         {
             var driver = Boot(out var go, out var fake);
-            yield return ToFrozenAdult(driver, fake);
+            // Энергия открыта В ИГРЕ — иначе Game отвергает удержание, и «контроль» ниже ничего не проверяет.
+            yield return ToFrozenAdultWithLiveScales(driver, fake);
             const AlarmScale e = AlarmScale.Energy;
 
             driver.Game.Scales.Energy = 10;
@@ -672,32 +740,168 @@ namespace ThanksNoThanks.Tests.PlayMode
             Assert.IsTrue(driver.AlarmActive(e), "энергия в тревоге");
             driver.DebugPumpAlarms(GameDriver.AlarmRecentInputSeconds + 0.5f);   // окно §6 протухло
             int before = driver.StarBurstCount;
-
-            // Мэшинг: первый импульс только СЕЕТ каденцию, остальные приходят с нулевым интервалом —
-            // ритм-гейт не пропускает ни одного (часы дыхания стоят: драйвер заморожен).
-            for (int i = 0; i < 5; i++) fake.Fire(GameInput.EnergyPulse);
             Assert.Greater(driver.SinceScaleInput(e), GameDriver.AlarmRecentInputSeconds,
-                "отвергнутые ритм-гейтом нажатия окно §6 не открывают");
+                "окно §6 честно протухло — датчик никто не трогал");
 
-            driver.Game.Scales.Energy = 60;              // шкалу вытянула КАРТОЧКА, не дыхание
+            driver.Game.Scales.Energy = 60;              // шкалу вытянула КАРТОЧКА, не игрок
             driver.DebugPumpAlarms(0.02f);
             Assert.IsFalse(driver.AlarmActive(e), "тревога снята");
-            Assert.AreEqual(before, driver.StarBurstCount, "без ЗАСЧИТАННОГО дыхания салюта нет");
+            Assert.AreEqual(before, driver.StarBurstCount, "без работы датчиком салюта нет");
             Assert.AreEqual(0, driver.ActiveStarCount, "…и звёзд в воздухе нет");
 
-            // Контроль тем же путём: ВАЛИДНАЯ каденция (пауза 0.6 с в окне [0.4, 1.5]) — импульс
-            // засчитан, окно открылось, выход в норму награждается салютом.
+            // Контроль тем же путём: ПОДНЯТЫЙ датчик — ввод засчитан, окно §6 открылось, выход в норму
+            // награждается салютом.
             driver.Game.Scales.Energy = 10;
             driver.DebugPumpAlarms(0.02f);
             driver.DebugPumpAlarms(GameDriver.AlarmRecentInputSeconds + 0.5f);
             Assert.IsTrue(driver.AlarmActive(e), "снова в тревоге, окно §6 снова протухло");
-            driver.DebugAdvanceInputClocks(0.6f);
-            fake.Fire(GameInput.EnergyPulse);
+            fake.Fire(GameInput.EnergyHold);
             Assert.AreEqual(0f, driver.SinceScaleInput(e), 1e-4f,
-                "импульс в ритме ЗАСЧИТАН — он и открывает окно §6");
+                "поднятый датчик ЗАСЧИТАН — он и открывает окно §6");
             driver.Game.Scales.Energy = 60;
             driver.DebugPumpAlarms(0.02f);
-            Assert.AreEqual(before + 1, driver.StarBurstCount, "калибровка дыханием → салют");
+            Assert.AreEqual(before + 1, driver.StarBurstCount, "работа датчиком → салют");
+
+            Object.Destroy(go);
+            yield return null;
+        }
+
+        // ================================================================ §6-окно ↔ ПРИНЯТЫЙ ввод
+        // MAJOR (скептик 2026-08-07): датчик высоты переиздаётся КАЖДЫЙ кадр, и раньше драйвер отмечал окно
+        // §6 по энергии на КАЖДОМ таком кадре — даже когда Game эти вводы ГЛУШИТ (кризис/депрессия: шкалы
+        // на паузе). Тревога энергии в депрессии живая (AlarmLive депрессию не исключает), поэтому рост
+        // энергии КАРТОЧКОЙ внутри двухсекундного окна выдавал бы ЛОЖНЫЙ салют за работу, которой не было.
+
+        private static readonly string[] CrisisIds =
+            { "CR00", "CR01", "CR02", "CR03", "CR04", "CR05", "CR06", "CR07", "CR08" };
+
+        private static string Csv()
+        {
+            var asset = Resources.Load<TextAsset>("scenes");
+            Assert.IsNotNull(asset, "Resources/scenes present");
+            return asset.text;
+        }
+
+        /// <summary>Игра, доезжающая до кризиса за секунды и гарантированно сваливающаяся в депрессию
+        /// (тот же боот, что в DepressionHudTests).</summary>
+        private static Game CrisisGame(string csv, bool toDepression)
+        {
+            var byId = CardLoader.ParseAll(csv).ToDictionary(c => c.Id);
+            var filler = new Card
+            {
+                Id = "FILL", Question = "FILL?", When = "60", Age = 60, Order = 999,
+                YesDeltas = new List<ScaleDelta>(), NoDeltas = new List<ScaleDelta>(),
+                NoNecrolog = "жил дальше", Flags = new List<string>(),
+            };
+            var plan = new DeckPlan
+            {
+                Deck = new List<Card> { byId["I03"], filler },
+                Reserve = new List<Card>(),
+                Crisis = CrisisIds.Select(id => byId[id]).ToList(),
+                Depression = byId["CR09"],
+            };
+            return new Game(() => plan, coin: () => false)
+            {
+                BlitzNormalOnYesRoll = () => true,
+                DepressionTriggerRoll = () => toDepression,
+                DepressionPulseInterval = () => 2.5f,
+            };
+        }
+
+        /// <summary>Довести НАСТОЯЩИЙ драйвер до блица кризиса, разобрав по пути туториалы и облачко.</summary>
+        private static IEnumerator ReachBlitz(GameDriver driver, Game g, PlayFakeInputSource fake)
+        {
+            driver.DebugReplaceGame(g);
+            fake.Confirm();
+            g.HandleInput(GameInput.AnswerNo);            // resolve I03 → age timer running
+            int guard = 0;
+            while (guard++ < 12000 && g.Phase == CrisisPhase.None && g.State == GameState.Playing)
+            {
+                if (driver.NewScaleShowing) { NewScaleTut.Clear(driver, fake); yield return null; continue; }
+                if (driver.TutorialShowing) { fake.Confirm(); yield return null; continue; }
+                g.Tick(0.2f);
+            }
+            Assert.AreEqual(CrisisPhase.Blitz, g.Phase, "доехали до блица кризиса");
+            driver.DebugPumpHost(GameDriver.BubbleSeconds + 0.1f);   // состарить объявление кризиса
+        }
+
+        // Депрессия ГЛУШИТ все шкальные контролы. Ни один из них не смеет открыть окно §6 — иначе шкала,
+        // вытянутая карточкой в пределах окна, награждается салютом за чужую работу.
+        [UnityTest]
+        public IEnumerator ScaleWindow_StaysShut_WhenDepressionSwallowsTheControls_AndNoFalseStarBurst()
+        {
+            var driver = Boot(out var go, out var fake);
+            yield return null;
+
+            var g = CrisisGame(Csv(), toDepression: true);
+            yield return ReachBlitz(driver, g, fake);
+            for (int i = 0; i < 5; i++) fake.Yes();                   // чистый блиц → хвост скатывается в депрессию
+            Assert.IsTrue(g.InDepression, "хвост кризиса завёл депрессию");
+            driver.DebugPumpHost(GameDriver.BubbleSeconds + 0.1f);    // состарить облачко «ТЁМНАЯ ПОЛОСА…»
+            yield return null;
+
+            driver.enabled = false;                                   // дальше время подаём вручную
+            driver.DebugApplyAgeGates(40f);                           // весь взрослый HUD на экране
+            const AlarmScale e = AlarmScale.Energy;
+
+            g.Scales.Energy = 10;
+            driver.DebugPumpAlarms(0.02f);
+            Assert.IsTrue(driver.AlarmActive(e),
+                "тревога энергии в депрессии ЖИВАЯ — значит ложный салют физически возможен");
+            driver.DebugPumpAlarms(GameDriver.AlarmRecentInputSeconds + 0.5f);   // окна §6 протухли
+            int before = driver.StarBurstCount;
+
+            // Игрок держит датчик (источник переиздаёт его каждый кадр) — но механика его глушит.
+            for (int i = 0; i < 5; i++) fake.Fire(GameInput.EnergyHold);
+            Assert.Greater(driver.SinceScaleInput(e), GameDriver.AlarmRecentInputSeconds,
+                "заглушенное депрессией удержание окно §6 по энергии НЕ открывает");
+
+            driver.DebugAdvanceInputClocks(1f);
+            fake.Fire(GameInput.MoneyTick);
+            Assert.Greater(driver.SinceScaleInput(AlarmScale.Money), GameDriver.AlarmRecentInputSeconds,
+                "…крутилка в депрессии — тоже не работа по шкале");
+            fake.Fire(GameInput.RelationUp);
+            Assert.Greater(driver.SinceScaleInput(AlarmScale.Relations), GameDriver.AlarmRecentInputSeconds,
+                "…и рычаг отношений");
+            fake.No();
+            Assert.Greater(driver.SinceScaleInput(AlarmScale.Health), GameDriver.AlarmRecentInputSeconds,
+                "…и ответ на карточку (в депрессии карточек нет)");
+
+            // Шкалу вытягивает КАРТОЧКА — внутри бывшего «окна». Салюта быть не должно.
+            g.Scales.Energy = 60;
+            driver.DebugPumpAlarms(0.02f);
+            Assert.IsFalse(driver.AlarmActive(e), "тревога снята");
+            Assert.AreEqual(before, driver.StarBurstCount, "ложного салюта в депрессии НЕТ");
+            Assert.AreEqual(0, driver.ActiveStarCount, "…и звёзд в воздухе нет");
+
+            Object.Destroy(go);
+            yield return null;
+        }
+
+        // То же для кризиса: блиц ГЛУШИТ крутилку/датчик/ось и ПЕРЕНАЗНАЧАЕТ рычаги ДА/НЕТ под свои кнопки —
+        // нажатие в блице не является калибровкой шкалы здоровья.
+        [UnityTest]
+        public IEnumerator ScaleWindow_StaysShut_WhenTheCrisisSwallowsOrRepurposesTheControls()
+        {
+            var driver = Boot(out var go, out var fake);
+            yield return null;
+
+            var g = CrisisGame(Csv(), toDepression: false);
+            yield return ReachBlitz(driver, g, fake);
+            driver.enabled = false;
+            driver.DebugApplyAgeGates(40f);
+            driver.DebugPumpAlarms(GameDriver.AlarmRecentInputSeconds + 0.5f);   // окна §6 протухли
+
+            for (int i = 0; i < 5; i++) fake.Fire(GameInput.EnergyHold);
+            driver.DebugAdvanceInputClocks(1f);
+            fake.Fire(GameInput.MoneyTick);
+            fake.Fire(GameInput.RelationDown);
+            Assert.AreEqual(CrisisPhase.Blitz, g.Phase, "всё ещё в блице (шкальные контролы тут инертны)");
+            fake.Yes();                                               // рычаг ДА = кнопка блица, НЕ ответ
+
+            foreach (AlarmScale s in System.Enum.GetValues(typeof(AlarmScale)))
+                Assert.Greater(driver.SinceScaleInput(s), GameDriver.AlarmRecentInputSeconds,
+                    "кризис не открывает окно §6 ни по одной шкале: " + s);
 
             Object.Destroy(go);
             yield return null;

@@ -13,6 +13,9 @@ namespace ThanksNoThanks.Tests.PlayMode
     /// (meeting-revisions §2: «окно НЕ уходит, пока игрок не приведёт шкалу в нужный режим»), the CRANK is
     /// what closes it — and the money HUD + crank stay live IMMEDIATELY afterwards on the same card.
     ///
+    /// ⚠ 2026-08-07: закрывает НЕ первый тик, а <see cref="GameDriver.MoneyTutorialTicks"/> принятых тиков
+    /// (основательница: «крутить ручку денег надо дольше на туториале — слишком быстро пропадает»).
+    ///
     /// The founder's Gate-2 rule «крутилка не снимает подсказку» is unchanged for the hints that are still
     /// hints (health 30, burnout — DriverLiveHudTests): there the crank is inert. On the §D screen the crank
     /// is not a dismiss control, it is the TASK — «Верти ручку — и монетки посыплются в копилку».
@@ -80,11 +83,24 @@ namespace ThanksNoThanks.Tests.PlayMode
             Assert.IsTrue(driver.Game.Paused, "still paused");
             Assert.AreSame(card, driver.Game.CurrentCard, "…and no answer was banked either");
 
-            // The CRANK is the task: one accepted tick pays income AND satisfies the screen.
+            // The CRANK is the task: N accepted ticks pay income AND satisfy the screen. One tick is NOT
+            // enough any more — the screen must survive a lone tick, so the founder gets «пару секунд
+            // верчения» instead of a window that vanishes before she reads it.
             driver.DebugAdvanceInputClocks(1f);            // the ~5/s income cap is armed
             fake.Fire(GameInput.MoneyTick);
             Assert.Greater(driver.Game.Money, money0, "the crank is LIVE under the pause — income landed");
-            driver.DebugAdvanceNewScale(0.05f);                          // условие засчитано → фейд
+            driver.DebugAdvanceNewScale(0.05f);
+            Assert.IsFalse(driver.NewScaleSatisfied, "ОДИН тик экран не закрывает (2026-08-07)");
+            Assert.IsTrue(driver.NewScaleShowing, "…он всё ещё на экране");
+
+            for (int i = 1; i < GameDriver.MoneyTutorialTicks; i++)
+            {
+                driver.DebugAdvanceInputClocks(1f);
+                fake.Fire(GameInput.MoneyTick);
+                driver.DebugAdvanceNewScale(0.05f);
+            }
+            Assert.IsTrue(driver.NewScaleSatisfied,
+                $"{GameDriver.MoneyTutorialTicks} принятых тиков — условие выполнено");
             driver.DebugAdvanceNewScale(GameDriver.NewScaleFadeSeconds);
             Assert.IsFalse(driver.NewScaleShowing, "the crank closed the screen");
             Assert.IsFalse(driver.NewScaleOverlay.activeSelf, "overlay hidden");
@@ -120,7 +136,7 @@ namespace ThanksNoThanks.Tests.PlayMode
             // While the screen is up the jar is ALREADY on screen — enlarged, as the §D reference draws it.
             Assert.AreSame(driver.MoneyJar, driver.NewScaleBigWidget, "the big scale IS the money jar");
 
-            NewScaleTut.Clear(driver, fake);               // crank once → screen closes
+            NewScaleTut.Clear(driver, fake);               // N принятых тиков → экран уходит
             Assert.IsFalse(driver.NewScaleShowing, "screen closed");
             Assert.IsTrue(driver.MoneyJar.activeSelf,
                 "money jar visible the MOMENT the screen closes — not one card later");
@@ -164,10 +180,18 @@ namespace ThanksNoThanks.Tests.PlayMode
             fake.Fire(GameInput.MoneyTickRepeat);
             Assert.AreEqual(afterFirst, driver.Game.Money, 1e-6,
                 "…and the second half is swallowed by the ~5/s income cap — one tick, not two");
+            Assert.AreEqual(1, driver.NewScaleCrankTicks,
+                "…и в счёт условия он тоже пошёл ровно ОДИН раз");
 
+            // Докручиваем до N принятых тиков — только тогда задача выполнена.
+            for (int i = 1; i < GameDriver.MoneyTutorialTicks; i++)
+            {
+                driver.DebugAdvanceInputClocks(1f);
+                fake.Fire(GameInput.MoneyTick);
+            }
             driver.DebugAdvanceNewScale(0.05f);                          // условие засчитано → фейд
             driver.DebugAdvanceNewScale(GameDriver.NewScaleFadeSeconds);
-            Assert.IsFalse(driver.NewScaleShowing, "the accepted tick satisfied the task");
+            Assert.IsFalse(driver.NewScaleShowing, "the accepted ticks satisfied the task");
 
             Object.Destroy(go);
             yield return null;

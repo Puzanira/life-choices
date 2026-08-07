@@ -28,6 +28,14 @@ namespace ThanksNoThanks.Tests.PlayMode
         // кремовое поле окна-задачи, кремовое поле облачка, обводка КРУПНОЙ батареи.
         private static readonly Vector4 RefTaskField = new(393f, 343f, 1625f, 819f);   // L, T, R, B
         private static readonly Vector4 RefStoryField = new(1014f, 107f, 1747f, 343f);
+        // ⚠ КАЙМА ≠ alpha-tight поле. RefTaskField — прямоугольный bbox кремового пятна, но нарисованная
+        // кайма плашки идёт ПО ЗВЁЗДАМ, и на строках задачи кремовое поле ýже: замер по кадрам r2
+        // (1920×1080, самая узкая строка текстовой полосы) даёт x 449…1576. Против НЕГО и меряется
+        // «дыхание» — против bbox зазор считался бы на ~50 px оптимистичнее, чем видит глаз.
+        private static readonly Vector4 RefTaskFrameInner = new(449f, 343f, 1576f, 819f);
+        /// <summary>Минимальный зазор глифов задачи до каймы (дизайн-скептик 2026-08-07: было 7 px слева
+        /// на энергии — текст читался «втиснутым»). Цель раскладки ~30+ px, гард держит нижнюю границу.</summary>
+        private const float TaskBreathMin = 20f;
         // ⚠ У батареи на эталоне ДВА разных бокса, и их нельзя путать (на этом и разъехалась раскладка):
         //   • ВНУТРЕННЯЯ КРОМКА ОБВОДКИ — x 207…412, y 145…546. Это то, что меряется с эталона «по рамке»;
         //     против него считает NewScaleBigWidgetLayoutTests (GameDriver.BatteryInnerStrokeRef).
@@ -193,6 +201,33 @@ namespace ThanksNoThanks.Tests.PlayMode
             return (cx - w / 2f, cy - h / 2f, cx + w / 2f, cy + h / 2f);
         }
 
+        /// <summary>
+        /// Бокс, который текст РЕАЛЬНО закрашивает (сетка глифов с учётом best-fit), в реф-px — а не его
+        /// рект. Именно глифы упираются в кайму, и именно их мерил дизайн-скептик.
+        /// </summary>
+        private static (float L, float T, float R, float B) GlyphBox(RectTransform canvas, Text t)
+        {
+            var settings = t.GetGenerationSettings(t.rectTransform.rect.size);
+            var tg = t.cachedTextGenerator;
+            tg.Populate(t.text, settings);
+            Assert.Greater(tg.characterCountVisible, 0, "«" + t.name + "» рисует глифы (не пусто и не тофу)");
+
+            float upp = 1f / t.pixelsPerUnit;
+            float k = Mathf.Abs(t.rectTransform.lossyScale.x / canvas.lossyScale.x);
+            float minX = float.MaxValue, maxX = float.MinValue, minY = float.MaxValue, maxY = float.MinValue;
+            var verts = tg.verts;
+            for (int i = 0; i < verts.Count; i++)
+            {
+                var p = verts[i].position;
+                float x = p.x * upp * k, y = p.y * upp * k;
+                if (x < minX) minX = x; if (x > maxX) maxX = x;
+                if (y < minY) minY = y; if (y > maxY) maxY = y;
+            }
+            var c = RefCentre(canvas, t.rectTransform);
+            // Вершины локальны ректу (пивот в центре); локальный +y — это реф-px ВВЕРХ, то есть −y.
+            return (c.x + minX, c.y - maxY, c.x + maxX, c.y - minY);
+        }
+
         private static (float L, float T, float R, float B) RefBox(RectTransform canvas, RectTransform rt)
         {
             var c = RefCentre(canvas, rt);
@@ -327,11 +362,22 @@ namespace ThanksNoThanks.Tests.PlayMode
             driver.DebugAdvanceNewScale(3f);
             Assert.IsTrue(driver.NewScaleShowing, "без крутилки окно стоит сколько угодно");
 
-            driver.DebugAdvanceInputClocks(1f);
-            fake.Fire(GameInput.MoneyTick);                  // ПРИНЯТЫЙ тик — через кэп и Game.Crank
+            // ⚠ 2026-08-07: условие — НЕ первый тик, а N (основательница: «крутить надо дольше, слишком
+            // быстро пропадает»). Сначала N−1 тиков: деньги идут, монетки капают, а окно СТОИТ.
+            for (int i = 0; i < GameDriver.MoneyTutorialTicks - 1; i++)
+            {
+                driver.DebugAdvanceInputClocks(1f);
+                fake.Fire(GameInput.MoneyTick);              // ПРИНЯТЫЙ тик — через кэп и Game.Crank
+                driver.DebugAdvanceNewScale(0.05f);
+            }
             Assert.Greater(driver.Game.Money, money0, "крутилка живая под модалкой: деньги пришли");
-            Assert.IsTrue(driver.NewScaleArmed, "условие денег выполнено принятым тиком");
+            Assert.IsTrue(driver.NewScaleArmed, "ввод по шкале был");
+            Assert.IsFalse(driver.NewScaleSatisfied,
+                $"{GameDriver.MoneyTutorialTicks - 1} тиков — окно ЕЩЁ стоит (условие {GameDriver.MoneyTutorialTicks})");
+            Assert.IsTrue(driver.NewScaleShowing, "…и оно на экране");
 
+            driver.DebugAdvanceInputClocks(1f);
+            fake.Fire(GameInput.MoneyTick);                  // N-й тик — вот теперь условие
             driver.DebugAdvanceNewScale(0.05f);
             Assert.IsTrue(driver.NewScaleSatisfied, "условие засчитано → пошёл фейд");
             Assert.IsTrue(driver.NewScaleShowing, "во время фейда окно ещё на экране");
@@ -350,54 +396,121 @@ namespace ThanksNoThanks.Tests.PlayMode
             yield return null;
         }
 
+        /// <summary>
+        /// РЕДИЗАЙН 2026-08-07 (основательница дословно: «просто зажать датчик высоты, пока батарейка не
+        /// заполнится»). Условие экрана энергии — ПОЛНАЯ батарея, и наполнить её можно только УДЕРЖАНИЕМ:
+        /// отпустил — рост встал (под модалкой время заморожено, поэтому шкала просто СТОИТ), зажал — растёт
+        /// на глазах. Ритм-гейта, «не в ритм» и полутора секунд «в рабочей зоне» больше нет.
+        /// </summary>
         [UnityTest]
-        public IEnumerator Energy_NeedsAValidBreath_Above40_HeldForOneAndAHalfSeconds()
+        public IEnumerator Energy_ClosesOnlyWhenTheBatteryIsFull_AndOnlyHoldingFillsIt()
         {
             var driver = Boot(out var go, out var fake);
             yield return null;                                   // Start подписал ввод
             SetupTo(driver, fake, NewScale.Energy);
 
-            // Шкала стоит НИЖЕ рабочей зоны — задача «подними дыханием» имеет смысл.
-            driver.Game.Scales.Energy = 30;
+            // Шкала открывается ПРОСЕВШЕЙ — иначе наполнять было бы нечего.
+            Assert.AreEqual(Game.EnergyOpenValue, driver.Game.Scales.Energy,
+                "энергия открывается на «первой усталости», а не полной");
 
-            // Мэшинг (интервалы ниже ритм-окна) механикой отвергается: ни энергии, ни взвода.
+            // Датчик НЕ поднят: время под модалкой заморожено, поэтому батарея не двигается вообще.
             int e0 = driver.Game.Scales.Energy;
-            for (int i = 0; i < 6; i++) { driver.DebugAdvanceInputClocks(0.05f); fake.Fire(GameInput.EnergyPulse); }
-            Assert.AreEqual(e0, driver.Game.Scales.Energy, "мэшинг дыханием ничего не восстанавливает");
-            Assert.IsFalse(driver.NewScaleArmed, "…и условие не взводит");
+            for (int i = 0; i < 40; i++) { driver.Game.Tick(0.25f); driver.DebugAdvanceNewScale(0.25f); }
+            Assert.AreEqual(e0, driver.Game.Scales.Energy, "без поднятого датчика батарея не растёт");
+            Assert.IsFalse(driver.NewScaleArmed, "…и условие не взводится");
+            Assert.IsTrue(driver.NewScaleShowing, "…а окно стоит сколько угодно");
 
-            // Спокойная каденция: первый импульс сеет ритм, дальше каждый валиден и даёт +3 %.
-            int guard = 0;
-            while (driver.Game.Scales.Energy <= GameDriver.NewScaleEnergyAbove && guard++ < 40)
-            {
-                driver.DebugAdvanceInputClocks(0.8f);
-                fake.Fire(GameInput.EnergyPulse);
-            }
-            Assert.Greater(driver.Game.Scales.Energy, GameDriver.NewScaleEnergyAbove,
-                "дыхание живое ПОД ПАУЗОЙ: энергия поднялась выше 40 %");
-            Assert.IsTrue(driver.NewScaleArmed, "валидный ритм-цикл взвёл условие");
-
-            // Удержание видно и считается: полоска прогресса заполняется.
+            // Зажали датчик: батарея наполняется НА ГЛАЗАХ, но пока не полна — окно держится.
+            fake.Fire(GameInput.EnergyHold);
+            driver.Game.Tick(0.5f);
             driver.DebugAdvanceNewScale(0.5f);
-            Assert.IsTrue(driver.NewScaleHoldTrack.gameObject.activeSelf, "прогресс удержания ВИДЕН");
-            Assert.Greater(driver.NewScaleHoldFraction, 0.2f, "полоска заполняется");
-            Assert.IsTrue(driver.NewScaleShowing, "1.5 с ещё не выдержаны — окно стоит");
+            Assert.Greater(driver.Game.Scales.Energy, e0, "поднятый датчик наполняет батарею под паузой");
+            Assert.IsTrue(driver.NewScaleArmed, "…и это РЕАЛЬНЫЙ ввод по шкале");
+            Assert.Less(driver.Game.Scales.Energy, GameDriver.NewScaleEnergyFull, "батарея ещё не полна…");
+            Assert.IsFalse(driver.NewScaleSatisfied, "…значит условие не выполнено");
 
-            // Провал ниже 40 % сбрасывает удержание.
-            driver.Game.Scales.Energy = 20;
-            driver.DebugAdvanceNewScale(0.2f);
-            Assert.AreEqual(0f, driver.NewScaleHoldFraction, 1e-3f, "вышел из режима — удержание с нуля");
-            Assert.IsFalse(driver.NewScaleSatisfied, "и условие не засчитано");
+            // Отпустили на несколько тактов: рост встал ровно там, где отпустили.
+            int paused = driver.Game.Scales.Energy;
+            for (int i = 0; i < 8; i++) { driver.Game.Tick(0.25f); driver.DebugAdvanceNewScale(0.25f); }
+            Assert.AreEqual(paused, driver.Game.Scales.Energy, "отпустил → рост прекратился");
+            Assert.IsTrue(driver.NewScaleShowing, "…и окно не ушло");
 
-            driver.Game.Scales.Energy = 60;
-            driver.DebugAdvanceNewScale(GameDriver.NewScaleHoldSeconds + 0.05f);
-            Assert.IsTrue(driver.NewScaleSatisfied, "выдержал 1.5 с в режиме → условие выполнено");
+            // Держим до конца — батарея заполняется, и ТОЛЬКО тогда экран уходит с салютом.
+            int stars0 = driver.StarBurstCount;
+            int guard = 0;
+            while (driver.Game.Scales.Energy < GameDriver.NewScaleEnergyFull && guard++ < 60)
+            {
+                fake.Fire(GameInput.EnergyHold);
+                driver.Game.Tick(0.25f);
+                driver.DebugAdvanceNewScale(0.25f);
+            }
+            Assert.GreaterOrEqual(driver.Game.Scales.Energy, GameDriver.NewScaleEnergyFull, "батарея полна");
+            driver.DebugAdvanceNewScale(0.05f);
+            Assert.IsTrue(driver.NewScaleSatisfied, "полная батарея → условие выполнено");
             driver.DebugAdvanceNewScale(GameDriver.NewScaleFadeSeconds);
             Assert.IsFalse(driver.NewScaleShowing, "окно ушло");
+            Assert.AreEqual(stars0 + 1, driver.StarBurstCount, "салют");
             Assert.IsFalse(driver.Game.Paused, "пауза снята");
 
             Object.Destroy(go);
             yield return null;
+        }
+
+        /// <summary>
+        /// ПОЛОС ПРОГРЕССА БОЛЬШЕ НЕТ — гард отсутствия (основательница 2026-08-07: «убрать полосу
+        /// прогресса в туториалах»). Проверяется не флагом драйвера, а самой ИЕРАРХИЕЙ оверлея: ни на одном
+        /// из четырёх экранов внутри модалки не должно быть ни дорожки, ни заполнения — как бы далеко игрок
+        /// ни продвинулся по условию.
+        /// </summary>
+        [UnityTest]
+        public IEnumerator NoProgressBar_OnAnyModal_TheWidgetItselfIsTheProgress()
+        {
+            foreach (var kind in new[] { NewScale.Money, NewScale.Relations, NewScale.Energy, NewScale.Child })
+            {
+                var driver = Boot(out var go, out var fake);
+                yield return null;
+                SetupTo(driver, fake, kind);
+
+                AssertNoBar(driver, kind, "сразу на открытии");
+
+                // …и после реального ввода по шкале (раньше полоска появлялась ровно тут — по «взводу»).
+                switch (kind)
+                {
+                    case NewScale.Money:
+                        driver.DebugAdvanceInputClocks(1f); fake.Fire(GameInput.MoneyTick); break;
+                    case NewScale.Energy:
+                        fake.Fire(GameInput.EnergyHold); driver.Game.Tick(0.5f); break;
+                    case NewScale.Relations:
+                        fake.Fire(GameInput.RelationUp); driver.Game.Tick(0.1f); break;
+                    case NewScale.Child:
+                        break;   // у ребёнка «взвод» = выполненное условие, окно уже уходит
+                }
+                driver.DebugAdvanceNewScale(0.5f);
+                AssertNoBar(driver, kind, "после реального ввода по шкале");
+
+                Object.Destroy(go);
+                yield return null;
+            }
+        }
+
+        // Обходим СОБСТВЕННУЮ обвязку модалки, но НЕ одолженный HUD-виджет (BigScaleSlot): там законно
+        // живут «RelBar»/«HealthBar» самой шкалы — это её рисунок, а не полоса прогресса туториала.
+        private static void AssertNoBar(GameDriver driver, NewScale kind, string when)
+        {
+            Walk(driver.NewScaleOverlay.transform, kind, when);
+        }
+
+        private static void Walk(Transform node, NewScale kind, string when)
+        {
+            for (int i = 0; i < node.childCount; i++)
+            {
+                var c = node.GetChild(i);
+                if (c.name == "BigScaleSlot") continue;             // одолженный виджет — не наша обвязка
+                string n = c.name;
+                Assert.IsFalse(n.Contains("Hold") || n.Contains("Progress") || n.Contains("Bar"),
+                    $"{kind} ({when}): в модалке остался элемент прогресса «{n}» — полосы сняты 2026-08-07");
+                Walk(c, kind, when);
+            }
         }
 
         [UnityTest]
@@ -561,15 +674,11 @@ namespace ThanksNoThanks.Tests.PlayMode
             Assert.IsFalse(driver.NewScaleArmed, "чужие вводы условие энергии не взводят");
             Assert.IsTrue(driver.NewScaleShowing, "…и окно, разумеется, не закрывают");
 
-            // А СВОЙ контрол жив: валидный ритм-цикл дыхания проходит и взводит условие.
+            // А СВОЙ контрол жив: поднятый датчик наполняет батарею и взводит условие.
             driver.Game.Scales.Energy = 30;
-            int breathGuard = 0;
-            while (!driver.NewScaleArmed && breathGuard++ < 12)
-            {
-                driver.DebugAdvanceInputClocks(0.8f);   // спокойная каденция: 1-й сеет ритм, дальше валидны
-                fake.Fire(GameInput.EnergyPulse);
-            }
-            Assert.Greater(driver.Game.Scales.Energy, 30, "СВОЙ контрол (дыхание) под модалкой живой");
+            fake.Fire(GameInput.EnergyHold);
+            driver.Game.Tick(0.5f);
+            Assert.Greater(driver.Game.Scales.Energy, 30, "СВОЙ контрол (датчик высоты) под модалкой живой");
             Assert.IsTrue(driver.NewScaleArmed, "…и он же взводит условие");
 
             Object.Destroy(go);
@@ -712,8 +821,8 @@ namespace ThanksNoThanks.Tests.PlayMode
         /// «отложки» достаточно и обрабатывать выгорание в середине экрана не нужно. Доказательство, а не
         /// рассуждение: держим энергию РОВНО на пороге латча (≤10 %) и лупим по всем контролам сколько
         /// угодно — латч не срабатывает, потому что под паузой <see cref="Game.Tick"/> не доходит до
-        /// дренажа энергии, а единственный оставшийся путь пересчёта (вдох) энергию только ПОДНИМАЕТ и на
-        /// чужом экране вдобавок отфильтрован. Экран остаётся проходимым.
+        /// дренажа энергии, а единственный оставшийся путь пересчёта (поднятый датчик) энергию только
+        /// ПОДНИМАЕТ и на чужом экране вдобавок отфильтрован. Экран остаётся проходимым.
         /// </summary>
         [UnityTest]
         public IEnumerator BurnoutCannotStart_UnderAnOpenChildModal_SoTheScreenStaysWinnable()
@@ -734,7 +843,7 @@ namespace ThanksNoThanks.Tests.PlayMode
             {
                 driver.DebugAdvanceInputClocks(1f);
                 fake.Fire(GameInput.MoneyTick);       // чужие контролы — все, какие есть
-                fake.Fire(GameInput.EnergyPulse);
+                fake.Fire(GameInput.EnergyHold);
                 fake.Fire(GameInput.RelationUp);
                 fake.Yes(); fake.No();                // …и ответы, которые под экраном инертны
                 driver.DebugTick(0.1f);
@@ -743,7 +852,7 @@ namespace ThanksNoThanks.Tests.PlayMode
             Assert.IsFalse(driver.Game.Burnout,
                 "выгорание НЕ начинается под открытой модалкой: дренаж энергии заморожен паузой");
             Assert.AreEqual(Game.BurnoutEnterEnergyAtOrBelow, driver.Game.Scales.Energy,
-                "…и сама энергия под экраном ребёнка не двигается ни вниз (дренаж), ни вверх (чужой вдох)");
+                "…и сама энергия под экраном ребёнка не двигается ни вниз (дренаж), ни вверх (чужой датчик)");
             Assert.IsTrue(driver.NewScaleShowing, "экран всё ещё стоит и всё ещё ждёт СВОЕГО ввода");
             Assert.IsTrue(driver.Game.ChildFlashing, "звонок жив");
             Assert.IsTrue(driver.ChildGroup.activeSelf, "трубка на экране — накрывать её нечем");
@@ -843,11 +952,49 @@ namespace ThanksNoThanks.Tests.PlayMode
             Assert.GreaterOrEqual(taskText.T, RefTaskField.y, "…и вверх");
             Assert.LessOrEqual(taskText.B, RefTaskField.w, "…и вниз");
 
+            // …и НЕ ВПРИТЫК к кайме: меряем НАРИСОВАННЫЕ глифы, а не рект (рект может быть с полями, а
+            // best-fit всё равно раздувает строку до его краёв — так и вышло 7 px слева на энергии).
+            var taskGlyphs = GlyphBox(canvas, driver.NewScaleTaskText);
+            Assert.GreaterOrEqual(taskGlyphs.L - RefTaskFrameInner.x, TaskBreathMin,
+                $"глифы задачи дышат слева (зазор {taskGlyphs.L - RefTaskFrameInner.x:0.#} px)");
+            Assert.GreaterOrEqual(RefTaskFrameInner.z - taskGlyphs.R, TaskBreathMin,
+                $"…и справа (зазор {RefTaskFrameInner.z - taskGlyphs.R:0.#} px)");
+
             var storyText = RefBox(canvas, driver.NewScaleStoryText.rectTransform);
             Assert.GreaterOrEqual(storyText.L, RefStoryField.x, "текст рассказа не вылезает влево из поля");
             Assert.LessOrEqual(storyText.R, RefStoryField.z, "…и вправо");
             Assert.GreaterOrEqual(storyText.T, RefStoryField.y, "…и вверх");
             Assert.LessOrEqual(storyText.B, RefStoryField.w, "…и вниз");
+
+            Object.Destroy(go);
+            yield return null;
+        }
+
+        /// <summary>
+        /// Тот же зазор — на ВСЕХ ЧЕТЫРЁХ модалках. Дыра, которую это закрывает: текст задачи один на все
+        /// четыре экрана, кегль выбирает best-fit, и КОРОТКАЯ формулировка набирается КРУПНЕЕ длинной —
+        /// значит «поправили энергию» ничего не гарантирует деньгам, отношениям и ребёнку. Проверяется
+        /// НАРИСОВАННЫЙ текст против каймы, а не рект против bbox.
+        /// </summary>
+        [UnityTest]
+        public IEnumerator TaskGlyphs_KeepBreathingRoom_FromTheFrame_OnEveryModal(
+            [Values(NewScale.Money, NewScale.Relations, NewScale.Energy, NewScale.Child)] NewScale which)
+        {
+            var driver = Boot(out var go, out var fake);
+            yield return null;
+            driver.DebugPreviewNewScale(which);
+            yield return null;
+
+            var canvas = driver.CanvasRect;
+            Assert.AreEqual(GameDriver.NewScaleTask(which), driver.NewScaleTaskText.text,
+                which + ": на экране канон-задача");
+
+            var g = GlyphBox(canvas, driver.NewScaleTaskText);
+            float padL = g.L - RefTaskFrameInner.x, padR = RefTaskFrameInner.z - g.R;
+            Assert.GreaterOrEqual(padL, TaskBreathMin, $"{which}: зазор слева {padL:0.#} px — текст втиснут");
+            Assert.GreaterOrEqual(padR, TaskBreathMin, $"{which}: зазор справа {padR:0.#} px — текст втиснут");
+            Assert.GreaterOrEqual(g.T, RefTaskField.y, which + ": глифы не вылезают вверх из поля");
+            Assert.LessOrEqual(g.B, RefTaskField.w, which + ": …и вниз");
 
             Object.Destroy(go);
             yield return null;

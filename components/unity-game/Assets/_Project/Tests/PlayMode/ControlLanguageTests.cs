@@ -47,7 +47,8 @@ namespace ThanksNoThanks.Tests.PlayMode
         }
 
         // Live a whole run out to the payoff screen on the semantic input funnel (same shape as the other
-        // driver tests): decline late cards, breathe when energy is open, dismiss hints on the confirm.
+        // driver tests): decline late cards, hold the height sensor when energy sags, dismiss hints on the
+        // confirm.
         private static void DriveToFinale(GameDriver driver, PlayFakeInputSource fake)
         {
             int guard = 0;
@@ -57,10 +58,9 @@ namespace ThanksNoThanks.Tests.PlayMode
                 // проходят реальным контролом шкалы (NewScaleTut), остальные подсказки — как раньше.
                 if (driver.NewScaleShowing) { NewScaleTut.Clear(driver, fake); continue; }
                 if (driver.TutorialShowing) { fake.Confirm(); continue; }
+                if (driver.Game.EnergyOpen && driver.Game.Scales.Energy < 60)
+                    fake.Fire(GameInput.EnergyHold);     // датчик зажат, пока батарея ниже половины
                 driver.Game.Tick(0.5f);
-                if (driver.Game.EnergyOpen)
-                    for (int i = 0; i < 3 && driver.Game.State == GameState.Playing; i++)
-                        fake.Fire(GameInput.EnergyPulse);
                 if (driver.Game.CurrentCard != null && driver.Game.CardTimer < 3f) fake.No();
             }
         }
@@ -289,9 +289,8 @@ namespace ThanksNoThanks.Tests.PlayMode
             // (в) без плат: подсказка появляется и называет клавишу ИЗ КОНФИГА ПАКЕТА.
             serial.ProvidesHeights = false;
             yield return null;
-            string expected = GameDriver.KeyHintPrefix
-                + KeyboardHints.PrimaryFor(KeyboardMapping.LoadDefault(), ArcadeControlId.HeightA)
-                + GameDriver.BreathKeyHintTail;
+            string expected = GameDriver.BreathKeyHintPrefix
+                + KeyboardHints.PrimaryFor(KeyboardMapping.LoadDefault(), ArcadeControlId.HeightA);
             Assert.AreEqual(expected, driver.NewScaleHintLine.text,
                 "без плат строка есть и собрана из маппинга пакета, а не из зашитой в игре буквы");
 

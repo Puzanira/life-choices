@@ -11,7 +11,7 @@ namespace ThanksNoThanks.Tests.PlayMode
     /// on a button — only on the scale's REAL control. So a walker that used to say
     /// «<c>if (driver.TutorialShowing) fake.Confirm();</c>» has to work the control instead.
     ///
-    /// Everything here goes through the ordinary input path (crank cap, breath rhythm gate, balancer axis,
+    /// Everything here goes through the ordinary input path (crank cap, held height sensor, balancer axis,
     /// child press window) — nothing is force-flagged — and the modal's own clock is pumped through the
     /// same seam Update drives, so a synchronous test loop can pass through the screen deterministically.
     /// </summary>
@@ -21,17 +21,17 @@ namespace ThanksNoThanks.Tests.PlayMode
         public static void Clear(GameDriver driver, PlayFakeInputSource fake)
         {
             int guard = 0;
-            while (driver.NewScaleShowing && driver.Game.State == GameState.Playing && guard++ < 60)
+            while (driver.NewScaleShowing && driver.Game.State == GameState.Playing && guard++ < 200)
             {
                 switch (driver.NewScaleKind)
                 {
                     case NewScale.Money:
                         driver.DebugAdvanceInputClocks(1f);          // let the ~5/s income cap re-arm
-                        fake.Fire(GameInput.MoneyTick);              // …one ACCEPTED crank tick
+                        fake.Fire(GameInput.MoneyTick);              // …one ACCEPTED crank tick (N нужно N)
                         break;
                     case NewScale.Energy:
-                        driver.DebugAdvanceInputClocks(0.8f);        // a calm cadence between breaths
-                        fake.Fire(GameInput.EnergyPulse);            // 1st seeds the rhythm, 2nd is valid
+                        fake.Fire(GameInput.EnergyHold);             // датчик зажат ЭТОТ такт…
+                        driver.Game.Tick(0.5f);                      // …и такт наполняет батарею (TickModalBreath)
                         break;
                     case NewScale.Relations:
                         fake.Fire(GameInput.RelationUp);             // the balancer lever (starts in zone)
@@ -61,7 +61,7 @@ namespace ThanksNoThanks.Tests.PlayMode
         public static IEnumerator ClearArcade(GameDriver driver, FakeBackend backend)
         {
             int guard = 0;
-            while (driver.NewScaleShowing && driver.Game.State == GameState.Playing && guard++ < 400)
+            while (driver.NewScaleShowing && driver.Game.State == GameState.Playing && guard++ < 1500)
             {
                 switch (driver.NewScaleKind)
                 {
@@ -82,11 +82,10 @@ namespace ThanksNoThanks.Tests.PlayMode
                         yield return null;
                         break;
                     case NewScale.Energy:
-                        backend.Next = new BackendSnapshot { HeightA = 0.85f };   // вдох — импульс на подъёме
+                        // «Зажми и держи»: датчик просто СТОИТ поднятым кадр за кадром, пока батарея не
+                        // наполнится и экран не уйдёт сам (значение per-poll — поэтому ставим каждый кадр).
+                        backend.Next = new BackendSnapshot { HeightA = 0.85f };
                         yield return null;
-                        backend.Next = new BackendSnapshot { HeightA = 0.15f };   // выдох — рычаг взводится
-                        float t = 0f;
-                        while (t < 0.5f) { t += Time.deltaTime; yield return null; }   // спокойная каденция
                         break;
                 }
             }

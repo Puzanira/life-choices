@@ -342,8 +342,8 @@ namespace ThanksNoThanks.Tests
             while (g.State == GameState.Playing && guard++ < 100000)
             {
                 g.Tick(0.25f);
-                for (int i = 0; i < 6 && g.EnergyOpen && g.State == GameState.Playing; i++)
-                    g.HandleInput(GameInput.EnergyPulse);   // breathe so energy never kills first
+                if (g.EnergyOpen && g.State == GameState.Playing)
+                    g.HandleInput(GameInput.EnergyHold);    // датчик зажат — энергия не убьёт раньше
             }
             Assert.AreEqual(GameState.Finale, g.State);
             Assert.IsTrue(g.RelationshipsLost, "the marker broke up along the way");

@@ -256,10 +256,10 @@ namespace ThanksNoThanks.Tests.PlayMode
         }
 
         [UnityTest]
-        public IEnumerator HealthHint_Dismiss_SameFrameChord_DoesNotLeak_Crank_Or_EnergyPulse()
+        public IEnumerator HealthHint_Dismiss_SameFrameChord_DoesNotLeak_Crank_Or_EnergyHold()
         {
-            // The EnergyPulse variant of the same-frame chord (skeptic HIGH), at the HEALTH hint (age 30)
-            // where energy is open and money is bankable — so a leaked crank/pulse would be observable.
+            // The ENERGY_HOLD variant of the same-frame chord (skeptic HIGH), at the HEALTH hint (age 30)
+            // where energy is open and money is bankable — so a leaked crank/hold would be observable.
             var driver = Boot(out var go, out var fake);
             yield return null;
             driver.DebugReplaceGame(AgeWalkDeck());      // seeded/deterministic walk to 30 (no CSV sampling)
@@ -293,15 +293,18 @@ namespace ThanksNoThanks.Tests.PlayMode
             double money0 = driver.Game.Money;
             int energy0 = driver.Game.Scales.Energy;
 
-            // The chord in source order: Confirm FIRST, then MoneyTick + EnergyPulse the SAME frame.
+            // The chord in source order: Confirm FIRST, then MoneyTick + EnergyHold the SAME frame.
             fake.Confirm();
             Assert.IsFalse(driver.TutorialShowing, "Enter dismissed the health hint");
             fake.Fire(GameInput.MoneyTick);
-            fake.Fire(GameInput.EnergyPulse);
+            fake.Fire(GameInput.EnergyHold);
             Assert.AreEqual(money0, driver.Game.Money,
                 "no crank leaked onto the dismiss frame (strong observable — cap was armed)");
-            Assert.AreEqual(energy0, driver.Game.Scales.Energy,
-                "no energy pulse leaked onto the dismiss frame (same guarded path)");
+            // Удержание — сигнал ВРЕМЕННОЙ, поэтому «протёк ли он» видно только на следующем такте: если бы
+            // латч прошёл, батарея прыгнула бы вверх на ~4 % (реген 16 %/с), а не просела дренажом.
+            driver.Game.Tick(0.25f);
+            Assert.LessOrEqual(driver.Game.Scales.Energy, energy0,
+                "no energy hold leaked onto the dismiss frame (same guarded path) — battery only drains");
 
             Object.Destroy(go);
             yield return null;

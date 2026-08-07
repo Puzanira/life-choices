@@ -20,7 +20,7 @@ namespace ThanksNoThanks
     ///   MenuButton  ✔ → выход (Exit — clean end-of-run, arcade contract §5)
     ///   Crank         → крутилка денег (accumulated degrees → discrete MoneyTick — a literal money crank)
     ///   BangButton    → «поднять трубку» звонящего ребёнка (ChildPress, revisions §5b)
-    ///   HeightA       → дыхание: one EnergyPulse per up-stroke through mid-travel (breathing lever)
+    ///   HeightA       → энергия: HELD EnergyHold, re-emitted every frame the sensor sits above mid-travel
     ///   Joystick.y    → балансир отношений (held RelationUp/RelationDown, spring-return = drift)
     ///
     /// A drop-in <c>SerialInputSource</c> is unnecessary: swapping keyboard→Arduino is a backend swap inside
@@ -33,10 +33,10 @@ namespace ThanksNoThanks
         [Tooltip("Crank rotation (degrees, either direction) that equals one MoneyTick.")]
         [SerializeField] private float degreesPerMoneyTick = 12f;
 
-        // Breathing lever (HeightA): one pulse per rising crossing of mid-travel, re-armed once it drops
-        // back. The thresholds and the edge logic live in the PURE BreathLever, so the whole keyboard
-        // path can be simulated deterministically in EditMode (BreathKeyboardPathTests).
-        private readonly BreathLever _breathLever = new();
+        // Датчик высоты (HeightA): УДЕРЖИВАЕМЫЙ сигнал «датчик поднят», переиздаётся каждый кадр, пока рука
+        // держит датчик выше середины хода (гистерезис — в PURE BreathSensor, чтобы весь клавиатурный путь
+        // прошагивался детерминированно в EditMode: BreathKeyboardPathTests).
+        private readonly BreathSensor _breathSensor = new();
         // Relationship balancer (Joystick.y): held axis, re-emitted every frame past the deadzone.
         private const float JoyDeadzone = 0.4f;
 
@@ -79,8 +79,8 @@ namespace ThanksNoThanks
                 Emit(GameInput.MoneyTick);
             }
 
-            // ---- breathing lever (HeightA) → one EnergyPulse per up-stroke through mid-travel ----
-            if (_breathLever.Step(ArcadeInput.HeightA.Value)) Emit(GameInput.EnergyPulse);
+            // ---- датчик высоты (HeightA) → held EnergyHold, переиздаётся КАЖДЫЙ кадр, пока датчик поднят ----
+            if (_breathSensor.Step(ArcadeInput.HeightA.Value)) Emit(GameInput.EnergyHold);
 
             // ---- relationship balancer (Joystick vertical) → held axis, re-emitted each frame ----
             float y = ArcadeInput.Joystick.Vector.y;

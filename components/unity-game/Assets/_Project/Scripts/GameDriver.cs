@@ -35,7 +35,7 @@ namespace ThanksNoThanks
         Money,
         /// <summary>Отношения (20, `OPEN:Отн`) — маркер в механической зоне 40–75 % и удержать 1.5 с.</summary>
         Relations,
-        /// <summary>Энергия (25, `OPEN:Эн`) — дыханием поднять энергию &gt;40 % и удержать 1.5 с.</summary>
+        /// <summary>Энергия (25, `OPEN:Эн`) — держать датчик высоты, пока батарейка не заполнится.</summary>
         Energy,
         /// <summary>Ребёнок (свадьба+2, `OPEN:Реб`) — поднять один звонок кнопкой «!».</summary>
         Child,
@@ -575,22 +575,24 @@ namespace ThanksNoThanks
         // ---- D: «экран появления новой шкалы» (meeting-revisions §2 / build-spec §D) ------------------
         // Модальный туториал на каждом OPEN четырёх шкал: затемнение поверх геймплея, КРУПНАЯ копия самой
         // шкалы у её HUD-места, облачко-рассказ Ведущего и окно-задача. Кнопками НЕ закрывается — только
-        // выполнением условия по РЕАЛЬНОМУ контролу (крутилка / дыхание / рычаг / «!»).
+        // выполнением условия по РЕАЛЬНОМУ контролу (крутилка / датчик высоты / рычаг / «!»).
         private GameObject _nsOverlay;     // корень модалки; поднимается в конец списка на показе
         private CanvasGroup _nsFade;       // фейд 0.2 с на выходе
         private Image _nsDim;              // затемнение ~40 % INK на весь экран
         private GameObject _nsSlot;        // полноэкранный слот, куда «одалживается» настоящий HUD-виджет
         private Image _nsPlate;            // окно-задача — `task-plate-v2` (Simple, НЕ 9-slice: звёзды-лучи)
         private Image _nsBubble;           // окно-рассказ — `host-comment-v2`, ЗЕРКАЛЬНО (рупор справа)
-        private Image _nsHoldTrack;        // видимый прогресс удержания 1.5 с — дорожка…
-        private Image _nsHoldFill;         // …и её заполнение
+        // ⚠ ПОЛОСА ПРОГРЕССА УДЕРЖАНИЯ СНЯТА 2026-08-07 (основательница, живой плейтест: «убрать полосу
+        // прогресса в туториалах»). Прогресс показывают САМИ виджеты: батарея наполняется, монеты капают в
+        // банку, маркер стоит в зоне. Гард отсутствия — NewScaleTutorialTests.NoProgressBar_OnAnyModal.
         private Text _nsTaskText;          // задача (Arimo Bold, в кремовом поле плашки)
         private Text _nsStoryText;         // рассказ (Rubik-Bold, в кремовом поле облачка)
         private NewScale _nsWhich;         // какая шкала сейчас объясняется
         private bool _nsShowing;
         private bool _nsArmed;             // РЕАЛЬНЫЙ ввод по этой шкале уже был (см. NewScaleArmed)
         private bool _nsDone;              // условие выполнено → идёт фейд
-        private float _nsHold;             // секунд НЕПРЕРЫВНОГО удержания режима
+        private float _nsHold;             // секунд НЕПРЕРЫВНОГО удержания режима (осталось у ОТНОШЕНИЙ)
+        private int _nsTicks;              // ПРИНЯТЫХ тиков крутилки на экране денег (условие — MoneyTutorialTicks)
         private float _nsFadeT;            // прожито фейда, с
         private readonly bool[] _nsSeen = new bool[5];   // один раз за жизнь на шкалу (индекс = NewScale)
         // ОТЛОЖЕННЫЙ показ: OPEN пришёл, но поднимать модалку сейчас нельзя (сейчас — только ВЫГОРАНИЕ под
@@ -599,7 +601,7 @@ namespace ThanksNoThanks
         private NewScale _nsPending = NewScale.None;
 
         // Одолженный виджет: настоящий HUD-виджет уезжает на модалку (увеличенным), а не клонируется, —
-        // так КРУПНАЯ копия ЖИВАЯ (батарея растёт от дыхания, сердце едет от рычага, монетка падает в банку)
+        // так КРУПНАЯ копия ЖИВАЯ (батарея наполняется под датчиком, сердце едет от рычага, монетка падает)
         // и рисуется поверх затемнения. Возвращается на своё место в HUD при закрытии.
         private GameObject _nsBorrowed;
         private Transform _nsBorrowedParent;
@@ -609,42 +611,45 @@ namespace ThanksNoThanks
         private Vector2 _nsBorrowedAnchorMin, _nsBorrowedAnchorMax, _nsBorrowedOffsetMin, _nsBorrowedOffsetMax;
         private Vector3 _nsBorrowedScale;
 
-        /// <summary>Сколько секунд НЕПРЕРЫВНО держать режим, чтобы окно ушло (revisions §2: «~1.5 сек»).</summary>
+        /// <summary>Сколько секунд НЕПРЕРЫВНО держать режим, чтобы окно ушло (revisions §2: «~1.5 сек»).
+        /// Осталось только у ОТНОШЕНИЙ: деньги закрываются счётом тиков, энергия — полной батареей,
+        /// ребёнок — поднятой трубкой.</summary>
         public const float NewScaleHoldSeconds = 1.5f;
         /// <summary>Фейд ухода окна (build-spec §D: «окно уходит (фейд 0.2с)»).</summary>
         public const float NewScaleFadeSeconds = 0.2f;
         /// <summary>Затемнение геймплея под модалкой — ~40 % INK (build-spec §D).</summary>
         public const float NewScaleDimAlpha = 0.40f;
-        /// <summary>Энергия «в рабочей зоне» для задачи D (revisions §2: &gt;40 %). Совпадает с порогом
-        /// снятия выгорания <see cref="Game.BurnoutExitEnergyAbove"/>, но это ОТДЕЛЬНАЯ величина экрана.</summary>
-        public const int NewScaleEnergyAbove = 40;
+        /// <summary>
+        /// Условие экрана ЭНЕРГИИ: «держи, пока батарейка НЕ ЗАПОЛНИТСЯ» (основательница, 2026-08-07).
+        /// 99, а не 100, — запас ровно в один процент на дискретность шкалы: реген интегрируется дробным
+        /// аккумулятором, и требовать точного попадания в 100 значило бы ловить последний целый шаг.
+        /// Прежнее условие «энергия &gt;40 % удержана 1.5 с» снято вместе с ритм-механикой.
+        /// </summary>
+        public const int NewScaleEnergyFull = 99;
+        /// <summary>
+        /// Сколько ПРИНЯТЫХ тиков крутилки закрывают экран ДЕНЕГ (основательница, 2026-08-07: «крутить
+        /// ручку денег надо дольше на туториале — слишком быстро пропадает»). Было 1 тик — окно исчезало
+        /// раньше, чем игрок успевал понять, что произошло. 7 тиков при кэпе дохода ~5/с — это пара секунд
+        /// живого верчения; монеты капают на КАЖДЫЙ тик, так что прогресс виден без всякой полоски.
+        /// </summary>
+        public const int MoneyTutorialTicks = 7;
 
-        // ---- подсказки клавиш при эмуляции + отклик на невалидный вдох (плейтест 2026-08-05) ----------
-        /// <summary>Сколько секунд висит подпись «вдох не в ритм» после отбитого ритм-гейтом импульса.</summary>
-        public const float BreathRejectSeconds = 0.9f;
-        /// <summary>Сколько секунд батарея «вздрагивает» затемнением на тот же отбитый вдох.</summary>
-        public const float EnergyDimSeconds = 0.35f;
-        /// <summary>До какой альфы проседает батарея на вздрагивании.</summary>
-        public const float EnergyDimAlpha = 0.35f;
+        // ---- подсказки клавиш при эмуляции (плейтест 2026-08-05, перекалибровано 2026-08-07) ----------
+        // ⚠ ОТКЛИК «НЕ В РИТМ» И ВЗДРАГИВАНИЕ БАТАРЕИ СНЯТЫ 2026-08-07 вместе с ритм-гейтом: отклоняться
+        // больше нечему — удержание либо идёт (батарея растёт на глазах), либо нет.
         /// <summary>Приставка второй строки: она честно говорит, что это НЕ контрол автомата, а эмуляция.</summary>
         public const string KeyHintPrefix = "эмуляция: ";
-        /// <summary>Хвост подсказки ДЫХАНИЯ. Клавиша сама по себе игрока не спасает: основательница
-        /// ДЕРЖАЛА клавишу («жму — ничего»), а удержание — это поднятая рука, а не дыхание. Поэтому
-        /// строка датчика прямо называет ДВИЖЕНИЕ и его темп (число — из калибровки ритм-гейта).</summary>
-        public const string BreathKeyHintTail = " — нажимай и отпускай, раз в ~2 секунды";
-        /// <summary>Отклик на вдох, отбитый ритм-гейтом (мигает на окне-задаче энергии).</summary>
-        public const string BreathOffRhythmText = "не в ритм — дыши ровно, раз в ~2 секунды";
+        /// <summary>Приставка второй строки для ДАТЧИКА ВЫСОТЫ. Клавиша сама по себе игрока не спасает —
+        /// строка обязана назвать ЖЕСТ. С 2026-08-07 жест ровно один и он же тот, который основательница
+        /// делала интуитивно: «зажми Q» (и держи, пока батарейка не заполнится — это уже текст задачи).</summary>
+        public const string BreathKeyHintPrefix = "эмуляция: зажми ";
 
-        // Вторая строка окна-задачи §D: подсказка клавиши при клавиатурной эмуляции, а на энергии — ещё и
-        // мигающий отклик «не в ритм». ОДНА строка на обе роли: у окна-задачи под текстом ровно одна
-        // свободная полоса до дорожки удержания, и две подписи там встали бы друг на друга.
+        // Вторая строка окна-задачи §D: подсказка клавиши при клавиатурной эмуляции. Мелкая служебная
+        // строка под текстом задачи.
         private Text _nsHintLine;
-        // То же под текстом S5-подсказки (выгорание объясняет дыхание — там клавиша тоже нужна).
+        // То же под текстом S5-подсказки (выгорание объясняет датчик высоты — там клавиша тоже нужна).
         private Text _tutHintLine;
         private ArcadeControlId? _tutHintControl;    // какой контрол объясняет ОТКРЫТАЯ сейчас S5-подсказка
-        private CanvasGroup _energyFade;             // затемнение батареи на отклонённый вдох
-        private float _breathRejectT;                // сек. до конца подписи «не в ритм»
-        private float _energyDimT;                   // сек. до конца вздрагивания батареи
 
         // Кэш готовой строки подсказки — по одному на каждое место (окно-задача / S5-подсказка), чтобы
         // два разных контрола на экране не выбивали друг друга из кэша. См. KeyHintLine.
@@ -685,14 +690,18 @@ namespace ThanksNoThanks
         public static readonly Vector4 StoryFieldRect = new(1380.5f, 225f, 734f, 237f);
         // Кегли сняты с эталона: задача — cap-height ≈75 px ⇒ Arimo Bold ≈104; рассказ — cap-height ≈26 px
         // и межстрочный 48 ⇒ Rubik ≈39 (тот же кегль, что у живой реплики Ведущего, BubbleTextMaxSize).
-        private const int TaskTextMaxSize = 104, TaskTextMinSize = 40;
+        // ⚠ ПОТОЛОК задачи снят со 104 до 96 (дизайн-скептик 2026-08-07): 104 был КРАЙНИМ кеглем эталона,
+        // и КОРОТКАЯ задача (а новая задача энергии короче прежней) набиралась им впритык к кайме. Потолок
+        // — это страховка «не крупнее эталона», а не цель: реальный кегль всё равно выбирает best-fit.
+        private const int TaskTextMaxSize = 96, TaskTextMinSize = 40;
         // Служебная вторая строка (клавиша эмуляции / отклик «не в ритм»): МЕЛКО — втрое ниже задачи.
         private const int HintTextSize = 30;
         // Полоса под неё ВЫРЕЗАЕТСЯ из текстового поля задачи (а не кладётся поверх): иначе длинная
-        // задача — а она теперь длинная, ритм назван словами — доезжает низом ровно туда, где стоит
-        // подсказка. Резерв постоянный, чтобы композиция окна не прыгала от наличия плат.
+        // задача доезжает низом ровно туда, где стоит подсказка. Резерв постоянный, чтобы композиция окна
+        // не прыгала от наличия плат. (Это резерв ПОДСКАЗКИ; снятая полоса прогресса своего резерва в
+        // текстовом поле не имела — она лежала ниже, в 776…796, уже за нижним краем текста.)
         private const float HintLineReserve = 62f;
-        // Центр служебной строки: под ужатым текстом задачи и НАД дорожкой удержания (776…796).
+        // Центр служебной строки: под ужатым текстом задачи, у нижнего края кремового поля.
         private const float HintLineCy = 740f;
         /// <summary>
         /// Цвет служебной строки: чернила ПОЛУПРОЗРАЧНО — она обязана быть тише задачи, но остаться
@@ -704,10 +713,13 @@ namespace ThanksNoThanks
         private static Color HintInk => new(Ink.r, Ink.g, Ink.b, 0.74f);
         private const int StoryTextMaxSize = 39, StoryTextMinSize = 22;
         // Поля текста внутри кремовых полей (чтобы best-fit не садился на рамку/звёзды).
-        private const float TaskTextPadX = 60f, TaskTextPadY = 48f;
+        // ⚠ ГОРИЗОНТАЛЬНОЕ поле задачи 60 → 90 (дизайн-скептик 2026-08-07). <see cref="TaskFieldRect"/> —
+        // это alpha-tight bbox кремового поля, но НАРИСОВАННАЯ кайма плашки идёт по звёздам и в верхних/
+        // нижних строках съедает ещё ~46 px с каждой стороны. При поле 60 самая широкая строка задачи
+        // (энергия) упиралась в кайму с зазором 7 px слева и 13 px справа — «дыхания» не оставалось.
+        // 90 даёт от каймы ≥30 px на всех четырёх модалках (гард: TaskGlyphs_KeepBreathingRoom...).
+        private const float TaskTextPadX = 90f, TaskTextPadY = 48f;
         private const float StoryTextPadX = 30f, StoryTextPadY = 20f;
-        // Полоска прогресса удержания — внутри кремового поля, у нижнего края.
-        private static readonly Vector4 HoldBarRect = new(1009f, 786f, 900f, 20f);
 
         // ---- КРУПНАЯ копия шкалы: ИСТОЧНИК → ЦЕЛЬ, оба БОКСАМИ (cx, cy-от-верха, w, h) в 1920×1080 --------
         // Задаётся именно ЦЕЛЕВОЙ бокс, а не «точка + масштаб»: масштаб ВЫВОДИТСЯ (k = dst.w / src.w), и
@@ -796,11 +808,11 @@ namespace ThanksNoThanks
         /// <summary>Рассказ Ведущего на открытии ЭНЕРГИИ (host-content §4).</summary>
         public const string EnergyStoryText =
             "Ого! Что это? Первая усталость? Ты же не думал, что энергия бесконечна?";
-        /// <summary>Задача на открытии ЭНЕРГИИ (host-content §4). Ритм НАЗВАН словами (плейтест
-        /// 2026-08-05 §5): число «~2 секунды» — из финальной калибровки ритм-гейта
-        /// (<see cref="BreathRhythm.TargetSeconds"/>, окно 0.4–3.0 с), а не круглое «на глаз».</summary>
+        /// <summary>Задача на открытии ЭНЕРГИИ (host-content §4). Формулировка основательницы дословно,
+        /// живой плейтест 2026-08-07: ритм-механика («дыши раз в ~2 секунды») снята, задача называет ровно
+        /// один жест — зажать и держать — и ровно одно условие выхода: полная батарея.</summary>
         public const string EnergyTaskText =
-            "Используй датчик высоты — дыши размеренно, раз в ~2 секунды, чтобы восстановить энергию";
+            "Зажми датчик высоты — держи, пока батарейка не заполнится";
         /// <summary>Рассказ Ведущего на открытии ОТНОШЕНИЙ (host-content §4, вар.1).</summary>
         public const string RelationsStoryText =
             "Ого-го! У кого-то, кажется, появились ЧУВСТВА! Только не задуши и не забрось — любовь любит золотую середину!";
@@ -858,9 +870,6 @@ namespace ThanksNoThanks
         private int _depMutterCount;       // muttering index (one muted host line per catch)
         // Depression colour tokens.
         private static readonly Color GrayWash = new(0.50f, 0.50f, 0.53f);   // the B&W wash tint
-
-        // Breath rhythm validator (E in a calm cadence → valid pulse → +energy). Clock advanced in Update.
-        private readonly BreathRhythm _breath = new();
 
         // ---- §4 тревоги: состояние на 4 шкалы (индекс = (int)AlarmScale) -----------------------------
         private const int AlarmCount = 4;
@@ -927,7 +936,7 @@ namespace ThanksNoThanks
         private const string BurnoutHintText =
             "ВЫГОРАНИЕ!\n\n" +
             "Всё даётся тяжелее — деньги идут вдвое медленнее.\n" +
-            "Подышите ДАТЧИКОМ ВЫСОТЫ, чтобы прийти в себя.\n\n" +
+            "Зажмите ДАТЧИК ВЫСОТЫ и держите, чтобы прийти в себя.\n\n" +
             "Отпустит само, когда энергия восстановится.";
 
         // ---- public inspection accessors (visual-assembly PlayMode tests) ----
@@ -1023,15 +1032,14 @@ namespace ThanksNoThanks
         public Text NewScaleTaskText => _nsTaskText;
         /// <summary>§D: текст рассказа (Rubik-Bold в кремовом поле облачка).</summary>
         public Text NewScaleStoryText => _nsStoryText;
-        /// <summary>§D: дорожка видимого прогресса удержания (показана только у шкал с удержанием).</summary>
-        public Image NewScaleHoldTrack => _nsHoldTrack;
-        /// <summary>§D: заполнение прогресса удержания — его ширина и есть индикатор.</summary>
-        public Image NewScaleHoldFill => _nsHoldFill;
         /// <summary>§D: КРУПНАЯ копия шкалы — это НАСТОЯЩИЙ HUD-виджет, одолженный модалке.</summary>
         public GameObject NewScaleBigWidget => _nsBorrowed;
-        /// <summary>§D: доля удержания 0…1 (то, что рисует полоска прогресса).</summary>
+        /// <summary>§D: доля выдержанного режима 0…1 (осталась у ОТНОШЕНИЙ; ВИДИМОЙ полоски больше нет —
+        /// основательница сняла её 2026-08-07, прогресс читается по самому виджету).</summary>
         public float NewScaleHoldFraction => Mathf.Clamp01(_nsHold / NewScaleHoldSeconds);
-        /// <summary>Вторая строка окна-задачи §D (подсказка клавиши / отклик «не в ритм»).</summary>
+        /// <summary>§D: сколько ПРИНЯТЫХ тиков крутилки уже набрано на экране денег.</summary>
+        public int NewScaleCrankTicks => _nsTicks;
+        /// <summary>Вторая строка окна-задачи §D (подсказка клавиши эмуляции).</summary>
         public Text NewScaleHintLine => _nsHintLine;
         /// <summary>Вторая строка S5-подсказки (подсказка клавиши).</summary>
         public Text TutorialHintLine => _tutHintLine;
@@ -1039,11 +1047,7 @@ namespace ThanksNoThanks
         /// ReferenceEquals два кадра подряд — если строка пересобирается, ссылка меняется, даже когда
         /// текст совпадает (и Text.text этого уже не покажет: одинаковую строку туда не переприсваивают).</summary>
         public string NewScaleHintCachedLine => _nsHintCache.Line;
-        /// <summary>Идёт ли сейчас отклик на отбитый ритм-гейтом вдох (подпись + вздрагивание батареи).</summary>
-        public bool BreathRejectShowing => _breathRejectT > 0f;
-        /// <summary>Текущая альфа батареи: &lt;1 — идёт «вздрагивание» на невалидном вдохе.</summary>
-        public float EnergyDimAmount => _energyFade != null ? _energyFade.alpha : 1f;
-        /// <summary>§D: по этой шкале уже был РЕАЛЬНЫЙ принятый ввод (крутилка/дыхание/рычаг/«!»).</summary>
+        /// <summary>§D: по этой шкале уже был РЕАЛЬНЫЙ принятый ввод (крутилка/датчик/рычаг/«!»).</summary>
         public bool NewScaleArmed => _nsArmed;
         /// <summary>§D: условие выполнено, идёт фейд ухода.</summary>
         public bool NewScaleSatisfied => _nsDone;
@@ -1151,7 +1155,9 @@ namespace ThanksNoThanks
             _ageText.text = Mathf.FloorToInt(age).ToString();
             _moneyText.text = FormatMoneyJar(120);
             _cardText.text = "Взять ипотеку на 25 лет?";
-            ReflectEnergyLevel(100f);
+            // На экране ЭНЕРГИИ батарея показывается В ПРОЦЕССЕ НАПОЛНЕНИЯ — это и есть кадр механики
+            // «зажми и держи»: полная батарея означала бы «задача уже выполнена».
+            ReflectEnergyLevel(which == NewScale.Energy ? 55f : 100f);
             ReflectHealthMarker(100f);
             ReflectRelationsMarker(55f, redZone: false);
             _yesPlate.color = Color.white; _noPlate.color = Color.white;
@@ -1437,13 +1443,9 @@ namespace ThanksNoThanks
         /// Тест смотрит именно на него, чтобы отличить «нажал» от «механика приняла».</summary>
         public float SinceScaleInput(AlarmScale s) => _sinceScaleInput[(int)s];
 
-        /// <summary>Layer-2 seam: продвинуть ДЕТЕРМИНИРОВАННЫЕ часы гейтов ввода (кэп дохода крутилки и
-        /// ритм дыхания) — ровно тем же вызовом, что и Update, для замороженного драйвера.</summary>
-        public void DebugAdvanceInputClocks(float dt)
-        {
-            _crankCap.Advance(dt);
-            _breath.Advance(dt);
-        }
+        /// <summary>Layer-2 seam: продвинуть ДЕТЕРМИНИРОВАННЫЕ часы гейтов ввода (остался один — кэп
+        /// дохода крутилки) — ровно тем же вызовом, что и Update, для замороженного драйвера.</summary>
+        public void DebugAdvanceInputClocks(float dt) => _crankCap.Advance(dt);
 
         /// <summary>Layer-2 seam: продвинуть летящие звёзды на dt (проверка самоочистки).</summary>
         public void DebugAdvanceStars(float dt) => AdvanceStars(dt);
@@ -1603,13 +1605,6 @@ namespace ThanksNoThanks
                                              // during Playing, so GREEN (ДА) is the catch — otherwise the
                                              // depression mini-game would be unwinnable on the cabinet.
 
-            // §6-окно: запомнить, что игрок ТОЛЬКО ЧТО работал по этой шкале. Здесь — только вводы БЕЗ
-            // механического гейта (рычаг отношений, ответ на карточку). Крутилка и дыхание отмечаются
-            // НЕ здесь, а в своих ветках ниже — ровно на ПРИНЯТОМ механикой событии (после кэпа дохода /
-            // после ритм-гейта): салют даётся за КАЛИБРОВКУ, а «нажал, но механика отвергла» калибровкой
-            // не является и окно §6 открывать не должно (иначе мэшинг ручкой/дыханием выпрашивает салют).
-            if (_game.State == GameState.Playing && !_tutorialShowing) NoteScaleInput(input);
-
             if (_tutorialShowing)
             {
                 // FOUNDER DECISION (Gate-2 playtest, re-mapped by 99fab3c): a hint dismisses on the
@@ -1629,9 +1624,10 @@ namespace ThanksNoThanks
                 // the crank must never fire a confirm — the GREEN button is the confirm (99fab3c).
                 if (_game.State != GameState.Playing) return;
                 if (!_crankCap.TryAccept()) return;         // income cap (anti-mashgun) — gameplay only
-                _game.HandleInput(GameInput.MoneyTick);     // Game sees only the semantic crank event
-                NoteScaleInput(AlarmScale.Money);           // §6-окно — ровно по ПРИНЯТОМУ тику (тем же
-                                                            // путём, каким тик уходит в Game.Crank)
+                // §6-окно — ровно по ПРИНЯТОМУ тику: кэп дохода пропустил И Game.Crank его засчитал
+                // (деньги открыты, не «глухая» пауза, не кризис/депрессия — там крутилка глушится).
+                if (_game.HandleInput(GameInput.MoneyTick)) // Game sees only the semantic crank event
+                    NoteScaleInput(AlarmScale.Money);
                 if (_game.MoneyOpen && isActiveAndEnabled)  // coin drops into the jar on each PAYING tick
                 {
                     if (_moneyPulse != null) StopCoroutine(_moneyPulse);
@@ -1640,22 +1636,18 @@ namespace ThanksNoThanks
                 return;
             }
 
-            if (input == GameInput.EnergyPulse)
+            if (input == GameInput.EnergyHold)
             {
-                // Rhythm gate lives HERE (pure BreathRhythm): Game receives the pulse only on a valid
-                // cadence, so mashing / sparse taps never restore energy. Inert outside live gameplay.
+                // УДЕРЖИВАЕМЫЙ сигнал: источник переиздаёт его каждый кадр, пока датчик поднят, и драйвер
+                // просто пропускает его в Game — там он латчится и превращается в один такт роста батареи.
+                // Никакого гейта: с 2026-08-07 удержание и есть механика, отвергать нечего. Инертен вне
+                // живого геймплея (на опенере/финале датчик ничего не делает).
                 if (_game.State != GameState.Playing) return;
-                var beat = _breath.PulseDetailed();
-                if (beat == BreathPulse.Valid)
-                {
-                    _game.HandleInput(GameInput.EnergyPulse);
-                    NoteScaleInput(AlarmScale.Energy);      // §6-окно — только по ПРОПУЩЕННОМУ ритм-гейтом
-                                                            // импульсу: мэшинг ничего не восстанавливает и
-                                                            // салют выпрашивать не должен
-                }
-                // Отбитый вдох обязан быть ВИДЕН (плейтест §5). ПЕРВЫЙ вдох жизни — не «не в ритм»:
-                // ему не с чем сравниваться, ругать за него нечестно.
-                else if (beat == BreathPulse.OffRhythm) NoteBreathRejected();
+                // §6-окно открывает только ПРИНЯТОЕ удержание: датчик поднят И механика его засчитала.
+                // Кризис/депрессия глушат датчик (шкалы там на паузе) — «держал во время депрессии» работой
+                // по шкале не является, иначе рост энергии карточкой сразу после дал бы ложный салют.
+                if (_game.HandleInput(GameInput.EnergyHold))
+                    NoteScaleInput(AlarmScale.Energy);      // игрок работает шкалой ПРЯМО СЕЙЧАС
                 return;
             }
 
@@ -1681,7 +1673,12 @@ namespace ThanksNoThanks
                 return;
             }
 
-            _game.HandleInput(input);
+            // §6-окно: отметить шкалу ТОЛЬКО если Game РЕАЛЬНО ПРИНЯЛ ввод (сюда доходят рычаг отношений и
+            // ответ на карточку — остальные контролы разобраны своими ветками выше). Кризис и депрессия эти
+            // же рычаги ГЛУШАТ или ПЕРЕНАЗНАЧАЮТ (блиц/импульс/ловля), и «нажал, но механика отвергла»
+            // калибровкой не является: иначе окно §6 открывалось бы без работы игрока и рост шкалы
+            // КАРТОЧКОЙ внутри окна выдавал бы ложный салют.
+            if (_game.HandleInput(input)) NoteScaleInput(input);
         }
 
         /// <summary>
@@ -1731,7 +1728,6 @@ namespace ThanksNoThanks
             SpinBackground(Time.deltaTime);      // ambient §7 ray spin — runs on every screen, pause included
             if (_game == null) return;
             _crankCap.Advance(Time.deltaTime);   // deterministic clock for the income cap
-            _breath.Advance(Time.deltaTime);     // deterministic clock for the breathing rhythm
             _game.Tick(Time.deltaTime);
             TickNewScale(Time.deltaTime);        // §D: условие выхода модалки → фейд → салют → снятие паузы
             if (_game.State == GameState.Playing && _game.InCrisis)
@@ -1743,7 +1739,7 @@ namespace ThanksNoThanks
                 if (_crisisUiActive) RestoreNormalPlates();   // just resumed from a crisis → restore the plates
                 _ageText.text = Mathf.FloorToInt(_game.Age).ToString();
                 _moneyText.text = FormatMoneyJar(_game.Money);   // live: ticks up on crank, drains down
-                // Live battery/bars move on their own (decay/drain/breath), not just on cards.
+                // Live battery/bars move on their own (decay/drain/held sensor), not just on cards.
                 var s = _game.Scales;
                 ReflectEnergyLevel(s.Energy);
                 ReflectHealthMarker(s.Health);
@@ -1957,41 +1953,24 @@ namespace ThanksNoThanks
         }
 
         /// <summary>
-        /// Вторая строка окон-подсказок и отклик на невалидный вдох. Строка КЛАВИШИ показывается ТОЛЬКО
-        /// пока контрол реально эмулируется клавиатурой (<see cref="ArcadeInput.KeyHint"/> — маппинг
-        /// читается ИЗ КОНФИГА ПАКЕТА, в игре нет ни одного зашитого имени клавиши); стоит воткнуть плату
-        /// — и та же проверка вернёт пустую строку, подсказка исчезнет сама, без перезапуска. Считается
-        /// каждый кадр именно ради этого «воткнул/выдернул».
+        /// Вторая строка окон-подсказок. Строка КЛАВИШИ показывается ТОЛЬКО пока контрол реально
+        /// эмулируется клавиатурой (<see cref="ArcadeInput.KeyHint"/> — маппинг читается ИЗ КОНФИГА
+        /// ПАКЕТА, в игре нет ни одного зашитого имени клавиши); стоит воткнуть плату — и та же проверка
+        /// вернёт пустую строку, подсказка исчезнет сама, без перезапуска. Считается каждый кадр именно
+        /// ради этого «воткнул/выдернул».
         ///
-        /// На окне ЭНЕРГИИ та же строка на <see cref="BreathRejectSeconds"/> подменяется откликом «не в
-        /// ритм» (плейтест §5): вдох, отбитый ритм-гейтом, обязан быть ВИДЕН, иначе игрок снова читает
-        /// молчание игры как «сломано».
+        /// (Отклик «не в ритм» и вздрагивание батареи, жившие здесь до 2026-08-07, снялись вместе с
+        /// ритм-гейтом: отвергать нечего — либо датчик держат и батарея растёт, либо нет.)
         /// </summary>
         private void ReflectKeyHints(float dt)
         {
-            if (_breathRejectT > 0f) _breathRejectT = Mathf.Max(0f, _breathRejectT - dt);
-            if (_energyDimT > 0f) _energyDimT = Mathf.Max(0f, _energyDimT - dt);
-
-            // Батарея «вздрагивает» затемнением — работает и в HUD, и на модалке (виджет там ТОТ ЖЕ,
-            // он одолжен, а не склонирован), потому что альфа живёт на его собственной группе.
-            if (_energyFade != null)
-            {
-                float k = EnergyDimSeconds <= 0f ? 0f : _energyDimT / EnergyDimSeconds;
-                float alpha = Mathf.Lerp(1f, EnergyDimAlpha, k);
-                if (!Mathf.Approximately(_energyFade.alpha, alpha)) _energyFade.alpha = alpha;
-            }
-
             if (_nsHintLine != null)
             {
                 // ЗАКРЫТАЯ модалка не считает вообще ничего: её строка пуста по определению, и подмешивать
                 // сюда последнюю шкалу (а тем более собирать строку) — работа в пустоту каждый кадр.
-                bool reject = _nsShowing && _nsWhich == NewScale.Energy && _breathRejectT > 0f;
-                string line = !_nsShowing ? ""
-                    : reject ? BreathOffRhythmText
-                    : KeyHintLine(ControlOf(_nsWhich), ref _nsHintCache);
+                string line = !_nsShowing ? "" : KeyHintLine(ControlOf(_nsWhich), ref _nsHintCache);
                 if (_nsHintLine.text != line) _nsHintLine.text = line;
-                var tint = reject ? TimerRed : HintInk;
-                if (_nsHintLine.color != tint) _nsHintLine.color = tint;
+                if (_nsHintLine.color != HintInk) _nsHintLine.color = HintInk;
             }
 
             if (_tutHintLine != null)
@@ -2004,7 +1983,7 @@ namespace ThanksNoThanks
         /// <summary>Какой контрол автомата объясняет §D-экран этой шкалы (для подсказки клавиши).</summary>
         private static ArcadeControlId? ControlOf(NewScale s) => s switch
         {
-            NewScale.Energy => ArcadeControlId.HeightA,     // датчик высоты — дыхание
+            NewScale.Energy => ArcadeControlId.HeightA,     // датчик высоты — «зажми и держи»
             NewScale.Relations => ArcadeControlId.Joystick, // балансир отношений
             NewScale.Money => ArcadeControlId.Crank,        // крутилка денег
             NewScale.Child => ArcadeControlId.BangButton,   // «поднять трубку»
@@ -2040,7 +2019,7 @@ namespace ThanksNoThanks
             {
                 string key = KeyboardHints.PrimaryFor(map, id);
                 if (!string.IsNullOrEmpty(key))
-                    line = KeyHintPrefix + key + (id == ArcadeControlId.HeightA ? BreathKeyHintTail : "");
+                    line = (id == ArcadeControlId.HeightA ? BreathKeyHintPrefix : KeyHintPrefix) + key;
             }
 
             cache.Valid = true;
@@ -2049,13 +2028,6 @@ namespace ThanksNoThanks
             cache.Mapping = map;
             cache.Line = line;
             return line;
-        }
-
-        /// <summary>Вдох отбит ритм-гейтом → видимый отклик: подпись мигает, батарея вздрагивает.</summary>
-        private void NoteBreathRejected()
-        {
-            _breathRejectT = BreathRejectSeconds;
-            _energyDimT = EnergyDimSeconds;
         }
 
         /// <summary>
@@ -2635,7 +2607,7 @@ namespace ThanksNoThanks
             burnoutTxt.resizeTextForBestFit = true; burnoutTxt.resizeTextMinSize = 60; burnoutTxt.resizeTextMaxSize = 130;
             BurnoutTitleFx(burnoutTxt);
             var burnoutSub = NewText("BurnoutSubtitle", _burnoutPlate.transform,
-                "крутите деньги — идёт туго • подышите рычагом", 40, TextAnchor.MiddleCenter, Color.white, _display);
+                "крутите деньги — идёт туго • зажмите датчик высоты", 40, TextAnchor.MiddleCenter, Color.white, _display);
             Anchor(burnoutSub.rectTransform, new Vector2(0.5f, 0.34f), new Vector2(1500, 96));
             burnoutSub.resizeTextForBestFit = true; burnoutSub.resizeTextMinSize = 24; burnoutSub.resizeTextMaxSize = 44;
             DisplayFx(burnoutSub);
@@ -2900,10 +2872,8 @@ namespace ThanksNoThanks
         private void BuildBattery()
         {
             _energyGroup = NewGroup("EnergyGroup", _hudRow.transform);
-            // Своя группа альфы: на отбитый ритм-гейтом вдох батарея коротко темнеет (плейтест §5).
-            // Именно CanvasGroup, а не тонировка спрайтов, — иначе отклик подрался бы с §4-тревогой,
-            // которая красит батарею целиком, и с кроссфейдом её красной копии.
-            _energyFade = _energyGroup.AddComponent<CanvasGroup>();
+            // (Группа альфы для «вздрагивания» батареи на невалидный вдох снята 2026-08-07 вместе с
+            // ритм-гейтом: отвергнутых вдохов больше не бывает, отклику нечего показывать.)
             _batteryImg = NewSprite("Battery", _energyGroup.transform, Sprite("energy-battery-v2"));
             AnchorPx(_batteryImg.rectTransform, BatteryRect.x, BatteryRect.y, BatteryRect.z, BatteryRect.w);
             // §4-ТРЕВОГА: та же батарея, ОФЛАЙН перекрашенная в палитру эталона (`energy-battery-alarm-v2`,
@@ -3327,12 +3297,14 @@ namespace ThanksNoThanks
         }
 
         /// <summary>Отметить ввод игрока ПО ШКАЛЕ — окно §6-триггера салюта. Разводка вводов по шкалам:
-        /// дыхание → энергия, рычаг отношений → отношения, крутилка → деньги, ответ на карточку →
+        /// датчик высоты → энергия, рычаг отношений → отношения, крутилка → деньги, ответ на карточку →
         /// здоровье (лечиться можно только выбором). Именно эта разводка и отличает «игрок починил» от
         /// «просто сменилась карточка».
-        /// ЗДЕСЬ — только вводы БЕЗ механического гейта. Крутилка (кэп дохода) и дыхание (ритм-гейт)
-        /// отмечаются в своих ветках <see cref="OnInput"/> перегрузкой по шкале — ровно на ПРИНЯТОМ
-        /// событии, иначе окно открывал бы и отвергнутый механикой мэшинг.</summary>
+        /// ВЫЗЫВАЕТСЯ ТОЛЬКО НА ПРИНЯТОМ ВВОДЕ — <see cref="Game.HandleInput"/> вернул true. «Нажал, но
+        /// механика отвергла» (кэп дохода срезал мэшинг; кризис/депрессия заглушили или переназначили
+        /// контрол; шкала ещё не открыта) калибровкой не является и окно §6 открывать не должно.
+        /// Крутилка и датчик высоты идут своими ветками <see cref="OnInput"/> через перегрузку по шкале —
+        /// у них есть ещё и собственный гейт (кэп дохода) перед Game.</summary>
         private void NoteScaleInput(GameInput input)
         {
             switch (input)
@@ -3344,8 +3316,8 @@ namespace ThanksNoThanks
             }
         }
 
-        /// <summary>Открыть окно §6 по КОНКРЕТНОЙ шкале — точка, куда отмечаются гейтованные вводы
-        /// (принятый тик крутилки, пропущенный ритм-гейтом импульс дыхания).</summary>
+        /// <summary>Открыть окно §6 по КОНКРЕТНОЙ шкале — точка, куда отмечаются вводы со своей веткой
+        /// (принятый кэпом тик крутилки, поднятый датчик высоты).</summary>
         private void NoteScaleInput(AlarmScale s) => _sinceScaleInput[(int)s] = 0f;
 
         // ================================================================ §6 · САЛЮТ ЗВЁЗД
@@ -3658,16 +3630,9 @@ namespace ThanksNoThanks
             _nsHintLine.resizeTextMaxSize = HintTextSize;
             _nsHintLine.verticalOverflow = VerticalWrapMode.Truncate;
 
-            // Видимый прогресс удержания (done-contract §5): тонкая полоска у нижнего края кремового поля.
-            // Дорожка — приглушённый INK, заполнение — GREEN кабинета (тот же токен, что у «подтверждения»).
-            _nsHoldTrack = NewSolid("HoldTrack", _nsOverlay.transform, new Color(Ink.r, Ink.g, Ink.b, 0.18f));
-            AnchorPx(_nsHoldTrack.rectTransform, HoldBarRect.x, HoldBarRect.y, HoldBarRect.z, HoldBarRect.w);
-            _nsHoldFill = NewSolid("HoldFill", _nsHoldTrack.transform, GoGreen);
-            var hf = _nsHoldFill.rectTransform;
-            hf.anchorMin = Vector2.zero; hf.anchorMax = new Vector2(0f, 1f);
-            hf.pivot = new Vector2(0f, 0.5f);
-            hf.offsetMin = Vector2.zero; hf.offsetMax = Vector2.zero;
-            _nsHoldTrack.gameObject.SetActive(false);
+            // ⚠ ЗДЕСЬ БЫЛА ПОЛОСКА ПРОГРЕССА УДЕРЖАНИЯ. Снята 2026-08-07 по слову основательницы («убрать
+            // полосу прогресса в туториалах»): прогресс на этих экранах показывает САМА шкала — батарея
+            // наполняется, монетки капают в банку, маркер стоит в зоне. Ничего вместо неё не строится.
 
             // Окно-рассказ: тот же спрайт облачка, но ОТРАЖЁННЫЙ — на эталоне рупор смотрит ВПРАВО-ВНИЗ
             // (на экране C он слева). Текст — отдельный ребёнок оверлея, поэтому отражение его не касается.
@@ -3883,9 +3848,6 @@ namespace ThanksNoThanks
             _ => "",
         };
 
-        /// <summary>Шкалы, где условие — УДЕРЖАНИЕ режима 1.5 с (у денег и ребёнка условие мгновенное).</summary>
-        private static bool IsHoldScale(NewScale s) => s == NewScale.Energy || s == NewScale.Relations;
-
         // Поднять модальный экран новой шкалы. Один раз за жизнь на шкалу. Не встаёт поверх S5-подсказки
         // (здоровье/выгорание) и поверх самой себя — иначе два открытия в одном кадре подрались бы за паузу.
         private void ShowNewScale(NewScale which)
@@ -3917,6 +3879,7 @@ namespace ThanksNoThanks
             _nsDone = false;
             _nsArmed = false;
             _nsHold = 0f;
+            _nsTicks = 0;
             _nsFadeT = 0f;
             _nsStoryText.text = NewScaleStory(which);
             _nsTaskText.text = NewScaleTask(which);
@@ -3924,7 +3887,6 @@ namespace ThanksNoThanks
             _nsFade.alpha = 1f;
             _nsOverlay.transform.SetAsLastSibling();
             _nsOverlay.SetActive(true);
-            ReflectNewScaleHold();
             SyncPause();
             ReflectDomeUnderModal();   // купол уходит ЭТИМ же кадром (иначе «культя» мигала бы один кадр)
 
@@ -3936,14 +3898,19 @@ namespace ThanksNoThanks
 
         /// <summary>
         /// Такт модалки: условие выхода → фейд 0.2 с → салют → снятие паузы. Условие проверяется ТОЛЬКО по
-        /// живому состоянию механики (деньги/энергия/отношения/звонок) плюс флаг «реальный ввод по этой
-        /// шкале уже был» — фальшивых «нажал ок» здесь нет.
-        ///
-        /// ⚠ РЕШЕНИЕ ВЛАДЕЛЬЦА (задокументировано в чекпойнте): удержание НАЧИНАЕТ считаться только ПОСЛЕ
-        /// первого принятого ввода по шкале (<see cref="_nsArmed"/>). Энергия на открытии = 100 %, отношения =
-        /// 55 % — обе УЖЕ в «нужном режиме», и без этого условия экран уходил бы сам через 1.5 с, не потребовав
-        /// от игрока ничего (ровно та «живая шкала, калиброванная под пассивного игрока», которую основательница
-        /// забраковала). Со «взводом» задача читается буквально: «привести шкалу в режим» = сделать ввод.
+        /// живому состоянию механики — фальшивых «нажал ок» здесь нет. Четыре разных условия:
+        /// <list type="bullet">
+        /// <item>ДЕНЬГИ — <see cref="MoneyTutorialTicks"/> ПРИНЯТЫХ тиков крутилки (2026-08-07: одного тика
+        /// было мало, окно исчезало быстрее, чем игрок понимал, что случилось);</item>
+        /// <item>ЭНЕРГИЯ — датчик реально поднимали И батарея ЗАПОЛНИЛАСЬ (≥<see cref="NewScaleEnergyFull"/> %).
+        /// Шкала открывается на <see cref="Game.EnergyOpenValue"/> %, а наполнить её можно ТОЛЬКО поднятым
+        /// датчиком, так что в живой игре «взвод» выполняется сам собой — он страхует поднятие экрана
+        /// снаружи (поза-снимок / Layer-2-сид) при уже полной батарее;</item>
+        /// <item>ОТНОШЕНИЯ — маркер в зоне 40–75 непрерывно <see cref="NewScaleHoldSeconds"/> с. Единственная
+        /// шкала, которой «взвод» ещё нужен: она открывается на 55 %, то есть УЖЕ в зоне, и без флага
+        /// «реальный ввод был» окно ушло бы само через 1.5 с, не потребовав ничего;</item>
+        /// <item>РЕБЁНОК — один ПОДНЯТЫЙ звонок (взвод и есть условие).</item>
+        /// </list>
         /// </summary>
         private void TickNewScale(float dt)
         {
@@ -3961,14 +3928,22 @@ namespace ThanksNoThanks
             bool inMode;
             switch (_nsWhich)
             {
-                case NewScale.Money:                    // ≥1 ПРИНЯТЫЙ тик крутилки (кэп + Game.Crank)
+                case NewScale.Money:                    // N ПРИНЯТЫХ тиков крутилки (кэп + Game.Crank)
+                    inMode = _nsTicks >= MoneyTutorialTicks;
+                    _nsHold = inMode ? NewScaleHoldSeconds : 0f;   // мгновенное условие — без удержания
+                    break;
                 case NewScale.Child:                    // один ПОДНЯТЫЙ звонок
                     inMode = _nsArmed;
-                    _nsHold = inMode ? NewScaleHoldSeconds : 0f;   // мгновенные условия — без удержания
+                    _nsHold = inMode ? NewScaleHoldSeconds : 0f;
                     break;
-                case NewScale.Energy:
-                    inMode = _nsArmed && _game.Scales.Energy > NewScaleEnergyAbove;
-                    _nsHold = inMode ? _nsHold + dt : 0f;          // вышел из режима — счётчик с нуля
+                case NewScale.Energy:                   // «держи, пока батарейка не заполнится»
+                    // «Взвод» здесь не про механику, а про ЧЕСТНОСТЬ экрана: условие обязано быть
+                    // выполнено РУКАМИ игрока. В живой игре шкала открывается на 20 % и наполнить её
+                    // нечем, кроме поднятого датчика, — но экран умеют поднимать и поза-снимок, и
+                    // Layer-2-сид (DebugShowNewScale) при полной батарее, и без флага он ушёл бы сам,
+                    // не дождавшись ни одного касания.
+                    inMode = _nsArmed && _game.Scales.Energy >= NewScaleEnergyFull;
+                    _nsHold = inMode ? NewScaleHoldSeconds : 0f;
                     break;
                 case NewScale.Relations:
                     float r = _game.Scales.Relationships;
@@ -3980,7 +3955,6 @@ namespace ThanksNoThanks
                     break;
             }
 
-            ReflectNewScaleHold();
             if (inMode && _nsHold >= NewScaleHoldSeconds) _nsDone = true;   // → фейд со следующего такта
         }
 
@@ -4000,17 +3974,6 @@ namespace ThanksNoThanks
             ShowNewScale(pending);
         }
 
-        // Полоска прогресса: видна только у шкал с УДЕРЖАНИЕМ и только после взвода (до первого ввода
-        // держать нечего). Деньги/ребёнок закрываются мгновенным событием — там полоски нет.
-        private void ReflectNewScaleHold()
-        {
-            if (_nsHoldTrack == null) return;
-            bool show = _nsShowing && IsHoldScale(_nsWhich) && _nsArmed && !_nsDone;
-            if (_nsHoldTrack.gameObject.activeSelf != show) _nsHoldTrack.gameObject.SetActive(show);
-            var rt = _nsHoldFill.rectTransform;
-            rt.anchorMax = new Vector2(NewScaleHoldFraction, 1f);
-        }
-
         // Закрыть модалку. reward=true — штатный выход по выполненному условию (салют звёзд, build-spec §D);
         // reward=false — аварийный (выход из игры / рестарт / уход из Playing): тихо, без награды.
         private void CloseNewScale(bool reward)
@@ -4020,6 +3983,7 @@ namespace ThanksNoThanks
             _nsDone = false;
             _nsArmed = false;
             _nsHold = 0f;
+            _nsTicks = 0;
             _nsWhich = NewScale.None;
             ReturnBigWidget();
             _nsOverlay.SetActive(false);
@@ -4038,8 +4002,8 @@ namespace ThanksNoThanks
 
         // Ввод под модалкой. Ответы (ДА/НЕТ) и таймаут окно НЕ закрывают — они здесь просто инертны;
         // живым остаётся ровно ОДИН контрол — контрол ОБЪЯСНЯЕМОЙ шкалы, тем же путём, что и в обычной
-        // игре (кэп дохода, ритм-гейт, ось балансира, окно звонка), поэтому «выполнил условие» = «реально
-        // поработал контролом».
+        // игре (кэп дохода, поднятый датчик, ось балансира, окно звонка), поэтому «выполнил условие» =
+        // «реально поработал контролом».
         //
         // ⚠ ФИЛЬТР ПО ШКАЛЕ — не косметика, а защита механики (находка ревью). Под модалкой время стоит:
         // возраст, стоимость жизни и ВСЕ дренажи заморожены. Если под ней живы ВСЕ контролы, игрок,
@@ -4063,19 +4027,14 @@ namespace ThanksNoThanks
                         if (_moneyPulse != null) StopCoroutine(_moneyPulse);
                         _moneyPulse = StartCoroutine(DropCoin());
                     }
-                    _nsArmed = true;                                  // ПРИНЯТЫЙ тик — вот и условие
+                    _nsArmed = true;                                  // ПРИНЯТЫЙ тик…
+                    if (_nsTicks < MoneyTutorialTicks) _nsTicks++;    // …и он же — шаг к N тикам условия
                     return;
 
-                case GameInput.EnergyPulse:
-                    if (_nsWhich != NewScale.Energy) return;          // чужой экран — дыхание мертво
+                case GameInput.EnergyHold:
+                    if (_nsWhich != NewScale.Energy) return;          // чужой экран — датчик мёртв
                     if (_game.State != GameState.Playing) return;
-                    var beat = _breath.PulseDetailed();                // ритм-гейт: мэшинг не считается
-                    if (beat != BreathPulse.Valid)
-                    {
-                        if (beat == BreathPulse.OffRhythm) NoteBreathRejected();
-                        return;
-                    }
-                    _game.HandleInput(GameInput.EnergyPulse);
+                    _game.HandleInput(GameInput.EnergyHold);          // латчится, TickModalBreath наполнит
                     _nsArmed = true;
                     return;
 
@@ -4192,7 +4151,7 @@ namespace ThanksNoThanks
             _gamePanel.SetActive(playing);
             _finalePanel.SetActive(finale);
 
-            // Fresh life → every hint is armed again, breathing re-seeds, and leftover state is cleared.
+            // Fresh life → every hint is armed again and leftover state is cleared.
             if (playing && !_wasPlaying)
             {
                 _healthTutorialSeen = false;
@@ -4213,7 +4172,6 @@ namespace ThanksNoThanks
                 _tutorialOverlay.SetActive(false);
                 _game.Paused = false;
                 _crankCap.Reset();
-                _breath.Reset();
                 _burnoutPlate.SetActive(false);
                 _breakupTimer.Hide();
                 _breakupPlate.SetActive(false);

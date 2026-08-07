@@ -291,16 +291,19 @@ namespace ThanksNoThanks.Tests
             Assert.AreEqual(GameState.Playing, g.State, "still Playing (mid-life), not the opener");
         }
 
-        // ---- E (breathing) is inert in depression (distinct from the CONFIRM catch) ----
+        // ---- the height sensor is inert in depression (distinct from the CONFIRM catch) ----
 
         [Test]
-        public void Depression_EnergyPulse_IsInert()
+        public void Depression_EnergyHold_IsInert()
         {
             var g = ReachDepression(Csv());
             int energy0 = g.Scales.Energy, gray0 = g.DepressionGray;
-            g.HandleInput(GameInput.EnergyPulse);         // the breathing lever does nothing in depression
-            Assert.AreEqual(energy0, g.Scales.Energy, "E does not restore energy in depression (scales paused)");
-            Assert.AreEqual(gray0, g.DepressionGray, "…and E is not the pulse catch (that's CONFIRM)");
+            // Держим датчик НЕСКОЛЬКО тактов: сигнал непрерывный, поэтому «инертен» обязано означать
+            // «не растит ничего СО ВРЕМЕНЕМ», а не «один вызов ничего не сделал».
+            for (int i = 0; i < 20; i++) { g.HandleInput(GameInput.EnergyHold); g.Tick(0.1f); }
+            Assert.AreEqual(energy0, g.Scales.Energy,
+                "поднятый датчик не наполняет батарею в депрессии (шкалы на паузе)");
+            Assert.AreEqual(gray0, g.DepressionGray, "…и он не «поймал пульс» — это делает CONFIRM");
             Assert.IsTrue(g.InDepression);
         }
 

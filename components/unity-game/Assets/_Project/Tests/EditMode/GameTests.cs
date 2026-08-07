@@ -68,7 +68,9 @@ namespace ThanksNoThanks.Tests
         {
             var g = new Game(new[] { Plain("A", 4, yesHealth: -10, yesNec: "y"), Plain("B", 6, noNec: "n") });
             var input = new FakeInputSource();
-            input.Received += g.HandleInput;            // exactly the wiring GameDriver uses
+            input.Received += i => g.HandleInput(i);    // exactly the wiring GameDriver uses
+                                                        // (лямбда, а не группа методов: HandleInput отдаёт
+                                                        // «принято ли шкалой» — см. §6-окно)
 
             input.Confirm();                            // start
             Assert.AreEqual("A?", g.CurrentCard.Question);

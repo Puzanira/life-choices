@@ -321,8 +321,8 @@ namespace ThanksNoThanks.Tests
             while (g.State == GameState.Playing && guard++ < 2000)
             {
                 g.Tick(0.5f);                     // never press
-                for (int i = 0; i < 3 && g.EnergyOpen && g.State == GameState.Playing; i++)
-                    g.HandleInput(GameInput.EnergyPulse);   // breathe so ENERGY never ends it first
+                if (g.EnergyOpen && g.State == GameState.Playing)
+                    g.HandleInput(GameInput.EnergyHold);    // датчик зажат — ЭНЕРГИЯ не кончит забег первой
                 if (g.State == GameState.Playing && g.Scales.Child == 0) { bottomedWhilePlaying = true; break; }
             }
             Assert.IsTrue(bottomedWhilePlaying,
@@ -376,8 +376,8 @@ namespace ThanksNoThanks.Tests
             while (g.State == GameState.Playing && guard++ < 5000)
             {
                 g.Tick(0.5f);
-                for (int i = 0; i < 3 && g.EnergyOpen && g.State == GameState.Playing; i++)
-                    g.HandleInput(GameInput.EnergyPulse);
+                if (g.EnergyOpen && g.State == GameState.Playing)
+                    g.HandleInput(GameInput.EnergyHold);
             }
             Assert.AreEqual(GameState.Finale, g.State);
 

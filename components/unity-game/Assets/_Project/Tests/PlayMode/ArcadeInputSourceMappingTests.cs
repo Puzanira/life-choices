@@ -148,19 +148,47 @@ namespace ThanksNoThanks.Tests.PlayMode
             yield return Cleanup();
         }
 
-        // ---- breathing lever (HeightA) → EnergyPulse ---------------------------------------------------
+        // ---- height sensor (HeightA) → HELD EnergyHold -------------------------------------------------
 
         [UnityTest]
-        public IEnumerator HeightA_UpStroke_Is_One_Breath_Held_Top_Does_Not_Repeat()
+        public IEnumerator HeightA_Held_Reemits_EnergyHold_Every_Frame_And_Nothing_Else()
         {
+            // ⚠ РЕДИЗАЙН 2026-08-07: датчик — УДЕРЖИВАЕМЫЙ контрол, как и джойстик отношений. Пока он выше
+            // середины хода, источник переиздаёт EnergyHold КАЖДЫЙ кадр (раньше выдавался один импульс на
+            // подъём — под механику ритма, которой больше нет).
             yield return Boot();
-            yield return Hold(new BackendSnapshot { HeightA = 0.8f }, frames: 6);   // stroke up + sit at top
-            CollectionAssert.AreEqual(new[] { GameInput.EnergyPulse }, _received,
-                "one up-stroke through mid-travel = exactly ONE EnergyPulse; holding the lever up never repeats");
-            yield return Release();                                                  // lever back down → re-arm
-            yield return Hold(new BackendSnapshot { HeightA = 0.8f }, frames: 4);   // second full stroke
-            CollectionAssert.AreEqual(new[] { GameInput.EnergyPulse, GameInput.EnergyPulse }, _received,
-                "a full down-up cycle breathes again — and still emits nothing but EnergyPulse");
+            yield return Hold(new BackendSnapshot { HeightA = 0.8f }, frames: 6);
+            Assert.GreaterOrEqual(_received.Count, 5,
+                "поднятый датчик — HELD-сигнал: он переиздаётся каждый кадр, а не один раз на подъём");
+            Assert.IsTrue(_received.All(i => i == GameInput.EnergyHold),
+                $"…и ничего, кроме EnergyHold (получено: {string.Join(",", _received)})");
+
+            // Опустили ниже порога отпускания — сигнал ГАСНЕТ, новых событий нет.
+            yield return Release();
+            int afterRelease = _received.Count;
+            yield return Hold(new BackendSnapshot { HeightA = 0.2f }, frames: 4);   // ниже High и ниже Low
+            Assert.AreEqual(afterRelease, _received.Count,
+                "опущенный датчик не шлёт ничего — рост энергии обязан прекращаться");
+
+            // Подняли снова — сигнал вернулся сам, без всякого «перевзвода».
+            yield return Hold(new BackendSnapshot { HeightA = 0.8f }, frames: 4);
+            Assert.Greater(_received.Count, afterRelease, "подняли снова — сигнал снова идёт");
+            Assert.IsTrue(_received.All(i => i == GameInput.EnergyHold), "…и по-прежнему только EnergyHold");
+            yield return Cleanup();
+        }
+
+        [UnityTest]
+        public IEnumerator HeightA_BetweenTheHysteresisThresholds_DoesNotChatter()
+        {
+            // Гистерезис: значение между Low и High не переключает состояние. Поднялись выше High — держим;
+            // просели до 0.4 (ниже High, но выше Low) — сигнал ДЕРЖИТСЯ (дрожание руки не рвёт удержание).
+            yield return Boot();
+            yield return Hold(new BackendSnapshot { HeightA = 0.8f }, frames: 3);
+            int held = _received.Count;
+            Assert.Greater(held, 0, "датчик поднят");
+            yield return Hold(new BackendSnapshot { HeightA = 0.4f }, frames: 4);   // Low < 0.4 < High
+            Assert.Greater(_received.Count, held,
+                "между порогами сигнал НЕ рвётся — иначе дрожь руки мигала бы батареей");
             yield return Cleanup();
         }
 

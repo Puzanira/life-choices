@@ -543,16 +543,14 @@ namespace ThanksNoThanks.Tests
         {
             var g = FillerLife();
             g.StartLife(); No(g);                     // start the age timer
-            int guard = 0, sinceBreath = 0;
+            int guard = 0;
             while (g.State == GameState.Playing && guard++ < 100000)
             {
                 g.Tick(0.25f);                        // 0.25s steps
                 if (active && g.MoneyOpen) g.HandleInput(GameInput.MoneyTick);  // ≈4 ticks/s focused
-                if (active && g.EnergyOpen && ++sinceBreath >= 5)              // ≈ every 1.25s
-                {
-                    g.HandleInput(GameInput.EnergyPulse);
-                    sinceBreath = 0;
-                }
+                // Датчик высоты держим, когда батарея просела ниже половины: рука уходит с крутилки, и
+                // это и есть цена энергии в новой механике (2026-08-07 — прежде это был ритм-вдох).
+                if (active && g.EnergyOpen && g.Scales.Energy < 50) g.HandleInput(GameInput.EnergyHold);
             }
             return g.Money;
         }
