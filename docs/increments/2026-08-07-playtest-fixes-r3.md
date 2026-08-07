@@ -190,5 +190,5 @@
 
 ## 6. Playtest verdict
 
-`Playtest ok:` —
-`Landed:` —
+`Playtest ok:` — (ждёт утренний батч основательницы)
+`Landed:` 38015cba9239cac4072f8f5470a8baf2466f6874 (2026-08-08, ночной прогон)
