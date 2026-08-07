@@ -158,4 +158,4 @@
 ## 6. Playtest verdict
 
 `Playtest ok:` —
-`Landed:` —
+`Landed:` 3b50914 (2026-08-07)
