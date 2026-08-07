@@ -115,24 +115,61 @@ namespace ThanksNoThanks.Tests.PlayMode
                 "выдернули плату — подсказка вернулась сама, без перезапуска");
         }
 
+        /// <summary>
+        /// r3: ВХОДНЫЕ ЭКРАНЫ СПЕЦРЕЖИМОВ живут по тому же правилу — экран, у которого ЕСТЬ свой контрол,
+        /// называет его клавишу при эмуляции; экран без контрола второй строки не получает (у здоровья
+        /// контрола нет по механике — лечат выборы за деньги, у блица оба рычага названы самой задачей).
+        /// </summary>
         [UnityTest]
-        public IEnumerator BurnoutHint_NamesTheSensorKeyToo()
+        public IEnumerator SpecialModeScreens_NameTheirControlKey_OnlyWhenTheyHaveOne()
         {
             yield return null;
-            _driver.DebugShowTutorial("ВЫГОРАНИЕ!", ArcadeControlId.HeightA);
+            _fake.Yes();                                 // opener → playing
             yield return null;
 
-            Assert.IsTrue(_driver.TutorialShowing);
-            Assert.AreEqual(ExpectedHint(ArcadeControlId.HeightA), _driver.TutorialHintLine.text,
-                "S5-подсказка про датчик тоже называет клавишу при эмуляции");
+            _driver.DebugShowSpecialMode(SpecialMode.Burnout);
+            yield return null;
+            Assert.IsTrue(_driver.SpecialModeShowing, "экран выгорания поднят");
+            Assert.AreEqual(ExpectedHint(ArcadeControlId.HeightA), _driver.NewScaleHintLine.text,
+                "экран выгорания называет клавишу ДАТЧИКА ВЫСОТЫ при эмуляции");
+            _driver.DebugCloseSpecialMode();
+            yield return null;
 
-            // …а подсказка БЕЗ контрола (здоровье) второй строки не получает — лишнего шума нет.
-            _driver.DebugDismissTutorial();
+            _driver.DebugShowSpecialMode(SpecialMode.Depression);
             yield return null;
-            _driver.DebugShowTutorial("ЗДОРОВЬЕ НАЧАЛО ТАЯТЬ.");
+            Assert.AreEqual(ExpectedHint(ArcadeControlId.BangButton), _driver.NewScaleHintLine.text,
+                "экран депрессии называет клавишу контрола ЛОВЛИ — кнопки «!» (решение основательницы 2026-08-08)");
+            _driver.DebugCloseSpecialMode();
             yield return null;
-            Assert.AreEqual("", _driver.TutorialHintLine.text,
-                "у подсказки без своего контрола второй строки нет");
+
+            _driver.DebugShowSpecialMode(SpecialMode.Health);
+            yield return null;
+            Assert.AreEqual("", _driver.NewScaleHintLine.text,
+                "у здоровья своего контрола НЕТ — лишней строки не появляется");
+            _driver.DebugCloseSpecialMode();
+            yield return null;
+
+            _driver.DebugShowSpecialMode(SpecialMode.Blitz);
+            yield return null;
+            Assert.AreEqual("", _driver.NewScaleHintLine.text,
+                "блиц играется двумя рычагами ответа — их называет сама задача, отдельной строки нет");
+            _driver.DebugCloseSpecialMode();
+            yield return null;
+        }
+
+        /// <summary>…и подсказка НА САМОМ экране депрессии (п.3в) тоже называет клавишу при эмуляции.</summary>
+        [UnityTest]
+        public IEnumerator DepressionBoard_NamesTheCatchKey_UnderEmulation()
+        {
+            yield return null;
+            _fake.Yes();
+            yield return null;
+
+            StringAssert.Contains(GameDriver.DepressionCatchControlName.ToLowerInvariant(),
+                GameDriver.DepressionBoardHint,
+                "подсказка на доске депрессии называет КОНТРОЛ, а не только ритм");
+            Assert.IsNotNull(_driver.DepressionKeyHint, "строка клавиши на доске депрессии собрана");
+            yield break;
         }
 
         [UnityTest]

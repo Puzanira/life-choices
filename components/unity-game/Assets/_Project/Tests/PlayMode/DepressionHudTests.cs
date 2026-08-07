@@ -38,15 +38,18 @@ namespace ThanksNoThanks.Tests.PlayMode
         private static Game DepressionGame(string csv)
         {
             var byId = CardLoader.ParseAll(csv).ToDictionary(c => c.Id);
-            var filler = new Card
-            {
-                Id = "FILL", Question = "FILL?", When = "60", Age = 60, Order = 999,
-                YesDeltas = new List<ScaleDelta>(), NoDeltas = new List<ScaleDelta>(),
-                NoNecrolog = "жил дальше", Flags = new List<string>(),
-            };
+            // r3: обычных карточек после кризиса должно хватить на зазор до депрессии + запас.
+            var fillers = new List<Card>();
+            for (int i = 0; i < Game.DepressionGapCards + 6; i++)
+                fillers.Add(new Card
+                {
+                    Id = "FILL" + i, Question = "FILL?", When = "60", Age = 60, Order = 999 + i,
+                    YesDeltas = new List<ScaleDelta>(), NoDeltas = new List<ScaleDelta>(),
+                    NoNecrolog = "жил дальше", Flags = new List<string>(),
+                });
             var plan = new DeckPlan
             {
-                Deck = new List<Card> { byId["I03"], filler },
+                Deck = new List<Card> { byId["I03"] }.Concat(fillers).ToList(),
                 Reserve = new List<Card>(),
                 Crisis = CrisisIds.Select(id => byId[id]).ToList(),
                 Depression = byId["CR09"],
@@ -74,17 +77,20 @@ namespace ThanksNoThanks.Tests.PlayMode
             int guard = 0;
             while (guard++ < 12000 && g.Phase == CrisisPhase.None && g.State == GameState.Playing)
             {
+                if (driver.SpecialModeShowing) { NewScaleTut.ClearSpecial(driver, fake); yield return null; continue; }
                 if (driver.NewScaleShowing) { NewScaleTut.Clear(driver, fake); yield return null; continue; }
                 if (driver.TutorialShowing) { fake.Confirm(); yield return null; continue; }
                 g.Tick(0.2f);
             }
             Assert.AreEqual(CrisisPhase.Blitz, g.Phase, "reached the crisis blitz");
+            NewScaleTut.ClearSpecial(driver, fake);        // r3: вход в блиц объявляется экраном
+            yield return null;
 
             // Объявление кризиса теперь живёт в облачке и ничего не блокирует — состарим его, чтобы
             // экран читался отдохнувшим (плашка-рубрика и её бит сняты 2026-08-05).
             driver.DebugPumpHost(GameDriver.BubbleSeconds + 0.1f);
-            for (int i = 0; i < 5; i++) fake.Yes();         // clear the blitz cleanly → crisis tail rolls
-            Assert.IsTrue(g.InDepression, "the crisis tail entered depression");
+            for (int i = 0; i < 5; i++) { fake.Yes(); driver.DebugClearFrameGuards(); }
+            yield return WalkToDepression(driver, g, fake);
 
             // Depression announces itself with a muted «ТЁМНАЯ ПОЛОСА…» bubble — age it out before pulses.
             driver.DebugPumpHost(GameDriver.BubbleSeconds + 0.1f);
@@ -98,7 +104,7 @@ namespace ThanksNoThanks.Tests.PlayMode
             yield return null;
             Assert.IsTrue(g.DepressionPulsing, "the pulse is lit");
             Assert.IsTrue(driver.DepressionPulseIndicator.gameObject.activeSelf, "the dim centre pulse is visible");
-            fake.Confirm();                                 // catch → one step of colour returns
+            fake.Fire(GameInput.ChildPress);                // ловля «!» → шаг цвета вернулся
             Assert.AreEqual(Game.DepressionGraySteps - 1, g.DepressionGray, "a catch stepped the gray down");
 
             yield return null;
@@ -108,7 +114,7 @@ namespace ThanksNoThanks.Tests.PlayMode
             for (int i = 0; i < Game.DepressionGraySteps - 1; i++)
             {
                 g.Tick(2.5f);
-                fake.Confirm();
+                fake.Fire(GameInput.ChildPress);
             }
             Assert.IsFalse(g.InDepression, "5 catches lifted depression");
 
@@ -129,16 +135,39 @@ namespace ThanksNoThanks.Tests.PlayMode
             int guard = 0;
             while (guard++ < 12000 && g.Phase == CrisisPhase.None && g.State == GameState.Playing)
             {
+                if (driver.SpecialModeShowing) { NewScaleTut.ClearSpecial(driver, fake); yield return null; continue; }
                 if (driver.NewScaleShowing) { NewScaleTut.Clear(driver, fake); yield return null; continue; }
                 if (driver.TutorialShowing) { fake.Confirm(); yield return null; continue; }
                 g.Tick(0.2f);
             }
             Assert.AreEqual(CrisisPhase.Blitz, g.Phase, "reached the crisis blitz");
+            NewScaleTut.ClearSpecial(driver, fake);
+            yield return null;
             driver.DebugPumpHost(GameDriver.BubbleSeconds + 0.1f);
-            for (int i = 0; i < 5; i++) fake.Yes();
-            Assert.IsTrue(g.InDepression, "the crisis tail entered depression");
+            for (int i = 0; i < 5; i++) { fake.Yes(); driver.DebugClearFrameGuards(); }
+            yield return WalkToDepression(driver, g, fake);
             driver.DebugPumpHost(GameDriver.BubbleSeconds + 0.1f);   // age out the «ТЁМНАЯ ПОЛОСА…» bubble
             yield return null;                                       // one Update → ReflectDepression, resting
+        }
+
+        /// <summary>
+        /// r3 (п.3а): депрессия входит не встык за блицем, а через ЗАЗОР обычных карточек — проходим его
+        /// обычными ответами и снимаем её входной экран зелёной, оставляя игру ровно в депрессии.
+        /// </summary>
+        private static IEnumerator WalkToDepression(GameDriver driver, Game g, PlayFakeInputSource fake)
+        {
+            Assert.IsTrue(g.DepressionArmed, "хвост кризиса зарядил депрессию");
+            int guard = 0;
+            while (guard++ < 40 && !g.InDepression && g.State == GameState.Playing)
+            {
+                fake.No();
+                driver.DebugClearFrameGuards();
+                if (driver.NewScaleShowing) NewScaleTut.Clear(driver, fake);
+                if (driver.TutorialShowing) { fake.Confirm(); driver.DebugClearFrameGuards(); }
+            }
+            Assert.IsTrue(g.InDepression, "the crisis tail entered depression");
+            NewScaleTut.ClearSpecial(driver, fake);          // …и её входной экран снят зелёной
+            yield return null;
         }
 
         // FIX 2 (S8 rework): the depression indicator is a BIG star that is ALWAYS visible during depression and

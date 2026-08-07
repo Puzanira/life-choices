@@ -45,11 +45,29 @@ namespace ThanksNoThanks.Tests.PlayMode
             }
         }
 
-        /// <summary>Clear whichever modal/hint is up: the §D screen by its control, the S5 hint by GREEN.</summary>
+        /// <summary>
+        /// r3: снять ВХОДНОЙ ЭКРАН СПЕЦРЕЖИМА (здоровье / блиц / депрессия / первое выгорание) тем же
+        /// путём, каким его снимает игрок, — ЗЕЛЁНОЙ кнопкой. Экран глушит остаток кадра (аккорд
+        /// «Enter + зелёная» не должен утечь в ловлю пульса), поэтому синхронный цикл сразу сбрасывает
+        /// одноразовые гейты — в живой игре их сбрасывает следующий кадр Update.
+        /// </summary>
+        public static void ClearSpecial(GameDriver driver, PlayFakeInputSource fake)
+        {
+            int guard = 0;
+            while (driver.SpecialModeShowing && guard++ < 20)
+            {
+                fake.Yes();                       // ЗЕЛЁНАЯ — единственный живой контрол под этим экраном
+                driver.DebugClearFrameGuards();
+            }
+        }
+
+        /// <summary>Clear whichever modal/hint/screen is up: §D by its control, S5 by GREEN, спецрежим по GREEN.</summary>
         public static void ClearAny(GameDriver driver, PlayFakeInputSource fake)
         {
+            if (driver.SpecialModeShowing) ClearSpecial(driver, fake);
             if (driver.NewScaleShowing) Clear(driver, fake);
-            if (driver.TutorialShowing) fake.Confirm();
+            if (driver.TutorialShowing) { fake.Confirm(); driver.DebugClearFrameGuards(); }
+            if (driver.SpecialModeShowing) ClearSpecial(driver, fake);   // очередь из двух окон
         }
 
         /// <summary>

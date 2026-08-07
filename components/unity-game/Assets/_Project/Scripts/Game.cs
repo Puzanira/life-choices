@@ -114,6 +114,13 @@ namespace ThanksNoThanks
         public const int BurnoutEnterEnergyAtOrBelow = 10; // входит при энергии ≤10%
         public const int BurnoutExitEnergyAbove = 40;      // снимается сам при энергии >40%
         public const double BurnoutIncomeMult = 0.5;       // крутилка «тяжелеет» — доход ×0.5
+        /// <summary>
+        /// ГРЕЙС-ПЕРИОД после выхода из выгорания (основательница, живой плейтест 2026-08-07: «повторное
+        /// выгорание встык — не даёт выдохнуть»). Столько секунд после снятия выгорания дренаж энергии НЕ
+        /// идёт и выгорание не может защёлкнуться заново. Запрошенный коридор 5–8 с, берём середину.
+        /// Реген под поднятым датчиком в грейсе работает как обычно — это пауза наказания, а не игры.
+        /// </summary>
+        public const float BurnoutGraceSeconds = 6f;
 
         // ---- live relationships balancer (tunable; canon §Отношения) ----
         // The fourth live scale: a balancer to hold inside a zone while cranking/holding the sensor/answering.
@@ -125,8 +132,15 @@ namespace ThanksNoThanks
         // 2026-07-23): «расставались уже в жёлтой, а должны — в конце красной». Жёлтая [15..40] = буфер-
         // предупреждение (таймер разрыва не идёт); красная (<15) = таймер разрыва. Значение тюнимое.
         public const int RelBreakupFloor = 15;
-        public const double RelDriftPerSec = 0.6;          // дрейф вниз ≈0.6%/сек, пока балансир открыт
-        public const double RelDriftMarriedPerSec = 0.3;   // в браке (MD01=ДА) мягче — вдвое медленнее
+        // ⚠ ДРЕЙФ ПЕРЕКАЛИБРОВАН 2026-08-07 (живой плейтест: «до расставания при полном бездействии больше
+        // минуты — бездействие не наказывается»). Требование основательницы: из зелёной середины (55 %) до
+        // РАЗРЫВА при полном бездействии ≈30–45 с. Число выводится, а не «на глаз»:
+        //   t = (СТАРТ − RelBreakupFloor)/d + RelBreakupSeconds = (55 − 15)/d + 10.
+        // d = 1.6 ⇒ 25 + 10 = 35 с — ровно середина коридора 30–45 (было d = 0.6 ⇒ 66.7 + 10 = 76.7 с).
+        // Удержание при этом по-прежнему уверенно вытягивает: нетто «держу ↑» = 4.0 − 1.6 = +2.4 %/с
+        // (в браке +3.2). Пороги зон и сама механика не тронуты — изменено ОДНО число (и его половина).
+        public const double RelDriftPerSec = 1.6;          // дрейф вниз ≈1.6%/сек, пока балансир открыт
+        public const double RelDriftMarriedPerSec = 0.8;   // в браке (MD01=ДА) мягче — вдвое медленнее
         public const double RelBalancerPerSec = 4.0;       // RELATION_AXIS ↑/↓ тянет маркер ≈4%/сек — было 1.5
                                                           // (нетто с дрейфом ~+3.4%/с), чтобы «держу ↑» ЯВНО
                                                           // двигало маркер; было слишком вяло/незаметно (плейтест)
@@ -171,6 +185,14 @@ namespace ThanksNoThanks
         // grayscale «собраться» mini-game DELIBERATELY OPPOSITE to the energy sensor (a steady HOLD).
         // Here the pulse is SLOW and SPARSE — wait and catch, don't mash. All values are dt/seed-injected.
         public const double DepressionChance = 0.5;        // per-life probability the crisis tail → depression
+        /// <summary>
+        /// ЗАЗОР «кризис → депрессия» в ОБЫЧНЫХ КАРТОЧКАХ (основательница, живой плейтест 2026-08-07:
+        /// депрессия влетала ВСТЫК за блицем, два спецрежима подряд читались как один сплошной). Ролл
+        /// по-прежнему делается хвостом кризиса (один раз за жизнь), но вход ОТКЛАДЫВАЕТСЯ, пока игрок не
+        /// сыграет столько обычных карточек. Расширение пейсинг-правила «механики не открываются подряд».
+        /// Запрошенный коридор 3–4; берём 4 (тюнимо).
+        /// </summary>
+        public const int DepressionGapCards = 4;
         public const int DepressionGraySteps = 5;          // 5 gray steps: 5 = full B&W, 0 = full colour (exit)
         // STEADY metronome (S8 playtest fix): the pulse is a predictable beat, not a random rare flash, so the
         // player can «дышать в такт». Equal min=max → a fixed ~1.5s tempo (was a random 2.5–3s wait, which read
@@ -220,6 +242,8 @@ namespace ThanksNoThanks
         // УДЕРЖИВАЕМЫЙ сигнал «датчик высоты поднят» на ЭТОТ тик (см. GameInput.EnergyHold). Ставится
         // вводом, гасится в начале каждого Tick — ровно модель оси балансира (_relAxis).
         private bool _breathHeld;
+        // Грейс после выхода из выгорания: пока >0, дренаж энергии не идёт и выгорание не защёлкивается.
+        private float _burnoutGrace;
         private double _healthDecayMult = 1.0; // set by LT01 (×2 забросил / ×0.5 занялся)
         private Card _lt08;                  // condition-triggered system heal card (from DeckPlan)
         private bool _lt08Triggered;         // single-shot per life
@@ -230,6 +254,12 @@ namespace ThanksNoThanks
         public bool HealthDecaying { get; private set; }
         /// <summary>Temporary «выгорание»: entered at energy ≤10%, exits above 40%. Halves crank income while on.</summary>
         public bool Burnout { get; private set; }
+
+        /// <summary>
+        /// Секунд грейса, оставшихся после выхода из выгорания (<see cref="BurnoutGraceSeconds"/> → 0).
+        /// Пока >0: дренаж энергии заморожен и повторное выгорание защёлкнуться не может — «встык» запрещён.
+        /// </summary>
+        public float BurnoutGrace => _burnoutGrace;
 
         // ---- live relationships balancer state ----
         private int _relAxis;                 // RELATION_AXIS for THIS tick: -1/0/+1, consumed each tick
@@ -270,23 +300,34 @@ namespace ThanksNoThanks
         public bool ChildFlashing { get; private set; }
 
         /// <summary>
-        /// The child call is FROZEN: the 5s window stops counting down and a press is not scored. Two cases,
-        /// one rule — «the player can't see the handset, so the clock must not run»:
-        /// <list type="bullet">
-        /// <item><see cref="Paused"/> — a hint / the §D modal is up over the board;</item>
-        /// <item><see cref="Burnout"/> — the S7 «ВЫГОРАНИЕ» plate is a FULL-SCREEN takeover drawn ON TOP of
-        /// the handset, so a running window would bank INVISIBLE misses (two of them = «плохой родитель»
-        /// for a call the player never saw).</item>
-        /// </list>
+        /// The child call is FROZEN: the 5s window stops counting down and a press is not scored. One rule —
+        /// «the player can't see the handset, so the clock must not run»: <see cref="Paused"/>, i.e. a hint,
+        /// the §D modal or a спецрежим-входной экран is up over the board.
+        ///
+        /// ⚠ ВЫГОРАНИЕ БОЛЬШЕ НЕ МОРОЗИТ ЗВОНОК (2026-08-07). Оно морозило его ровно по одной причине:
+        /// плашка S7 была ПОЛНОЭКРАННЫМ захватом, нарисованным поверх трубки, и окно копило НЕВИДИМЫЕ
+        /// пропуски. Живой плейтест основательницы снял тот захват: первое выгорание объясняет входной
+        /// D-экран (он ставит обычную <see cref="Paused"/>, и звонок замирает вместе со всем остальным), а
+        /// повторные показывают КОРОТКУЮ плашку без блокировки — трубка при ней видна целиком, значит и
+        /// замораживать нечего.
+        ///
         /// Nothing is reset: the remaining window and the miss streak survive the freeze and continue from
         /// the same point the moment it lifts. (Crisis and depression freeze the call even earlier — there
         /// <see cref="Tick"/> never reaches <see cref="IntegrateChild"/> at all.)
         /// </summary>
-        public bool ChildCallFrozen => InputsFrozen || Burnout;
+        public bool ChildCallFrozen => InputsFrozen;
 
         /// <summary>Fired the instant the child scale opens (MD02=ДА, «свадьба+2») — drives the S5
         /// «ПОПОЛНЕНИЕ! жмите Enter по вспышке» hint + pause, one-shot per life.</summary>
         public event Action ChildOpened;
+
+        /// <summary>
+        /// Fired the instant a call window closes UNPRESSED — «проспал звонок» (живой плейтест 2026-08-07:
+        /// «пропуск звонка вообще никак не отзывается»). Чистая семантика: штраф «плохого родителя» живёт
+        /// отдельно (он даётся только за ДВА пропуска подряд), а это событие — про КАЖДЫЙ пропуск, чтобы
+        /// драйвер увёл трубку в «поникшей» позе и Ведущий это озвучил.
+        /// </summary>
+        public event Action ChildCallMissed;
 
         // ---- midlife crisis (blitz + impulse) state ----
         private List<Card> _blitzThoughts;      // CR01..CR05 (from the plan); null when no crisis in this plan
@@ -346,6 +387,8 @@ namespace ThanksNoThanks
         private float _depPulseWindow;       // time left in the OPEN hit-window (>0 while the dim pulse is lit)
         private float _depPressLockout;      // anti-mash: while >0 an in-window press is discarded (still a miss)
         private readonly Random _depRng = new();  // engine-free RNG for the pulse interval + the entry roll
+        private bool _depArmed;              // ролл сработал — депрессия ЖДЁТ зазора в обычных карточках
+        private int _depGapLeft;             // сколько обычных карточек ещё должно пройти до входа
 
         /// <summary>Test/tuning seam: supplies the NEXT pulse interval in seconds. null → a uniform draw in
         /// [<see cref="DepressionPulseIntervalMin"/>,<see cref="DepressionPulseIntervalMax"/>]. Survives
@@ -368,6 +411,16 @@ namespace ThanksNoThanks
         /// <summary>True while the dim pulse is lit (the ~0.6s hit-window is open) — a CONFIRM now is a catch.
         /// Read by the driver to reveal the faint centre pulse indicator (S8).</summary>
         public bool DepressionPulsing { get; private set; }
+
+        /// <summary>
+        /// Ролл хвоста кризиса УЖЕ выпал в пользу депрессии, но она ЖДЁТ зазора: депрессия не встаёт встык
+        /// за блицем (<see cref="DepressionGapCards"/> обычных карточек между ними, плейтест 2026-08-07).
+        /// </summary>
+        public bool DepressionArmed => _depArmed;
+
+        /// <summary>Сколько обычных карточек ещё должно пройти до отложенного входа в депрессию (0 — либо
+        /// зазор выбран, либо депрессия не ждёт вовсе).</summary>
+        public int DepressionGapLeft => _depArmed ? _depGapLeft : 0;
 
         /// <summary>Fired the instant depression begins — drives the muted «ТЁМНАЯ ПОЛОСА…» announce (S8).</summary>
         public event Action DepressionStarted;
@@ -582,12 +635,16 @@ namespace ThanksNoThanks
                     if (input == GameInput.Confirm) StartLife();
                     break;
                 case GameState.Playing:
-                    // Depression intercepts EVERYTHING: the only live input is the CONFIRM catch on the dim
-                    // pulse (scales paused — crank/breath/axis/child/answers are all inert). CONFIRM here is
-                    // the catch, NOT a restart (we are mid-Playing), and NOT a child press (driver defers).
+                    // Depression intercepts EVERYTHING: the only live input is the pulse catch (scales are
+                    // paused — crank/breath/axis/answers are all inert).
+                    // ⚠ КОНТРОЛ ЛОВЛИ — КНОПКА «!» (CHILD_PRESS). РЕШЕНИЕ ОСНОВАТЕЛЬНИЦЫ 2026-08-08 по
+                    // открытому вопросу п.3г: ловля стоит на «!», как и было в спеке встречи, а не на
+                    // зелёной. Зелёная (ДА) в депрессии ИНЕРТНА — она сюда доходит и не делает ничего
+                    // (значит и §6-окно не открывает, и плашку не панчит). Трубкой «!» в депрессии тоже
+                    // не является: окно звонка под депрессией не крутится (Tick сюда не доходит).
                     if (InDepression)
                     {
-                        if (input == GameInput.Confirm) DepressionPress();
+                        if (input == GameInput.ChildPress) DepressionPress();
                         break;
                     }
                     // Crisis intercepts the two answer levers (ДА/НЕТ); crank/breath/axis/child are inert
@@ -752,11 +809,28 @@ namespace ThanksNoThanks
                 Answer(_coin(), timeout: true);   // не успел — берём ДА или НЕТ случайно (тон — «пропуск»)
         }
 
+        /// <summary>
+        /// ПОРЯДОК «карточка → открытие шкалы» (основательница, живой плейтест 2026-08-07: «карточка
+        /// „начать встречаться“ приходит ПОСЛЕ открытия шкалы отношений — нелогично»).
+        ///
+        /// Причина была не в колоде, а в момент срабатывания: возраст догоняет возраст ТЕКУЩЕЙ карточки
+        /// сразу, как её выдали, поэтому возрастной гейт (20) щёлкал ПОКА `YA03` ещё висела неотвеченной —
+        /// туториал шкалы вставал поверх собственного вопроса. Колода при этом правильная: `YA03` и так
+        /// первая среди карточек 20 лет (сортировка по возрасту, потом по порядку в CSV).
+        ///
+        /// Правило: открытие ПРИДЕРЖИВАЕТСЯ, пока текущая карточка сама несёт флаг `OPEN:{scale}`. Как
+        /// только она отвечена и выдана следующая — возраст уже перейден, и гейт щёлкает первым же тиком.
+        /// Канон-возрасты (18/20/25) не тронуты; правило одно на все три шкалы.
+        /// </summary>
+        private bool HeldByItsOwnCard(string scale)
+            => CurrentCard != null && CurrentCard.Opens(scale);
+
         // Opens the money scale the first time Age reaches 18 and announces it (tutorial + pause hook).
         // Returns true if the frame should stop here (a listener paused the game on open).
         private bool CheckMoneyOpen()
         {
             if (MoneyOpen || Age < MoneyOpenAge) return false;
+            if (HeldByItsOwnCard(Card.OpenMoney)) return false;   // сначала ответь на СВОЮ карточку
             MoneyOpen = true;
             MoneyOpened?.Invoke();   // driver shows the S5 overlay and sets Paused
             return Paused;
@@ -771,6 +845,7 @@ namespace ThanksNoThanks
         private bool CheckEnergyOpen()
         {
             if (EnergyOpen || Age < EnergyOpenAge) return false;
+            if (HeldByItsOwnCard(Card.OpenEnergy)) return false;  // сначала ответь на СВОЮ карточку (YA05)
             EnergyOpen = true;
             Scales.Energy = Math.Min(Scales.Energy, EnergyOpenValue);
             _energyFrac = 0;
@@ -796,6 +871,7 @@ namespace ThanksNoThanks
         private bool CheckRelationshipsOpen()
         {
             if (RelationshipsOpen || RelationshipsLost || Age < RelationshipsOpenAge) return false;
+            if (HeldByItsOwnCard(Card.OpenRelations)) return false;  // «начать встречаться?» → и только потом шкала
             RelationshipsOpen = true;
             RelationshipsOpened?.Invoke();
             return Paused;
@@ -834,6 +910,7 @@ namespace ThanksNoThanks
                 CardTimerMax = AnswerSecondsFor(c.Age);
                 CardTimer = CardTimerMax;
                 CardChanged?.Invoke();
+                CountDepressionGapCard();   // зазор «кризис → депрессия» считается ОБЫЧНЫМИ карточками
                 return;
             }
         }
@@ -1228,7 +1305,7 @@ namespace ThanksNoThanks
             _suspendedCard = null;
             CrisisEnded?.Invoke();
             CardChanged?.Invoke();                // driver re-renders the resumed card (normal HUD)
-            MaybeEnterDepression();               // RANDOM_TRIGGER tail: the crisis may drop into «тёмная полоса»
+            MaybeArmDepression();                 // RANDOM_TRIGGER tail: ролл сейчас, вход — через зазор карточек
         }
 
         // Injected-time tick while a crisis phase is active: only the fast blitz/impulse timer runs — the
@@ -1255,18 +1332,38 @@ namespace ThanksNoThanks
             _depPulseNextInterval = 0f;
             _depPulseWindow = 0f;
             _depPressLockout = 0f;
+            _depArmed = false;
+            _depGapLeft = 0;
         }
 
         // Crisis tail: a one-shot RANDOM_TRIGGER roll (canon: «иногда после кризиса»). Latches _depressionDone
         // either way so it can never re-roll this life; only fires when the plan actually carries CR09.
-        private void MaybeEnterDepression()
+        //
+        // ⚠ ЗАЗОР (2026-08-07). Ролл делается ЗДЕСЬ (сразу хвостом кризиса, как и был), но вход в депрессию
+        // ОТКЛАДЫВАЕТСЯ на DepressionGapCards обычных карточек: два спецрежима встык читались как один
+        // сплошной, и игрок не успевал вернуться в обычную игру между ними.
+        private void MaybeArmDepression()
         {
             if (_depressionDone || _depressionCard == null) return;
             _depressionDone = true;   // one-shot per life whether or not it hits
             bool roll = DepressionTriggerRoll != null
                 ? DepressionTriggerRoll()
                 : _depRng.NextDouble() < DepressionChance;
-            if (roll) EnterDepression();
+            if (!roll) return;
+            _depArmed = true;
+            _depGapLeft = DepressionGapCards;
+        }
+
+        // Одна обычная карточка прошла (вызов из Advance, уже ПОСЛЕ того как карточка выставлена). Когда
+        // зазор выбран — депрессия входит немедленно, на этой самой карточке: её таймер замирает вместе с
+        // остальным, а по выходу игра продолжается ровно с неё.
+        private void CountDepressionGapCard()
+        {
+            if (!_depArmed) return;
+            if (--_depGapLeft > 0) return;
+            _depArmed = false;
+            _depGapLeft = 0;
+            EnterDepression();
         }
 
         // Enter depression: full B&W, scales paused, the slow-pulse scheduler armed. The suspended normal
@@ -1386,6 +1483,7 @@ namespace ThanksNoThanks
             EnergyOpen = false;
             HealthDecaying = false;
             Burnout = false;
+            _burnoutGrace = 0f;
             _healthDecayFrac = 0;
             _energyFrac = 0;
             _breathHeld = false;
@@ -1418,7 +1516,11 @@ namespace ThanksNoThanks
         private void IntegrateEnergy(float dt, bool held)
         {
             if (!EnergyOpen) return;
-            double net = (held ? EnergyRegenPerSec : 0.0) - EnergyDrainPerSec;
+            // ГРЕЙС после выгорания: несколько секунд без дренажа, чтобы «встык» не случился (5в).
+            // Тикает ровно здесь — в живом ходе; под паузой (как и всё остальное) он стоит.
+            bool grace = _burnoutGrace > 0f;
+            if (grace) _burnoutGrace = Math.Max(0f, _burnoutGrace - dt);
+            double net = (held ? EnergyRegenPerSec : 0.0) - (grace ? 0.0 : EnergyDrainPerSec);
             if (Scales.Energy > 0 || net > 0)
             {
                 _energyFrac += net * dt;
@@ -1467,10 +1569,12 @@ namespace ThanksNoThanks
         }
 
         // Temporary «выгорание»: latch on at energy ≤10%, release above 40% (hysteresis, re-enterable).
-        // Entering fires an event; the driver shows the one-shot hint and the S7 plate off Burnout.
+        // Entering fires an event; the driver shows the D-style intro screen (first time) / the short plate.
+        // ГРЕЙС (5в): пока _burnoutGrace > 0, латч ЗАПРЕЩЁН — повторное выгорание встык невозможно даже
+        // если карточка мгновенно уронила энергию обратно на дно (дренаж в грейсе и так не идёт).
         private void UpdateBurnout()
         {
-            if (!Burnout && Scales.Energy <= BurnoutEnterEnergyAtOrBelow)
+            if (!Burnout && _burnoutGrace <= 0f && Scales.Energy <= BurnoutEnterEnergyAtOrBelow)
             {
                 Burnout = true;
                 BurnoutEntered?.Invoke();
@@ -1478,6 +1582,7 @@ namespace ThanksNoThanks
             else if (Burnout && Scales.Energy > BurnoutExitEnergyAbove)
             {
                 Burnout = false;
+                _burnoutGrace = BurnoutGraceSeconds;   // выдох: несколько секунд без дренажа
             }
         }
 
@@ -1706,8 +1811,10 @@ namespace ThanksNoThanks
 
         // A missed flash. Two in a row = «плохой родитель»: relationships −10% + child scale drop, applied
         // ONCE per lapse (the streak resets, so it takes two fresh misses to be penalised again).
+        // КАЖДЫЙ пропуск (не только штрафной) объявляется событием — драйвер уводит трубку «поникшей».
         private void RegisterChildMiss()
         {
+            ChildCallMissed?.Invoke();
             _childConsecutiveMiss++;
             if (_childConsecutiveMiss < ChildBadParentMisses) return;
             _childConsecutiveMiss = 0;

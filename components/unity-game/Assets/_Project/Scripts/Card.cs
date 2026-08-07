@@ -97,6 +97,53 @@ namespace ThanksNoThanks
 
         public IReadOnlyList<string> Flags = System.Array.Empty<string>();
 
+        // ---- OPEN:* — «эта карточка ОТКРЫВАЕТ шкалу» ------------------------------------------------
+        // Токены — те же сокращения шкал, что и в Δ-колонке (см. CardLoader.Abbrevs).
+        public const string OpenMoney = "Дн";
+        public const string OpenRelations = "Отн";
+        public const string OpenEnergy = "Эн";
+        public const string OpenChild = "Реб";
+
+        /// <summary>
+        /// Карточка несёт ЛЮБОЙ флаг <c>OPEN:*</c> — она «открывающая». Читается сэмплером: среди карточек
+        /// одного возраста открывающие идут ПЕРВЫМИ, иначе чужая карточка того же года перешагнёт
+        /// возрастной порог за неё и туториал шкалы встанет ДО вопроса, который её вводит (r3, п.8).
+        /// </summary>
+        public bool OpensAnyScale
+        {
+            get
+            {
+                var flags = Flags;
+                if (flags == null) return false;
+                for (int i = 0; i < flags.Count; i++)
+                    if (flags[i].StartsWith("OPEN:", System.StringComparison.Ordinal)) return true;
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Карточка помечена флагом <c>OPEN:{scale}</c>, т.е. по канону колоды именно ОНА открывает эту
+        /// шкалу («ПЕРВАЯ ЛЮБОВЬ! Начать встречаться?» → `OPEN:Отн`).
+        ///
+        /// Механически шкалы открываются ПО ВОЗРАСТУ (<see cref="Game"/>), а не по флагу, и до 2026-08-07
+        /// это давало ровно ту нелогичность, которую поймал живой плейтест: возраст догоняет карточку
+        /// СРАЗУ при её выдаче, поэтому туториал шкалы вставал ПОВЕРХ ещё не отвеченного вопроса — сначала
+        /// «вот тебе шкала отношений», и только потом «начать встречаться?». Флаг читается <see cref="Game"/>
+        /// ровно для того, чтобы придержать открытие до ответа на СВОЮ карточку (порядок «встречаться →
+        /// OPEN:Отн»), не трогая канон-возрасты.
+        /// </summary>
+        public bool Opens(string scale)
+        {
+            var flags = Flags;
+            if (flags == null) return false;
+            for (int i = 0; i < flags.Count; i++)
+                if (flags[i].Length == 5 + scale.Length
+                    && flags[i].StartsWith("OPEN:", System.StringComparison.Ordinal)
+                    && flags[i].EndsWith(scale, System.StringComparison.Ordinal))
+                    return true;
+            return false;
+        }
+
         public bool IsNoCons;         // NOCONS — intro card, apply nothing / no necrolog line
         public bool IsRond;           // ROND   — droppable from the necrolog first when over the limit
         public bool YesIsFatal;       // FATAL  — choosing ДА ends the run immediately

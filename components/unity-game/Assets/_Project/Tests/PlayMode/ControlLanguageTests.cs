@@ -52,12 +52,24 @@ namespace ThanksNoThanks.Tests.PlayMode
         private static void DriveToFinale(GameDriver driver, PlayFakeInputSource fake)
         {
             int guard = 0;
-            while (driver.Game.State == GameState.Playing && guard++ < 8000)
+            while (driver.Game.State == GameState.Playing && guard++ < 30000)
             {
+                driver.DebugAdvanceNewScale(0.5f);   // поднять ОТЛОЖЕННЫЕ окна (в живой игре это Update)
                 // §D: открытия четырёх шкал поднимают МОДАЛКУ, которая кнопкой не снимается — её
                 // проходят реальным контролом шкалы (NewScaleTut), остальные подсказки — как раньше.
+                if (driver.SpecialModeShowing) { NewScaleTut.ClearSpecial(driver, fake); continue; }
                 if (driver.NewScaleShowing) { NewScaleTut.Clear(driver, fake); continue; }
-                if (driver.TutorialShowing) { fake.Confirm(); continue; }
+                if (driver.TutorialShowing) { fake.Confirm(); driver.DebugClearFrameGuards(); continue; }
+                // ДЕПРЕССИЯ — тупик для «просто откажись»: там рычаг НЕТ инертен, а выход только через
+                // ловлю пульса зелёной. Ловим по вспышке (мэшинг по контракту не выигрывает), иначе жизнь
+                // не кончается никогда и тест ждёт финала до конца бюджета.
+                if (driver.Game.InDepression)
+                {
+                    if (driver.Game.DepressionPulsing) fake.Fire(GameInput.ChildPress);
+                    else driver.Game.Tick(0.2f);
+                    driver.DebugClearFrameGuards();
+                    continue;
+                }
                 if (driver.Game.EnergyOpen && driver.Game.Scales.Energy < 60)
                     fake.Fire(GameInput.EnergyHold);     // датчик зажат, пока батарея ниже половины
                 driver.Game.Tick(0.5f);
@@ -307,28 +319,44 @@ namespace ThanksNoThanks.Tests.PlayMode
             public BackendSnapshot Poll(float deltaTime) => default;
         }
 
-        // A live tutorial really is dismissed by GREEN (the button label promises exactly that).
+        /// <summary>
+        /// ЗЕЛЁНАЯ — единственный подтверждающий контрол кабинета, и живой блокирующий экран обязан
+        /// сниматься ИМЕННО ей (подпись на его CTA это и обещает).
+        ///
+        /// ⚠ r3 2026-08-07: блокирующий экран, до которого доезжает обычная жизнь, — это уже не жёлтая
+        /// S5-подсказка (её последние два текста, здоровье и выгорание, переехали), а ВХОДНОЙ ЭКРАН
+        /// СПЕЦРЕЖИМА. Проверяем на нём — и на самой S5-механике отдельно, чтобы примитив не сгнил.
+        /// </summary>
         [UnityTest]
-        public IEnumerator Hint_Dismisses_On_Green()
+        public IEnumerator BlockingScreen_Dismisses_On_Green()
         {
             var driver = Boot(out var go, out var fake);
             yield return null;
 
             fake.Yes();                                        // opener → playing
             int guard = 0;
-            while (!driver.TutorialShowing && driver.Game.State == GameState.Playing && guard++ < 8000)
+            while (!driver.SpecialModeShowing && driver.Game.State == GameState.Playing && guard++ < 8000)
             {
                 // Первые открытия (18/20/25) ведут §D-модалку — она НЕ снимается зелёной и проходится
-                // своим контролом; S5-подсказка, которую и проверяет этот тест, остаётся у здоровья (30).
+                // своим контролом; блокирующий экран, который снимает ЗЕЛЁНАЯ, — это здоровье (30).
                 if (driver.NewScaleShowing) { NewScaleTut.Clear(driver, fake); continue; }
                 driver.Game.Tick(0.25f);
-                if (!driver.TutorialShowing && !driver.NewScaleShowing && driver.Game.CurrentCard != null
+                if (!driver.SpecialModeShowing && !driver.NewScaleShowing && driver.Game.CurrentCard != null
                     && driver.Game.CardTimer < 3.5f) fake.No();
             }
-            Assert.IsTrue(driver.TutorialShowing, "a hint modal came up");
+            Assert.IsTrue(driver.SpecialModeShowing, "блокирующий экран поднялся");
+            Assert.IsTrue(driver.Game.Paused, "…и он держит паузу");
 
-            fake.Yes();                                        // GREEN = «ПОНЯТНО»
-            Assert.IsFalse(driver.TutorialShowing, "GREEN dismissed the hint (the arcade confirm)");
+            fake.Yes();                                        // GREEN
+            Assert.IsFalse(driver.SpecialModeShowing, "ЗЕЛЁНАЯ сняла экран (аркадный confirm)");
+            Assert.IsFalse(driver.Game.Paused, "…и пауза снята");
+
+            // …и тот же контракт у S5-примитива: он остался общей «блокирующей подсказкой».
+            driver.DebugClearFrameGuards();
+            driver.DebugShowTutorial("ТЕСТ");
+            Assert.IsTrue(driver.TutorialShowing, "S5-подсказка поднята");
+            fake.Yes();
+            Assert.IsFalse(driver.TutorialShowing, "…и тоже снимается ЗЕЛЁНОЙ");
 
             Object.Destroy(go);
             yield return null;

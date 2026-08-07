@@ -67,5 +67,91 @@ namespace ThanksNoThanks.Tests
             Assert.IsEmpty(GameDriver.NewScaleStory(NewScale.None), "None — не экран");
             Assert.IsEmpty(GameDriver.NewScaleTask(NewScale.None), "None — не экран");
         }
+
+        // ============================================================ r3 — §4b, входные экраны спецрежимов
+
+        private static readonly SpecialMode[] Modes =
+            { SpecialMode.Health, SpecialMode.Blitz, SpecialMode.Depression, SpecialMode.Burnout };
+
+        private static string CanonSection4b()
+        {
+            Assert.IsTrue(File.Exists(CanonPath), $"канон host-content.md на месте: {CanonPath}");
+            string all = File.ReadAllText(CanonPath).Replace("\r\n", "\n");
+            int start = all.IndexOf("## 4b.", System.StringComparison.Ordinal);
+            Assert.Greater(start, 0, "в host-content.md есть §4b (входные экраны спецрежимов)");
+            return Squash(all.Substring(start));
+        }
+
+        /// <summary>
+        /// Тот же дрейф-гард, что у §4, но для восьми строк входных экранов спецрежимов (r3). Они —
+        /// ЧЕРНОВИКИ: основательница правит их свободно ПРЯМО В ДОКУМЕНТЕ, и этот тест краснеет ровно
+        /// тогда, когда правка не доехала до кода (или наоборот).
+        /// </summary>
+        [Test]
+        public void EverySpecialModeString_IsVerbatimInHostContentSection4b()
+        {
+            string canon = CanonSection4b();
+            foreach (var m in Modes)
+            {
+                StringAssert.Contains(Squash(GameDriver.SpecialStory(m)), canon,
+                    m + ": рассказ Ведущего дословно из host-content §4b");
+                StringAssert.Contains(Squash(GameDriver.SpecialTask(m)), canon,
+                    m + ": задача дословно из host-content §4b");
+            }
+            StringAssert.Contains(Squash(GameDriver.ChildMissedLine), canon,
+                "реплика на пропущенный звонок — тоже канон-черновик §4b");
+            StringAssert.Contains(Squash(GameDriver.BurnoutPlateTitle), canon,
+                "заголовок короткой плашки повторного выгорания — оттуда же");
+            StringAssert.Contains(Squash(GameDriver.BurnoutPlateSubtitle), canon,
+                "…и её вторая строка");
+        }
+
+        /// <summary>
+        /// §4b помечен как ЧЕРНОВИК основательницы — иначе правки уедут «в код навсегда», и она перестанет
+        /// понимать, что здесь можно трогать. Гард на саму пометку.
+        /// </summary>
+        [Test]
+        public void SpecialModeTexts_AreMarkedAsFounderEditableDrafts()
+        {
+            string canon = CanonSection4b();
+            StringAssert.Contains("ЧЕРНОВИК", canon.ToUpperInvariant(),
+                "§4b помечен как черновик, который основательница правит свободно");
+            StringAssert.Contains("ОСНОВАТЕЛЬНИЦА ПРАВИТ СВОБОДНО", canon.ToUpperInvariant(),
+                "…прямым текстом");
+        }
+
+        [Test]
+        public void TheFourSpecialModes_HaveBothWindowsFilled()
+        {
+            foreach (var m in Modes)
+            {
+                Assert.IsNotEmpty(GameDriver.SpecialStory(m), m + ": окно-рассказ не пустое");
+                Assert.IsNotEmpty(GameDriver.SpecialTask(m), m + ": окно-задача не пустое");
+            }
+            Assert.IsEmpty(GameDriver.SpecialStory(SpecialMode.None), "None — не экран");
+            Assert.IsEmpty(GameDriver.SpecialTask(SpecialMode.None), "None — не экран");
+        }
+
+        /// <summary>
+        /// п.3г — ВОПРОС ЗАКРЫТ ОСНОВАТЕЛЬНИЦЕЙ 2026-08-08: ловля идёт по КНОПКЕ «!». Гард держит две вещи
+        /// сразу: (а) все тексты по-прежнему собираются из ОДНОЙ константы (заготовка и сделала смену
+        /// правкой одной строки), (б) ни в одном из них не осталось ЗЕЛЁНОЙ — иначе экран звал бы игрока
+        /// жать не тот контрол, а механика молчала бы.
+        /// </summary>
+        [Test]
+        public void DepressionCatchControl_IsNamedFromASingleConstant_AndItIsTheBangButton()
+        {
+            Assert.IsNotEmpty(GameDriver.DepressionCatchControlName, "константа контрола задана");
+            StringAssert.Contains("!", GameDriver.DepressionCatchControlName,
+                "решение основательницы 2026-08-08: контрол ловли — кнопка «!»");
+            StringAssert.Contains(GameDriver.DepressionCatchControlName, GameDriver.DepressionTaskText,
+                "задача входного экрана называет контрол ИЗ константы");
+            StringAssert.Contains(GameDriver.DepressionCatchControlName.ToLowerInvariant(),
+                GameDriver.DepressionBoardHint,
+                "…и подсказка на самой доске депрессии — оттуда же");
+            foreach (var text in new[] { GameDriver.DepressionTaskText, GameDriver.DepressionBoardHint })
+                Assert.IsFalse(text.ToUpperInvariant().Contains("ЗЕЛЁН"),
+                    "в текстах депрессии не осталось ЗЕЛЁНОЙ: «" + text + "»");
+        }
     }
 }

@@ -78,11 +78,16 @@ namespace ThanksNoThanks.Tests.PlayMode
             int guard = 0;
             while (guard++ < 12000 && g.Phase == CrisisPhase.None && g.State == GameState.Playing)
             {
+                if (driver.SpecialModeShowing) { NewScaleTut.ClearSpecial(driver, fake); yield return null; continue; }
                 if (driver.NewScaleShowing) { NewScaleTut.Clear(driver, fake); yield return null; continue; }
                 if (driver.TutorialShowing) { fake.Confirm(); yield return null; continue; }
                 g.Tick(0.2f);
             }
             Assert.AreEqual(CrisisPhase.Blitz, g.Phase, "reached the crisis blitz");
+            // r3: кризис объявляется ВХОДНЫМ ЭКРАНОМ блица; снимаем его зелёной, как это делает игрок.
+            Assert.AreEqual(SpecialMode.Blitz, driver.SpecialModeKind, "вход в блиц объявлен экраном");
+            NewScaleTut.ClearSpecial(driver, fake);
+            yield return null;
         }
 
         // Own rect corners in canvas-local space (excludes children).

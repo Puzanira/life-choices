@@ -214,15 +214,25 @@ namespace ThanksNoThanks.Tests
         {
             var g = WithMd02(interval: 5f);
             OpenChild(g);
-            int child0 = g.Scales.Child; int rel0 = g.Scales.Relationships;
+            int child0 = g.Scales.Child;
+            int missed = 0;
+            g.ChildCallMissed += () => missed++;
             TickUntilFlashing(g);
-            g.Tick(Game.ChildFlashWindow + 0.2f); // let the FIRST window expire unpressed → miss #1
+            // Мерим ОТ МОМЕНТА, когда трубка зазвонила: тогда единственное, что может тронуть отношения за
+            // окно, — это дрейф, и его верхняя граница считается точно. (Раньше сравнение шло с началом
+            // ожидания и молча предполагало, что дрейф «мал»; r3 сделал его ощутимо быстрее.)
+            int rel1 = g.Scales.Relationships;
+            const float window = Game.ChildFlashWindow + 0.2f;
+            g.Tick(window);                       // окно истекает НЕПОДНЯТЫМ → пропуск №1
             Assert.IsFalse(g.ChildFlashing, "window closed (missed)");
+            Assert.AreEqual(1, missed, "ровно один ПРОПУСК объявлен (r3 п.9: событие на КАЖДЫЙ пропуск)");
             Assert.AreEqual(child0, g.Scales.Child, "one miss alone does not drop the child scale");
-            // Relationships only slid by the natural balancer drift (a few points over the ~7s), NOT the
-            // −10% bad-parent penalty — so it stays well above the penalty floor (drift ≪ penalty).
-            Assert.Greater(g.Scales.Relationships, rel0 - Game.ChildBadParentRelPenalty,
-                "one miss alone carries no −10% relationships hit (only tiny drift)");
+
+            int drop = rel1 - g.Scales.Relationships;
+            int driftMax = (int)(Game.RelDriftPerSec * window) + 2;   // +2 — округление до целого
+            Assert.LessOrEqual(drop, driftMax,
+                $"падение отношений {drop} объясняется ОДНИМ дрейфом (≤{driftMax}) — штрафа "
+                + $"−{Game.ChildBadParentRelPenalty}% за ОДИН пропуск нет");
         }
 
         [Test]

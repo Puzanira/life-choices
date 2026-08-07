@@ -441,8 +441,76 @@ namespace ThanksNoThanks.Tests
             Assert.AreEqual(1.0, g.IncomeMultiplier, Eps, "income back to full after recovery");
 
             No(g);                               // D2 → energy back down to 3
-            g.Tick(0.1f);                        // integrate → burnout again
-            Assert.IsTrue(g.Burnout, "burnout is re-enterable");
+            g.Tick(0.1f);
+            // r3 (п.5в): ВСТЫК больше нельзя — после выхода идёт грейс, и латч в нём ЗАПРЕЩЁН.
+            Assert.IsFalse(g.Burnout, "повторное выгорание ВСТЫК запрещено — идёт грейс");
+            g.Tick(Game.BurnoutGraceSeconds);     // …грейс истёк
+            Assert.IsTrue(g.Burnout, "burnout is re-enterable — но только ПОСЛЕ грейса");
+        }
+
+        /// <summary>
+        /// r3 (п.5в) — ГРЕЙС ПОСЛЕ ВЫГОРАНИЯ. Живой плейтест: игрок выкарабкивался из выгорания и тут же
+        /// падал в него обратно — «выдохнуть не дают». Контракт: несколько секунд после выхода дренаж
+        /// энергии НЕ идёт и выгорание не может защёлкнуться заново.
+        ///
+        /// Зубы: без грейса энергия после выхода стоит на 41 %, дренаж 1.7 %/с съедает её за ~18 с и — что
+        /// важнее — карточка, роняющая энергию, защёлкивает выгорание ТЕМ ЖЕ тактом. Оба случая красные.
+        /// </summary>
+        [Test]
+        public void BurnoutGrace_FreezesTheDrain_AndForbidsAnImmediateRelapse()
+        {
+            var d1 = WithNoDelta(Plain("D1", 26), Scale.Energy, DeltaKind.Set, 4);
+            var d2 = WithNoDelta(Plain("D2", 28), Scale.Energy, DeltaKind.Set, 3);
+            var g = NewGame(() => true, d1, d2, Plain("C", 90));
+            g.StartLife(); No(g);
+            OpenEnergy(g);
+            No(g);                                // D1 → energy 4
+            g.Tick(0.1f);
+            Assert.IsTrue(g.Burnout, "вошли в выгорание");
+            Assert.AreEqual(0f, g.BurnoutGrace, "внутри выгорания грейса нет");
+
+            int hold = 0;                         // держим ровно ДО выхода — ни такта лишнего
+            while (g.Burnout && hold++ < 400) { Hold(g); g.Tick(0.05f); }
+            Assert.IsFalse(g.Burnout, "вышли из выгорания");
+            Assert.AreEqual(Game.BurnoutGraceSeconds, g.BurnoutGrace, 1e-3f,
+                "на выходе взводится грейс на всю длину");
+            Assert.That(Game.BurnoutGraceSeconds, Is.InRange(5f, 8f),
+                "коридор основательницы — 5–8 с");
+
+            // (1) В ГРЕЙСЕ ДРЕНАЖА НЕТ: энергия стоит на месте, хотя датчик отпущен.
+            int e0 = g.Scales.Energy;
+            g.Tick(Game.BurnoutGraceSeconds - 1f);
+            Assert.AreEqual(e0, g.Scales.Energy, "в грейсе энергия не убывает — это и есть «выдохнуть»");
+            Assert.Greater(g.BurnoutGrace, 0f, "грейс ещё идёт");
+
+            // (2) …и даже провал энергии КАРТОЧКОЙ внутри грейса выгорание не защёлкивает.
+            No(g);                                // D2 → energy = 3
+            g.Tick(0.2f);
+            Assert.AreEqual(3, g.Scales.Energy, "карточка уронила шкалу…");
+            Assert.IsFalse(g.Burnout, "…но выгорание в грейсе не защёлкивается");
+
+            // (3) Грейс истёк — всё работает как раньше: дренаж идёт, выгорание входит.
+            g.Tick(Game.BurnoutGraceSeconds);
+            Assert.AreEqual(0f, g.BurnoutGrace, "грейс кончился");
+            Assert.IsTrue(g.Burnout, "…и выгорание снова возможно");
+        }
+
+        /// <summary>Грейс живёт ОДНУ жизнь: рестарт снимает его вместе с выгоранием.</summary>
+        [Test]
+        public void BurnoutGrace_IsClearedByARestart()
+        {
+            var d1 = WithNoDelta(Plain("D1", 26), Scale.Energy, DeltaKind.Set, 4);
+            var g = NewGame(() => true, d1, Plain("C", 90));
+            g.StartLife(); No(g);
+            OpenEnergy(g); No(g); g.Tick(0.1f);
+            Assert.IsTrue(g.Burnout);
+            int hold = 0;
+            while (g.Burnout && hold++ < 400) { Hold(g); g.Tick(0.05f); }
+            Assert.Greater(g.BurnoutGrace, 0f, "грейс взведён");
+
+            g.StartLife();
+            Assert.AreEqual(0f, g.BurnoutGrace, "свежая жизнь начинается без грейса");
+            Assert.IsFalse(g.Burnout, "…и без выгорания");
         }
 
         // ================================================================ the two burnout endings

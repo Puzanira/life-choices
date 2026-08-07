@@ -95,10 +95,13 @@ namespace ThanksNoThanks.Tests
             Assert.AreEqual(t0, g.CardTimer, "card timer frozen under the hint");
         }
 
-        // ================================================================ drift (−0.6, married −0.3)
+        // ================================================================ drift (r3: −1.6, married −0.8)
+        // ⚠ ПЕРЕКАЛИБРОВКА 2026-08-07 (живой плейтест: «до расставания при бездействии больше минуты —
+        // бездействие не наказывается»). Числа тюнимые, механика и пороги зон НЕ менялись; тесты ниже
+        // связаны с КОНСТАНТАМИ, а не с зашитыми «0.6» — балансная правка меняет одну строку в Game.
 
         [Test]
-        public void Drift_PullsDownAboutPointSixPerSecond()
+        public void Drift_PullsDownAtTheCanonRate()
         {
             var g = NewGame(() => false, Plain("A", 21), Plain("L", 90));
             g.StartLife(); No(g);
@@ -108,7 +111,11 @@ namespace ThanksNoThanks.Tests
             int r0 = g.Scales.Relationships;
             for (int i = 0; i < 8; i++) g.Tick(0.5f);   // 4s under the timer, no axis
             int drop = r0 - g.Scales.Relationships;
-            Assert.That(drop, Is.InRange(2, 3), "≈0.6%/s downward drift (4s ≈ 2–3%)");
+            double want = Game.RelDriftPerSec * 4.0;
+            Assert.That(drop, Is.InRange(want - 1.0, want + 1.0),
+                $"дрейф ≈{Game.RelDriftPerSec}%/с (4 с ≈ {want}%) — округление до целого даёт ±1");
+            Assert.Greater(Game.RelDriftPerSec, 1.0,
+                "бездействие ДОЛЖНО наказываться: дрейф быстрее одного процента в секунду");
         }
 
         [Test]
@@ -122,7 +129,75 @@ namespace ThanksNoThanks.Tests
             int r0 = g.Scales.Relationships;
             for (int i = 0; i < 8; i++) g.Tick(0.5f);   // 4s
             int drop = r0 - g.Scales.Relationships;
-            Assert.That(drop, Is.InRange(1, 2), "married drift ≈0.3%/s (4s ≈ 1%) — softer than single");
+            double want = Game.RelDriftMarriedPerSec * 4.0;
+            Assert.That(drop, Is.InRange(want - 1.0, want + 1.0),
+                $"дрейф в браке ≈{Game.RelDriftMarriedPerSec}%/с (4 с ≈ {want}%) — мягче холостого");
+            Assert.AreEqual(Game.RelDriftPerSec / 2.0, Game.RelDriftMarriedPerSec, 1e-6,
+                "брак — ровно вдвое мягче, каким бы ни был базовый дрейф");
+        }
+
+        /// <summary>
+        /// r3 (п.7) — ГЛАВНЫЙ гард балансной правки: ИЗ ЗЕЛЁНОЙ СЕРЕДИНЫ (стартовые 55 %) ПОЛНОЕ
+        /// БЕЗДЕЙСТВИЕ приводит к РАЗРЫВУ за 30–45 секунд. Это ровно то, что просила основательница:
+        /// «сейчас до расставания при бездействии больше минуты — не наказывается».
+        ///
+        /// Зубы двусторонние: на старом дрейфе 0.6 %/с получалось ≈76 с (краснеет по верхней границе), а
+        /// на «слишком злом» дрейфе разрыв успел бы до 30 с (краснеет по нижней). Порог зон и длительность
+        /// красного таймера при этом не участвуют в правке — они те же константы.
+        /// </summary>
+        [Test]
+        public void Idle_FromTheGreenMiddle_BreaksUpWithinThirtyToFortyFiveSeconds()
+        {
+            // Возраст ДЕРЖИМ на 22: энергия (25) не открывается, здоровье (30) не тает — измеряется РОВНО
+            // дрейф отношений, а не гонка «кто убьёт раньше». Карточек с запасом на весь коридор.
+            var deck = new List<Card> { Starter() };
+            for (int i = 0; i < 30; i++) deck.Add(Plain("F" + i, 22));
+            var g = new Game(deck, coin: () => false);
+            g.StartLife(); No(g);
+            g.Tick(2f);                          // открылось на 20; шкала на стартовых 55 (зелёная середина)
+            Assert.IsTrue(g.RelationshipsOpen);
+            Assert.That(g.Scales.Relationships, Is.InRange(Game.RelZoneMin, Game.RelZoneMax),
+                "стартуем именно из зелёной зоны");
+
+            float t = 0f;
+            int guard = 0;
+            while (!g.RelationshipsLost && g.State == GameState.Playing && guard++ < 3000)
+            {
+                g.Tick(0.1f);                    // НИ ОДНОГО ввода по оси — полное бездействие
+                t += 0.1f;
+            }
+
+            Assert.IsTrue(g.RelationshipsLost, "полное бездействие приводит к разрыву");
+            Assert.That(t, Is.InRange(30f, 45f),
+                $"из зелёной середины до разрыва при бездействии {t:0.0} с — коридор основательницы 30–45 с");
+        }
+
+        /// <summary>
+        /// Вторая половина той же правки: УДЕРЖАНИЕ по-прежнему уверенно вытягивает. Нетто «держу ↑»
+        /// обязано остаться ЯВНО положительным — иначе ускоренный дрейф превратил бы живую шкалу в
+        /// неуправляемую (memory: «живую шкалу нельзя калибровать так, чтобы игрок не мог её удержать»).
+        /// </summary>
+        [Test]
+        public void Holding_StillPullsUpConfidently_AgainstTheFasterDrift()
+        {
+            Assert.Greater(Game.RelBalancerPerSec - Game.RelDriftPerSec, 2.0,
+                "нетто удержания ↑ — ЯВНО положительное (>2 %/с), а не «еле-еле»");
+
+            var deck = new List<Card> { Starter(), SetRelNo("HIT", 21, 20) };
+            for (int i = 0; i < 30; i++) deck.Add(Plain("F" + i, 22));   // возраст держим ниже 25
+            var g = new Game(deck, coin: () => false);
+            g.StartLife(); No(g);
+            g.Tick(2f); No(g);                   // шкала посажена на 20 — жёлтый буфер, до разрыва рукой подать
+            int r0 = g.Scales.Relationships;
+
+            float t = 0f;
+            for (int i = 0; i < 100; i++) { Up(g); g.Tick(0.1f); t += 0.1f; }   // 10 с удержания ↑
+            Assert.IsFalse(g.RelationshipsLost, "удержание спасает от разрыва");
+            Assert.That(g.Scales.Relationships - r0, Is.GreaterThanOrEqualTo(20),
+                $"за {t:0.0} с удержания шкала выросла минимум на 20 п.п. (нетто "
+                + $"{Game.RelBalancerPerSec - Game.RelDriftPerSec:0.0} %/с)");
+            Assert.That(g.Scales.Relationships, Is.GreaterThanOrEqualTo(Game.RelZoneMin),
+                "…и вернулась в зелёную зону");
         }
 
         // ================================================================ RELATION_AXIS ↑/↓
@@ -149,7 +224,7 @@ namespace ThanksNoThanks.Tests
             for (int i = 0; i < 8; i++) { Down(g); g.Tick(0.5f); }  // 4s holding ↓
             int drop = r0 - g.Scales.Relationships;
             Assert.That(drop, Is.GreaterThanOrEqualTo(7),
-                "held ↓ (≈1.5) plus drift (≈0.6) ≈ 2.1%/s down (4s ≳ 8%)");
+                "held ↓ плюс дрейф тянут вниз заметно быстрее одного дрейфа (4 с ≳ 8 %)");
         }
 
         [Test]

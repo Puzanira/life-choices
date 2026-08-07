@@ -289,8 +289,23 @@ namespace ThanksNoThanks
             //    milestone, a gated card, or a protected young sub-window card. Pad from leftover if short.
             ClampSize(deck, normals, leftover, protectedNormals, rng);
 
-            // 7) Age order; stable on ties by source order (I02@0 and I03@1 stay first).
-            deck.Sort((a, b) => a.Age != b.Age ? a.Age.CompareTo(b.Age) : a.Order.CompareTo(b.Order));
+            // 7) Age order; ties broken by source order (I02@0 and I03@1 stay first) — С ОДНОЙ ПОПРАВКОЙ.
+            //
+            // ⚠ ОТКРЫВАЮЩАЯ КАРТОЧКА ИДЁТ ПЕРВОЙ В СВОЁМ ВОЗРАСТЕ (r3, п.8, 2026-08-07). Живой плейтест:
+            // «карточка „начать встречаться“ приходит ПОСЛЕ открытия шкалы отношений — нелогично». Шкалы
+            // открываются ПО ВОЗРАСТУ, а возраст догоняет возраст текущей карточки. Значит любая ЧУЖАЯ
+            // карточка того же года, выпавшая раньше `OPEN:`-карточки, перешагивает порог за неё — и
+            // туториал шкалы встаёт ДО вопроса, который её вводит. Так и было с `YA02` («бросить универ»,
+            // окно 19–21): при возрасте 20 её порядок в CSV меньше, чем у `YA03`, и она вставала первой.
+            //
+            // Правило одно и общее: среди карточек ОДНОГО возраста открывающие идут раньше обычных.
+            // Канон-возрасты не тронуты, состав колоды не тронут — меняется только порядок внутри года.
+            // (Вторая половина порядка живёт в Game: открытие ПРИДЕРЖИВАЕТСЯ, пока сама `OPEN:`-карточка
+            //  висит неотвеченной.)
+            int OpenFirst(Card c) => c.OpensAnyScale ? 0 : 1;
+            deck.Sort((a, b) => a.Age != b.Age ? a.Age.CompareTo(b.Age)
+                              : OpenFirst(a) != OpenFirst(b) ? OpenFirst(a).CompareTo(OpenFirst(b))
+                              : a.Order.CompareTo(b.Order));
 
             // 8) Reserve: every ungated normal that didn't make the deck (incl. clamp-trimmed ones),
             //    age-assigned inside its window and age-sorted. Game.Substitute draws from it when a

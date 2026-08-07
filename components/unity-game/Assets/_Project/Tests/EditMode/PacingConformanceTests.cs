@@ -80,14 +80,20 @@ namespace ThanksNoThanks.Tests
                 // Advance injected time until age reaches this card's age so any threshold crossing (18/20/
                 // 25/30) fires WHILE the card is up. Break early if age can't advance yet (AgeRunning off
                 // until I03 resolves) so I02/I03 don't spin the guard.
+                //
+                // ⚠ ХОТЯ БЫ ОДИН ТИК НА КАЖДУЮ КАРТОЧКУ — обязательно (r3). В живой игре Update тикает
+                // КАЖДЫЙ кадр, поэтому возрастной гейт проверяется и тогда, когда возраст уже догнан.
+                // Прежний `while (g.Age < card.Age)` на такой карточке не тикал вовсе, и открытие,
+                // ПРИДЕРЖАННОЕ до ответа на свою `OPEN:`-карточку (п.8), проваливалось до ближайшей
+                // карточки СТАРШЕГО возраста — то есть тест мерил не игру, а собственный цикл.
                 int safety = 0;
                 float prevAge = g.Age;
-                while (g.Age < card.Age && g.State == GameState.Playing
-                       && ReferenceEquals(g.CurrentCard, card) && safety++ < 400)
+                while (g.State == GameState.Playing && ReferenceEquals(g.CurrentCard, card) && safety++ < 400)
                 {
                     g.Tick(0.1f);
                     CheckOpens();
-                    if (safety > 2 && g.Age == prevAge) break; // age not advancing → stop ticking this card
+                    if (g.Age >= card.Age) break;               // возраст догнан — карточка отработана
+                    if (safety > 2 && g.Age == prevAge) break;  // age not advancing → stop ticking this card
                     prevAge = g.Age;
                 }
                 CheckOpens();
@@ -149,6 +155,102 @@ namespace ThanksNoThanks.Tests
             // The binding gap is энергия→здоровье (25–29 has exactly 8 tight FC cards). Documents the margin.
             Assert.GreaterOrEqual(worst, RequiredGap,
                 $"the tightest inter-reveal gap across all seeds is {worst} ordinary cards (need ≥{RequiredGap})");
+        }
+
+        /// <summary>
+        /// r3 (п.8) — ПОРЯДОК «КАРТОЧКА → ОТКРЫТИЕ ШКАЛЫ». Живой плейтест основательницы: «карточка
+        /// „начать встречаться“ приходит ПОСЛЕ открытия шкалы отношений — нелогично».
+        ///
+        /// Причина была в МОМЕНТЕ, а не в колоде: возраст догоняет возраст текущей карточки сразу, как её
+        /// выдали, поэтому гейт 20 щёлкал, пока `YA03` («ПЕРВАЯ ЛЮБОВЬ! Начать встречаться?») ещё висела
+        /// НЕОТВЕЧЕННОЙ, и туториал шкалы вставал поверх собственного вопроса. Канон-возрасты не тронуты —
+        /// открытие ПРИДЕРЖИВАЕТСЯ, пока текущая карточка сама несёт флаг `OPEN:{шкала}`.
+        ///
+        /// Проверяем на РЕАЛЬНОЙ колоде и всех тех же сидах: в момент открытия шкалы её `OPEN:`-карточка
+        /// уже ОТВЕЧЕНА (её нет на экране). Зубы: снимите придержку в Game.Check*Open — краснеет.
+        /// </summary>
+        [Test]
+        public void EveryOpenCard_IsAnswered_BeforeItsScaleOpens()
+        {
+            foreach (int seed in Seeds)
+            {
+                var all = AllCards();
+                var g = new Game(() => DeckSampler.BuildPlan(all, new System.Random(seed)), coin: () => false);
+                g.StartLife();
+
+                bool money = false, rel = false, energy = false;
+                var offenders = new List<string>();
+
+                void Check()
+                {
+                    var c = g.CurrentCard;
+                    if (c == null) return;
+                    if (!money && g.MoneyOpen)
+                    {
+                        money = true;
+                        if (c.Opens(Card.OpenMoney)) offenders.Add($"Дн открылись НА {c.Id}");
+                    }
+                    if (!rel && g.RelationshipsOpen)
+                    {
+                        rel = true;
+                        if (c.Opens(Card.OpenRelations)) offenders.Add($"Отн открылись НА {c.Id}");
+                    }
+                    if (!energy && g.EnergyOpen)
+                    {
+                        energy = true;
+                        if (c.Opens(Card.OpenEnergy)) offenders.Add($"Эн открылись НА {c.Id}");
+                    }
+                }
+
+                int guard = 0;
+                while (g.State == GameState.Playing && g.CurrentCard != null && guard++ < 3000)
+                {
+                    var card = g.CurrentCard;
+                    int safety = 0;
+                    float prevAge = g.Age;
+                    while (g.State == GameState.Playing && ReferenceEquals(g.CurrentCard, card) && safety++ < 400)
+                    {
+                        g.Tick(0.1f);
+                        Check();
+                        if (g.Age >= card.Age) break;
+                        if (safety > 2 && g.Age == prevAge) break;
+                        prevAge = g.Age;
+                    }
+                    Check();
+                    if (money && rel && energy) break;
+                    if (g.State == GameState.Playing && ReferenceEquals(g.CurrentCard, card))
+                        g.HandleInput(GameInput.AnswerNo);
+                    Check();
+                }
+
+                Assert.IsTrue(money && rel && energy, $"seed {seed}: все три шкалы открылись за молодость");
+                CollectionAssert.IsEmpty(offenders,
+                    $"seed {seed}: шкала открылась ПОВЕРХ своей же неотвеченной карточки — "
+                    + string.Join(", ", offenders));
+            }
+        }
+
+        /// <summary>
+        /// Прямая проверка канона колоды, без симуляции: карточка «начать встречаться» (`OPEN:Отн`) —
+        /// САМАЯ РАННЯЯ среди карточек своего возраста, т.е. игрок встречает её первой из двадцатилетних.
+        /// Это вторая половина порядка: придержка в Game спасает от «шкала поверх вопроса», а вот это —
+        /// от «между вопросом и шкалой вклинилась чужая карточка того же возраста».
+        /// </summary>
+        [Test]
+        public void TheDatingCard_IsTheFirstCardOfItsAge()
+        {
+            foreach (int seed in Seeds)
+            {
+                var deck = DeckSampler.BuildPlan(AllCards(), new System.Random(seed)).Deck;
+                var open = deck.FirstOrDefault(c => c.Opens(Card.OpenRelations));
+                Assert.IsNotNull(open, $"seed {seed}: карточка OPEN:Отн есть в колоде");
+
+                int idx = deck.IndexOf(open);
+                for (int i = 0; i < idx; i++)
+                    Assert.Less(deck[i].Age, open.Age,
+                        $"seed {seed}: {deck[i].Id} (возраст {deck[i].Age}) вклинилась ПЕРЕД "
+                        + $"{open.Id} (возраст {open.Age}) — «встречаться» обязана быть первой в своём возрасте");
+            }
         }
     }
 }

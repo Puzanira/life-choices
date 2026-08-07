@@ -25,13 +25,22 @@ namespace ThanksNoThanks.Tests
             return asset.text;
         }
 
-        private static Card Filler()
+        private static Card Filler(int n = 0)
             => new Card
             {
-                Id = "FILL", Question = "FILL?", When = "60", Age = 60, Order = 999,
+                Id = "FILL" + n, Question = "FILL?", When = "60", Age = 60, Order = 999 + n,
                 YesDeltas = new List<ScaleDelta>(), NoDeltas = new List<ScaleDelta>(),
                 NoNecrolog = "жил дальше", Flags = new List<string>(),
             };
+
+        // Обычных карточек после кризиса нужно ХВАТИТЬ на зазор (r3: депрессия не встык за блицем), плюс
+        // запас — иначе колода кончится раньше, чем зазор будет выбран, и жизнь уйдёт в финал.
+        private static List<Card> Fillers()
+        {
+            var list = new List<Card>();
+            for (int i = 0; i < Game.DepressionGapCards + 6; i++) list.Add(Filler(i));
+            return list;
+        }
 
         // A minimal plan re-parsed fresh each life: I03 (starts the age timer) + a filler at 60 so age climbs
         // through the 45–50 crisis window, the whole crisis block, and CR09 carried on the depression slot.
@@ -42,7 +51,7 @@ namespace ThanksNoThanks.Tests
                 var byId = CardLoader.ParseAll(csv).ToDictionary(c => c.Id);
                 return new DeckPlan
                 {
-                    Deck = new List<Card> { byId["I03"], Filler() },
+                    Deck = new List<Card> { byId["I03"] }.Concat(Fillers()).ToList(),
                     Reserve = new List<Card>(),
                     Crisis = withCrisis ? CrisisIds.Select(id => byId[id]).ToList() : new List<Card>(),
                     Depression = byId["CR09"],
@@ -75,20 +84,40 @@ namespace ThanksNoThanks.Tests
             return g;
         }
 
+        /// <summary>
+        /// r3: депрессия ЗАРЯЖАЕТСЯ хвостом кризиса, но ВХОДИТ только после зазора в обычных карточках.
+        /// Хелпер проходит зазор обычными ответами и возвращает, сколько карточек на это ушло.
+        /// </summary>
+        private static int WalkDepressionGap(Game g)
+        {
+            int cards = 0;
+            int guard = 0;
+            while (!g.InDepression && g.State == GameState.Playing && guard++ < 50)
+            {
+                if (g.CurrentCard == null) break;
+                g.HandleInput(GameInput.AnswerNo);
+                cards++;
+            }
+            return cards;
+        }
+
         private static Game ReachDepression(string csv)
         {
             var g = StartCrisisAndTail(csv, depressionRoll: true);
+            Assert.IsTrue(g.DepressionArmed, "the crisis tail armed depression (gap pending)");
+            WalkDepressionGap(g);
             Assert.IsTrue(g.InDepression, "the crisis tail rolled into depression");
             Assert.AreEqual(Game.DepressionGraySteps, g.DepressionGray, "enters fully desaturated");
             return g;
         }
 
-        // Advance to the next lit pulse and catch it (one clean CONFIRM inside the window).
+        // Advance to the next lit pulse and catch it (одно чистое нажатие «!» внутри окна).
+        // ⚠ КОНТРОЛ ЛОВЛИ — «!» (CHILD_PRESS), решение основательницы 2026-08-08 по п.3г.
         private static void CatchOnePulse(Game g)
         {
             g.Tick(2.5f);                                 // interval elapses → pulse opens (window full)
             Assert.IsTrue(g.DepressionPulsing, "the dim pulse is lit");
-            g.HandleInput(GameInput.Confirm);             // catch on the pulse
+            g.HandleInput(GameInput.ChildPress);          // catch on the pulse — кнопка «!»
         }
 
         // ---- entry: RANDOM_TRIGGER tail after the crisis ----
@@ -101,12 +130,70 @@ namespace ThanksNoThanks.Tests
             Assert.IsFalse(g.InCrisis, "the crisis already resolved before depression");
         }
 
+        /// <summary>
+        /// r3 (п.3а): ЗАЗОР «кризис → депрессия». Живой плейтест: депрессия влетала ВСТЫК за блицем, и два
+        /// спецрежима подряд читались как один сплошной. Контракт: ролл делается хвостом кризиса (как и
+        /// был), но ВХОД откладывается минимум на <see cref="Game.DepressionGapCards"/> ОБЫЧНЫХ карточек.
+        /// Зубы: на встык-поведении (вход прямо в ResumeAfterCrisis) первый же Assert краснеет.
+        /// </summary>
+        [Test]
+        public void Depression_WaitsOutAGapOfOrdinaryCards_NotBackToBackWithTheBlitz()
+        {
+            var g = StartCrisisAndTail(Csv(), depressionRoll: true);
+
+            Assert.IsFalse(g.InDepression, "депрессия НЕ начинается тем же тактом, что кончился блиц");
+            Assert.IsTrue(g.DepressionArmed, "…но она заряжена и ждёт зазора");
+            Assert.AreEqual(Game.DepressionGapCards, g.DepressionGapLeft, "зазор взведён на полную длину");
+            Assert.AreEqual(CrisisPhase.None, g.Phase, "кризис при этом закончен — идёт обычная игра");
+
+            // Каждая обычная карточка выбирает по одному шагу зазора — и НИ ОДНА раньше срока не пускает.
+            for (int i = 1; i < Game.DepressionGapCards; i++)
+            {
+                g.HandleInput(GameInput.AnswerNo);
+                Assert.IsFalse(g.InDepression,
+                    $"после {i} обычной карточки депрессии всё ещё нет (нужно {Game.DepressionGapCards})");
+                Assert.AreEqual(Game.DepressionGapCards - i, g.DepressionGapLeft, "зазор убывает по карточке");
+            }
+
+            g.HandleInput(GameInput.AnswerNo);            // …и ровно на N-й она входит
+            Assert.IsTrue(g.InDepression, "зазор выбран — депрессия началась");
+            Assert.IsFalse(g.DepressionArmed, "…и очередь пуста");
+            Assert.AreEqual(Game.DepressionGraySteps, g.DepressionGray, "входит полностью обесцвеченной");
+
+            // Зазор МЕРЯЕТСЯ КАРТОЧКАМИ, а не временем: время под депрессией не при чём, но и до неё
+            // просто «постоять» нельзя — без ответов депрессия не наступит никогда.
+            Assert.GreaterOrEqual(Game.DepressionGapCards, 3, "коридор основательницы 3–4 карточки");
+        }
+
+        /// <summary>Ожидание зазора НЕ прожигается временем: постой сколько угодно — пока карточки не
+        /// отвечены, депрессия не входит (иначе «зазор» стал бы таймером и мог совпасть со встыком).</summary>
+        [Test]
+        public void DepressionGap_IsCountedInCards_NotInSeconds()
+        {
+            var g = StartCrisisAndTail(Csv(), depressionRoll: true);
+            Assert.IsTrue(g.DepressionArmed);
+
+            g.HandleInput(GameInput.AnswerNo);        // свежая карточка → полный таймер фазы под ногами
+            var card = g.CurrentCard;
+            int gap0 = g.DepressionGapLeft;
+            Assert.Greater(gap0, 0, "зазор ещё не выбран");
+            // Стоим на ОДНОЙ карточке, не доводя её таймер до конца (фаза 30+ = 6 с).
+            for (int i = 0; i < 20; i++)
+            {
+                g.Tick(0.1f);
+                Assert.IsFalse(g.InDepression, "время само по себе зазор не выбирает");
+            }
+            Assert.AreSame(card, g.CurrentCard, "карточка та же — таймаута не было");
+            Assert.AreEqual(gap0, g.DepressionGapLeft, "зазор считается КАРТОЧКАМИ, а не секундами");
+        }
+
         [Test]
         public void Depression_DoesNotEnter_WhenRollMisses()
         {
             var g = StartCrisisAndTail(Csv(), depressionRoll: false);
             Assert.IsFalse(g.InDepression, "roll missed → no depression");
-            Assert.AreEqual("FILL", g.CurrentCard.Id, "ordinary play resumed on the suspended card");
+            Assert.IsFalse(g.DepressionArmed, "…и ничего не заряжено на потом");
+            Assert.AreEqual("FILL0", g.CurrentCard.Id, "ordinary play resumed on the suspended card");
             Assert.AreEqual(GameState.Playing, g.State);
         }
 
@@ -205,10 +292,10 @@ namespace ThanksNoThanks.Tests
             Assert.AreEqual(Game.DepressionGraySteps - 1, g.DepressionGray);
 
             Assert.IsFalse(g.DepressionPulsing, "no pulse lit right now");
-            g.HandleInput(GameInput.Confirm);             // a press OUTSIDE the window = miss
+            g.HandleInput(GameInput.ChildPress);          // a press OUTSIDE the window = miss
             Assert.AreEqual(Game.DepressionGraySteps, g.DepressionGray, "colour slips one step back toward gray");
 
-            g.HandleInput(GameInput.Confirm);             // another errant press
+            g.HandleInput(GameInput.ChildPress);          // another errant press
             Assert.AreEqual(Game.DepressionGraySteps, g.DepressionGray, "floored at full gray — never below the start");
             Assert.IsTrue(g.InDepression, "a miss never ends depression");
         }
@@ -233,11 +320,11 @@ namespace ThanksNoThanks.Tests
         public void Depression_Mashing_NeverWins()
         {
             var g = ReachDepression(Csv());
-            // Mash CONFIRM every frame across many pulse cycles: the anti-mash lockout means an unlocked
+            // Mash «!» every frame across many pulse cycles: the anti-mash lockout means an unlocked
             // press can never coincide with the window, so no catch ever lands and depression never lifts.
             for (int i = 0; i < 600; i++)
             {
-                g.HandleInput(GameInput.Confirm);
+                g.HandleInput(GameInput.ChildPress);
                 g.Tick(0.05f);
                 Assert.IsTrue(g.InDepression, "mashing never exits depression");
             }
@@ -259,7 +346,7 @@ namespace ThanksNoThanks.Tests
             Assert.AreEqual(0, g.DepressionGray, "5 catches → full colour");
             Assert.IsFalse(g.InDepression, "depression lifted");
             Assert.AreEqual(GameState.Playing, g.State, "ordinary play resumes");
-            Assert.AreEqual("FILL", g.CurrentCard.Id, "resumed on the suspended normal card");
+            StringAssert.StartsWith("FILL", g.CurrentCard.Id, "resumed on an ordinary card, ходом игры");
         }
 
         // ---- no death in depression ----
@@ -276,19 +363,37 @@ namespace ThanksNoThanks.Tests
             }
         }
 
-        // ---- CONFIRM is the catch, not a restart ----
+        // ---- «!» is the catch; ЗЕЛЁНАЯ в депрессии инертна ----
 
+        /// <summary>
+        /// РЕШЕНИЕ ОСНОВАТЕЛЬНИЦЫ 2026-08-08 (п.3г): ловля пульса — кнопка «!» (CHILD_PRESS), как и стояло
+        /// в спеке встречи. Зелёная (ДА) и dev-Enter (CONFIRM) в депрессии НЕ ловят и вообще ничего не
+        /// делают: иначе экран звал бы жать «!», а работала бы другая кнопка.
+        /// </summary>
         [Test]
-        public void Depression_Confirm_IsTheCatch_NotARestart()
+        public void Depression_BangButton_IsTheCatch_AndGreenIsInert()
         {
             var g = ReachDepression(Csv());
-            g.HandleInput(GameInput.Confirm);             // outside a window — a miss, NOT a restart
-            Assert.AreEqual(GameState.Playing, g.State, "CONFIRM never restarts/leaves play during depression");
+            g.HandleInput(GameInput.ChildPress);          // outside a window — a miss, NOT a restart
+            Assert.AreEqual(GameState.Playing, g.State, "«!» never restarts/leaves play during depression");
             Assert.IsTrue(g.InDepression);
 
             CatchOnePulse(g);                             // inside the window — a catch (progress)
-            Assert.AreEqual(Game.DepressionGraySteps - 1, g.DepressionGray, "CONFIRM in the window catches (progress)");
+            Assert.AreEqual(Game.DepressionGraySteps - 1, g.DepressionGray, "«!» in the window catches (progress)");
             Assert.AreEqual(GameState.Playing, g.State, "still Playing (mid-life), not the opener");
+
+            // …а ЗЕЛЁНАЯ и dev-Enter на открытом окне не ловят — прогресса от них нет.
+            int gray = g.DepressionGray;
+            g.Tick(2.5f);
+            Assert.IsTrue(g.DepressionPulsing, "окно ловли открыто");
+            Assert.IsFalse(g.HandleInput(GameInput.AnswerYes), "зелёная в депрессии ОТВЕРГНУТА");
+            Assert.IsFalse(g.HandleInput(GameInput.Confirm), "…и dev-Enter тоже");
+            Assert.AreEqual(gray, g.DepressionGray, "ни одна из них не поймала пульс");
+            Assert.IsTrue(g.DepressionPulsing, "…окно так и осталось открытым");
+            Assert.IsTrue(g.InDepression, "…и депрессия не кончилась");
+
+            g.HandleInput(GameInput.ChildPress);          // а «!» — ловит
+            Assert.AreEqual(gray - 1, g.DepressionGray, "поймала именно «!»");
         }
 
         // ---- the height sensor is inert in depression (distinct from the CONFIRM catch) ----

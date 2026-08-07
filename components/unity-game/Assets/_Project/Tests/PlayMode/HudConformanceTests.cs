@@ -1072,6 +1072,11 @@ namespace ThanksNoThanks.Tests.PlayMode
             var canvas = driver.CanvasRect;
 
             driver.DebugPreviewBlocked();        // blocked BLOCK$ card: red banner + «цена 100 ₽», frozen
+            // Поза обязана быть СТАТИЧНОЙ: анимация въезда карточки (CardEntry) могла оставить её
+            // подмасштабированной, а с r3 баннер и чип — уже НЕ дети карточки, и мерить их через её
+            // масштаб нельзя. Приводим карточку к единице и меряем всех в КАНВАС-координатах.
+            driver.CardRect.localScale = Vector3.one;
+            driver.CardRect.anchoredPosition = Vector2.zero;
             var cardText = driver.CardRect.Find("CardText").GetComponent<Text>();
             // The deck's LONGEST question (67 chars, Resources/scenes.csv), verbatim.
             cardText.text = "Ваш ребёнок вырос и больше не нуждается в помощи. Помочь всё равно?";
@@ -1086,11 +1091,10 @@ namespace ThanksNoThanks.Tests.PlayMode
             var card = driver.CardRect;
             var bannerRt = (RectTransform)driver.BlockBanner.transform;
             var question = GlyphBoxAt(cardText, OnCardRefCentre(canvas, card, cardText.rectTransform));
-            var banner = BoxAt(OnCardRefCentre(canvas, card, bannerRt), bannerRt);
-            var pricePlate = BoxAt(OnCardRefCentre(canvas, card, driver.CardPricePlate.rectTransform),
+            var banner = BoxAt(RefCentre(canvas, bannerRt), bannerRt);
+            var pricePlate = BoxAt(RefCentre(canvas, driver.CardPricePlate.rectTransform),
                 driver.CardPricePlate.rectTransform);
-            var priceGlyphs = GlyphBoxAt(driver.CardPriceText,
-                OnCardRefCentre(canvas, card, driver.CardPriceText.rectTransform));
+            var priceGlyphs = GlyphBoxAt(driver.CardPriceText, RefCentre(canvas, driver.CardPriceText.rectTransform));
 
             // The banner really does occupy the reserved band the fix reasons about (asset-map §8 field).
             Assert.AreEqual(GameDriver.CardBandTop, banner.T, MapTol,
@@ -1157,16 +1161,22 @@ namespace ThanksNoThanks.Tests.PlayMode
             Below(driver.RelAlarmKant.transform, driver.RelBarImage.transform,
                 "§4: кант тревоги отношений — под баром");
 
-            // (2) card: frame → question → BLOCK$ banner → price plate → price text.
+            // (2) card: frame → question. Баннер и чип цены с r3 ЖИВУТ НЕ В КАРТОЧКЕ (см. (2b)).
             var card = driver.CardRect;
             Below(card.Find("CardFrame"), card.Find("CardText"), "вопрос рисуется поверх плашки карточки");
-            Below(card.Find("CardText"), card.Find("BlockBannerInk"), "кант BLOCK$-баннера — поверх вопроса");
-            Below(card.Find("BlockBannerInk"), card.Find("BlockBanner"),
+
+            // (2b) r3 (п.6): BLOCK$-баннер и чип цены — в СВОЁМ контейнере ПОВЕРХ плашек ответа. Раньше они
+            // были детьми карточки, а плашки — её соседями ПОЗЖЕ, и кнопки срезали ровно то, что игрок
+            // обязан прочитать («нет денег» и цену). Внутренний порядок фигур сохранён.
+            var block = driver.BlockOverlay.transform;
+            Below(driver.YesPlateImage.transform, block, "баннер/цена рисуются ПОВЕРХ зелёной плашки");
+            Below(driver.NoPlateImage.transform, block, "…и поверх красной");
+            Below(block.Find("BlockBannerInk"), block.Find("BlockBanner"),
                 "чёрный keyline BLOCK$-баннера — ПОД красной плашкой (виден кантом снаружи)");
-            Below(card.Find("BlockBanner"), card.Find("CardPriceInk"), "кант чипа цены — поверх баннера");
-            Below(card.Find("CardPriceInk"), card.Find("CardPricePlate"),
+            Below(block.Find("BlockBanner"), block.Find("CardPriceInk"), "кант чипа цены — поверх баннера");
+            Below(block.Find("CardPriceInk"), block.Find("CardPricePlate"),
                 "чёрный keyline чипа цены — ПОД тёмной плашкой чипа");
-            Below(card.Find("CardPricePlate"), card.Find("CardPrice"), "текст цены — поверх своей плашки");
+            Below(block.Find("CardPricePlate"), block.Find("CardPrice"), "текст цены — поверх своей плашки");
 
             // (3) §5b: звонящая трубка — слой 5 «оверлеи» (build-spec §1.3), т.е. ВЫШЕ ряда HUD и выше
             // карточки-вопроса; иначе выехавшая трубка ныряла бы под плашку и звонок читался бы как баг.

@@ -42,6 +42,32 @@ namespace ThanksNoThanks
     }
 
     /// <summary>
+    /// СПЕЦРЕЖИМ, чей ВХОДНОЙ ЭКРАН поднят сейчас (плейтест-фиксы r3, 2026-08-07). Обобщение §D-модалки на
+    /// состояния, которые до сих пор начинались без объяснений: игрок влетал в блиц/депрессию/выгорание и
+    /// «умирал, не понимая, что происходит», а здоровье объяснялось старой жёлтой S5-подсказкой, выпадавшей
+    /// из арт-пака.
+    ///
+    /// Экран собран ИЗ ТЕХ ЖЕ БЛОКОВ, что и §D (затемнение · крупный виджет · облачко-рассказ ·
+    /// окно-задача), но закрывается не работой контролом — у этих режимов либо нет своего контрола
+    /// (здоровье), либо он и есть содержание режима, — а ЗЕЛЁНОЙ кнопкой, тем же CTA-блоком, каким
+    /// начинается опенер и перезапускается финал. Пока экран висит, стоит ВСЁ: возраст, дренажи, таймер
+    /// карточки, кризисный таймер и планировщик пульса депрессии — умереть, читая правила, нельзя.
+    /// </summary>
+    public enum SpecialMode
+    {
+        /// <summary>Никакой — входного экрана нет.</summary>
+        None,
+        /// <summary>Здоровье начало таять (30). Крупный виджет — бар здоровья; своего контрола нет.</summary>
+        Health,
+        /// <summary>Кризис среднего возраста → БЛИЦ (45). Крупный виджет — купол-таймер.</summary>
+        Blitz,
+        /// <summary>«Тёмная полоса» (CR09). Крупный виджет — та самая звезда-пульс, которую ловят.</summary>
+        Depression,
+        /// <summary>ПЕРВОЕ выгорание за жизнь. Крупный виджет — красная батарея (повторные — короткая плашка).</summary>
+        Burnout,
+    }
+
+    /// <summary>
     /// MonoBehaviour driver for «Спасибо, не надо». Owns the pure <see cref="Game"/>, wires an
     /// <see cref="IInputSource"/> (an <see cref="ArcadeInputSource"/> reading the shared arcade-controls
     /// layer by default; a fake can be injected for tests), and
@@ -86,6 +112,46 @@ namespace ThanksNoThanks
         public static Color DomeYellowToken => DomeYellow;
         public static Color DomeAlarmToken => DomeAlarm;
         public static Color DomeInkToken => DomeInk;
+        // Короткая плашка ПОВТОРНОГО выгорания (r3, п.5б): тот же насыщенный красный, что у BLOCK$-баннера,
+        // — это «плохое состояние», и оно обязано читаться тем же языком, что остальные тревоги арт-пака.
+        private static readonly Color BurnoutRed = new(0.90f, 0.18f, 0.14f);
+        /// <summary>
+        /// Короткая плашка выгорания: центр x, центр y от ВЕРХА, w, h. ПОД БАТАРЕЕЙ, в левой колонке.
+        ///
+        /// ⚠ ПЕРЕВЕШЕНА 2026-08-08 (дизайн-скептик, раунд 2). Стояла на (1294, 226) — то есть под баром
+        /// ЗДОРОВЬЯ, хотя говорит про БАТАРЕЮ, и низом (271) подходила к обводке карточки на 2 px. Правило
+        /// «сообщение о состоянии живёт под своим виджетом» никуда не делось — просто применено к нужному
+        /// виджету: плашка ушла под батарею (её низ 283.6), в левую колонку.
+        ///
+        /// Коридор посчитан по НАРИСОВАННЫМ соседям, не на глаз: батарея сверху (низ 275.5), рисунок
+        /// карточки справа (левый край 412.3), трубка в покое снизу (<see cref="PhoneRestDrawnBox"/>,
+        /// верх 396.2). Кант (<see cref="BlockKeylineInk"/> = 4 px с каждой стороны) даёт внешний бокс
+        /// 12…375 × 288…384 — зазоры 12.5 / 37 / 12.2 при требуемых ≥12.
+        ///
+        /// ⚠ ВЫЕХАВШАЯ трубка (звонок, <see cref="PhoneRingDrawnBox"/>) в этот коридор не помещается ни
+        /// при какой ширине: между низом батареи и её верхом всего 55 px. Разведены ВРЕМЕНЕМ — плашка
+        /// гаснет, пока трубка на экране (см. ветку плашки в Update).
+        /// </summary>
+        public static readonly Vector4 BurnoutPlateRect = new(193.5f, 336f, 355f, 88f);
+        /// <summary>
+        /// НАРИСОВАННЫЙ бокс трубки в позе покоя (центр x, центр y от ВЕРХА, w, h). Рект
+        /// <see cref="PhoneRestRect"/> уезжает за левый край экрана и вдобавок несёт прозрачные поля
+        /// спрайта (`phone-rest-v2` 662×715, alpha-bbox 113…546 × 47…681), поэтому «не накрывать трубку»
+        /// считается по РИСУНКУ, а не по ректу: x −80.5…158.4, y 396.2…745.6.
+        /// </summary>
+        public static readonly Vector4 PhoneRestDrawnBox = new(38.95f, 570.9f, 238.9f, 349.4f);
+        /// <summary>То же для позы ЗВОНКА (`phone-ring-v2` 662×715, alpha-bbox 0…661 × 20…682): выехавшая
+        /// трубка занимает x −61.7…349.7, y 330.3…742.2 — весь низ левой колонки. Именно она, а не покой,
+        /// и есть настоящий сосед короткой плашки выгорания.</summary>
+        public static readonly Vector4 PhoneRingDrawnBox = new(144f, 536.25f, 411.3f, 411.9f);
+        /// <summary>НАРИСОВАННЫЙ бокс карточки (`choice-plate-v2` 1536×1024, alpha-bbox 33…1501 × 26…994):
+        /// x 412.3…1506.0, y 229.0…950.7. Рект карточки заметно шире рисунка (по 25 px прозрачных полей).</summary>
+        public static readonly Vector4 CardPlateDrawnBox = new(959.13f, 589.87f, 1093.75f, 721.74f);
+        /// <summary>BLOCK$-баннер «нет денег» на экране: центр x, центр y от ВЕРХА, w, h. Те же пиксели,
+        /// что давала прежняя доля карточки (y 705…815 внутри её кремового поля 286…892).</summary>
+        public static readonly Vector4 BlockBannerRect = new(959.5f, 760f, 900f, 110f);
+        /// <summary>Чип цены («СТОИТ N ₽» / «цена N ₽») — так же абсолютным боксом (y 811…889).</summary>
+        public static readonly Vector4 CardPriceRect = new(959.5f, 850f, 360f, 78f);
         private static readonly Color PlateMute = new(0.62f, 0.62f, 0.64f);    // S10: muted answer plates while BLOCK$-blocked
         private static readonly Color CardBlockDim = new(0.52f, 0.54f, 0.60f); // S10: tint the card frame when unaffordable (dims to muted cobalt)
         // S1 opener, снято с эталона «Стартовый экран.png»: золото марки-рамки и тёплый крем её плашки —
@@ -493,6 +559,17 @@ namespace ThanksNoThanks
         /// и лерпается вместе с позой за <see cref="PhoneSlideSeconds"/> — выезд «разгорается», уезд гаснет.
         /// </summary>
         public static readonly Color PhoneRestTint = new(1f, 0.830f, 0.745f, 1f);
+        /// <summary>
+        /// Тинт ПОНИКШЕЙ позы (r3, п.9): трубка, которую проспали, уезжает ЗАМЕТНО темнее обычного покоя —
+        /// контраст с уездом после успеха, где ещё догорает салют звёзд. Живой плейтест основательницы:
+        /// «пропуск звонка вообще никак не отзывается». Множитель — 0.55 от тинта покоя по всем каналам:
+        /// это ровно «та же трубка, но погасшая», а не другой цвет (uGUI тинт умножает, поэтому одна
+        /// доля по всем каналам сохраняет оттенок и роняет только светлоту).
+        /// </summary>
+        public const float PhoneMissedDim = 0.55f;
+        /// <summary>Готовый тинт поникшей позы — из <see cref="PhoneRestTint"/> × <see cref="PhoneMissedDim"/>.</summary>
+        public static readonly Color PhoneMissedTint = new(
+            PhoneRestTint.r * PhoneMissedDim, PhoneRestTint.g * PhoneMissedDim, PhoneRestTint.b * PhoneMissedDim, 1f);
 
         // Baked cavity colours, sampled off `energy-battery-v2`: cream «empty», saturated yellow «full».
         private static readonly Color BatteryCream = new(253f / 255f, 249f / 255f, 230f / 255f);
@@ -508,6 +585,9 @@ namespace ThanksNoThanks
         private float _phoneOut;           // 0 = за левым краем (покой), 1 = выехала внутрь (звонок)
         private float _phoneRingClock;     // часы ТЕКУЩЕГО звонка — детерминированная фаза качания
         private bool _phoneRinging;        // прошлый Game.ChildFlashing (ловим ФРОНТ звонка)
+        // r3 (п.9): ПОСЛЕДНИЙ звонок был ПРОСПАН — трубка уезжает «поникшей» (тот же спрайт покоя, но
+        // притушенный сильнее обычного). Снимается следующим звонком: подняли или нет — это уже про новый.
+        private bool _phoneMissed;
 
         // Card
         private RectTransform _cardRoot;
@@ -562,6 +642,7 @@ namespace ThanksNoThanks
 
         // BLOCK$ (S10): the card is dimmed by tinting its OWN frame sprite (exact rounded silhouette — a
         // separate veil rect showed straight edges cutting across the sunburst), plus a red block-tag banner.
+        private GameObject _blockOverlay;     // r3: контейнер баннера+чипа, созданный ПОСЛЕ плашек ответа
         private GameObject _blockBanner;
         private GameObject _blockBannerInk;   // чёрный keyline вокруг баннера (сосед НИЖЕ него)
         private Image _cardPriceInk;          // тот же keyline вокруг чипа цены
@@ -634,6 +715,71 @@ namespace ThanksNoThanks
         /// </summary>
         public const int MoneyTutorialTicks = 7;
 
+        // ---- ВХОДНОЙ ЭКРАН СПЕЦРЕЖИМА (r3): те же блоки §D + зелёная CTA -----------------------------
+        private GameObject _smCtaEdge;     // тёмный кант CTA (тот же приём, что у опенера/финала)
+        private Image _smCta;              // сама зелёная плашка (bar-track × OnBarTrack(GoGreen))
+        private Text _smCtaText;
+        private SpecialMode _smWhich;
+        private bool _smShowing;
+        private bool _smHealthSeen;        // здоровье объясняется один раз за жизнь
+        private bool _smBurnoutSeen;       // …и выгорание тоже: повторные идут короткой плашкой
+        private SpecialMode _smPending;    // экран пришёл, пока сверху висело другое окно — не теряем
+
+        /// <summary>Резерв нижней полосы окна-задачи на входном экране спецрежима: там, кроме служебной
+        /// строки, стоит ещё и CTA-плашка, поэтому текст задачи ужимается сильнее, чем на §D-модалке.
+        /// ⚠ 160 → 132 (дизайн-скептик, раунд 2): CTA поднялась внутрь поля, и старый резерв оставлял между
+        /// текстом и ней ДЫРУ 110–135 px — особенно заметную на здоровье и блице, где служебной строки нет
+        /// вовсе. Теперь полоса раздана честно: текст 391…639, служебная строка 651…685, кант CTA 699…795,
+        /// низ поля 819 — зазоры 12 / 14 / 24.</summary>
+        private const float SpecialTaskReserve = 132f;
+        /// <summary>Центр служебной строки (клавиша эмуляции) на входном экране спецрежима: между текстом
+        /// задачи и кантом CTA (см. <see cref="SpecialTaskReserve"/>).</summary>
+        private const float SpecialHintLineCy = 668.5f;
+        /// <summary>Зазор от нижней кромки кремового поля окна-задачи до КАНТА зелёной CTA. До 2026-08-08
+        /// CTA стояла на 770 и её кант упирался в кромку поля 0…3 px — «приклеена ко дну» (дизайн-скептик,
+        /// раунд 2). Коридор ≥16, взято 24 — и дыхание есть, и CTA не лезет в текстовую полосу.</summary>
+        public const float SpecialCtaFieldGap = 24f;
+        /// <summary>Зелёная CTA входного экрана: центр x, центр y от ВЕРХА, w, h — в кремовом поле плашки
+        /// (поле 343…819), поэтому плашка целиком лежит на креме, а не на кайме со звёздами. Вертикаль
+        /// ВЫВЕДЕНА из поля: низ канта = низ поля − <see cref="SpecialCtaFieldGap"/>.</summary>
+        public static readonly Vector4 SpecialCtaRect = new(1009f, SpecialCtaCy, 620f, 84f);
+        /// <summary>Тёмный кант этой CTA — внешний контур, по которому меряется «дыхание» до кромки поля.</summary>
+        public static readonly Vector4 SpecialCtaEdgeRect = new(1009f, SpecialCtaCy, 632f, 96f);
+        private const float SpecialCtaEdgeH = 96f;
+        /// <summary>Центр CTA по вертикали: 819.5 (низ кремового поля) − 24 (зазор) − 48 (полвысоты канта).</summary>
+        private const float SpecialCtaCy = 581f + 477f / 2f - SpecialCtaFieldGap - SpecialCtaEdgeH / 2f;
+
+        // КРУПНЫЕ ВИДЖЕТЫ входных экранов: ИСТОЧНИК (нарисованный бокс в HUD) → ЦЕЛЬ (бокс на экране),
+        // по тем же правилам, что и BigScaleSrc/Dst: у своего HUD-места, крупнее HUD, целиком в кадре с
+        // полем ≥16 px, мимо текстовых полей обоих окон, мимо бейджа возраста и мимо CTA.
+        //   ЗДОРОВЬЕ — У СВОЕГО HUD-МЕСТА (правый верх). ⚠ ПЕРЕСТАВЛЕНО 2026-08-08 (дизайн-скептик,
+        //     раунд 2): бар стоял на 610 — то есть в слоте ОТНОШЕНИЙ — сросся кромкой с батареей и
+        //     оставлял торчащий розовый обрезок плашки отношений. Канон r2-tut-rel: крупная копия стоит
+        //     У СВОЕГО места и перекрывает соседей ЦЕЛИКОМ, а не наполовину. Правый верх занят облачком —
+        //     поэтому на ЭТОМ экране облачко зеркалится ВЛЕВО (см. StoryBubbleLeftRect), а бар садится в
+        //     коридор между ним и банкой: 640 px ширины (k≈1.27) с зазорами ≥16 до обоих.
+        private static readonly Vector4 BigHealthSrc = new(HealthBarDrawnCx, HealthBarDrawnCy, HealthBarDrawnW, HealthBarDrawnH);
+        private static readonly Vector4 BigHealthDst = new(1307f, 120f, 640f, 161.27f);   // k≈1.27
+        //   ВЫГОРАНИЕ — та же батарея и тот же бокс, что у экрана энергии (проверенное чистое место).
+        //     Боксы берутся ЧЕРЕЗ BigScaleSrc/Dst (вызовом, не полем): BigEnergySrc/Dst объявлены НИЖЕ по
+        //     файлу, и статический инициализатор поля прочитал бы их нулями.
+
+        /// <summary>Целевой бокс крупного виджета входного экрана спецрежима (нулевой — виджета нет).</summary>
+        public static Vector4 BigSpecialDst(SpecialMode m) => m switch
+        {
+            SpecialMode.Health => BigHealthDst,
+            SpecialMode.Burnout => BigScaleDst(NewScale.Energy),
+            _ => Vector4.zero,      // блиц и депрессия идут БЕЗ крупного виджета (см. ShowSpecialMode)
+        };
+
+        /// <summary>Исходный (HUD) бокс того же виджета. Нулевой — у режима крупного виджета нет.</summary>
+        public static Vector4 BigSpecialSrc(SpecialMode m) => m switch
+        {
+            SpecialMode.Health => BigHealthSrc,
+            SpecialMode.Burnout => BigScaleSrc(NewScale.Energy),
+            _ => Vector4.zero,
+        };
+
         // ---- подсказки клавиш при эмуляции (плейтест 2026-08-05, перекалибровано 2026-08-07) ----------
         // ⚠ ОТКЛИК «НЕ В РИТМ» И ВЗДРАГИВАНИЕ БАТАРЕИ СНЯТЫ 2026-08-07 вместе с ритм-гейтом: отклоняться
         // больше нечему — удержание либо идёт (батарея растёт на глазах), либо нет.
@@ -655,6 +801,7 @@ namespace ThanksNoThanks
         // два разных контрола на экране не выбивали друг друга из кэша. См. KeyHintLine.
         private HintCache _nsHintCache;
         private HintCache _tutHintCache;
+        private HintCache _depHintCache;   // …и третье место — подсказка контрола НА экране депрессии
 
         /// <summary>
         /// Запомненная строка подсказки вместе с ВСЕМ, от чего она зависит: контрол, ответ «этот контрол
@@ -688,6 +835,27 @@ namespace ThanksNoThanks
         public static readonly Vector4 StoryBubbleRect = new(1443.4f, 224.7f, 946.5f, 331.4f);
         /// <summary>Кремовое поле облачка на экране — сюда садится рассказ.</summary>
         public static readonly Vector4 StoryFieldRect = new(1380.5f, 225f, 734f, 237f);
+        /// <summary>
+        /// ЗЕРКАЛЬНАЯ РОКИРОВКА (дизайн-скептик, раунд 2): облачко уезжает ВЛЕВО, освобождая правый верх
+        /// крупному бару здоровья (его собственное HUD-место). Спрайт при этом идёт в РОДНОЙ ориентации
+        /// (localScale +1, рупор слева), а кремовое поле лежит правее центра спрайта — поэтому смещение
+        /// поля меняет знак: рект = поле − 62.9 (справа было поле + 62.9).
+        ///
+        /// Вертикаль ВЫШЕ канонической (165 против 224.7) — и это не вкусовщина, а то же правило «перекрывай
+        /// соседей ЦЕЛИКОМ»: НАРИСОВАННОЕ облачко (alpha-bbox спрайта 1445×506 → поля 11.8/9.2/17.0/16.4 px
+        /// на экране) обязано накрыть и плашку отношений (413…936, 35…167), и батарею (126…241, 57…276)
+        /// без единого торчащего обрезка. На 165 нарисованное облачко занимает x 38…964, y 16…314 —
+        /// обе фигуры внутри с полем ≥17 px.
+        /// </summary>
+        public static readonly Vector4 StoryBubbleLeftRect = new(500f, 165f, 946.5f, 331.4f);
+        /// <summary>Кремовое поле зеркального (левого) облачка — сюда садится тот же рассказ.</summary>
+        public static readonly Vector4 StoryFieldLeftRect = new(562.9f, 165.3f, 734f, 237f);
+        /// <summary>Прозрачные поля РИСУНКА внутри спрайта `host-comment-v2` — в долях спрайта (L, T, R, B).
+        /// Замер по самому ассету: 1445×506, alpha-bbox x 18…1430, y 26…480. Нужен всем, кто считает, что
+        /// облачко реально накрывает (гард «никаких торчащих обрезков соседей»): рект облачка заметно
+        /// больше нарисованной фигуры.</summary>
+        public static readonly Vector4 StoryBubbleArtInset01 =
+            new(18f / 1445f, 26f / 506f, 14f / 1445f, 25f / 506f);
         // Кегли сняты с эталона: задача — cap-height ≈75 px ⇒ Arimo Bold ≈104; рассказ — cap-height ≈26 px
         // и межстрочный 48 ⇒ Rubik ≈39 (тот же кегль, что у живой реплики Ведущего, BubbleTextMaxSize).
         // ⚠ ПОТОЛОК задачи снят со 104 до 96 (дизайн-скептик 2026-08-07): 104 был КРАЙНИМ кеглем эталона,
@@ -796,6 +964,13 @@ namespace ThanksNoThanks
         /// <summary>То же для окна-рассказа.</summary>
         public static Vector4 StoryTextBox => new(StoryFieldRect.x, StoryFieldRect.y,
             StoryFieldRect.z - 2f * StoryTextPadX, StoryFieldRect.w - 2f * StoryTextPadY);
+        /// <summary>Бокс текста задачи на ВХОДНОМ ЭКРАНЕ спецрежима — то, что ставит LayoutTaskWindow(true).
+        /// Вынесен наружу ради гарда «вертикаль роздана»: текст ↔ служебная строка ↔ CTA ↔ кромка поля.</summary>
+        public static Vector4 SpecialTaskTextRect => new(TaskFieldRect.x, TaskFieldRect.y - SpecialTaskReserve / 2f,
+            TaskFieldRect.z - 2f * TaskTextPadX, TaskFieldRect.w - 2f * TaskTextPadY - SpecialTaskReserve);
+        /// <summary>Бокс служебной строки (клавиша эмуляции) там же.</summary>
+        public static Vector4 SpecialHintLineRect => new(TaskFieldRect.x, SpecialHintLineCy,
+            TaskFieldRect.z - 2f * TaskTextPadX, 34f);
         /// <summary>Бейдж возраста — крупная шкала на него не налезает.</summary>
         public static Vector4 AgeBadgeBox => AgeBadgeRect;
         /// <summary>НАРИСОВАННЫЙ бокс бейджа возраста (asset-map §2: 1639,392,212,207) — ось правой
@@ -833,6 +1008,58 @@ namespace ThanksNoThanks
         public const string ChildTaskText =
             "Когда телефон слева зазвонит — жми «!», чтобы поднять трубку";
 
+        // ---- КАНОН-ЧЕРНОВИКИ ВХОДНЫХ ЭКРАНОВ СПЕЦРЕЖИМОВ (host-content §4, помечены «✍ черновик») -----
+        // Все четыре пары «рассказ + задача» лежат в docs/new_concept/host-content.md §4 с пометкой
+        // «✍ черновик — основательница правит свободно» и сверяются с документом дословно
+        // (NewScaleCanonTextTests), чтобы копия не разъехалась с каноном. Тон — Цезарь Фликерман.
+
+        /// <summary>
+        /// КОНТРОЛ ЛОВЛИ ДЕПРЕССИИ — одна константа на все тексты (п.3г контракта). ⚠ ВОПРОС ЗАКРЫТ
+        /// ОСНОВАТЕЛЬНИЦЕЙ 2026-08-08: ловля идёт по КНОПКЕ «!» (<see cref="GameInput.ChildPress"/>,
+        /// BangButton кабинета), как и стояло в спеке встречи, а не по зелёной. Заготовка сработала как
+        /// задумано — смена контрола вышла правкой одной строки текста и одной ветки в Game.
+        /// </summary>
+        public const string DepressionCatchControlName = "«!»";
+
+        /// <summary>Рассказ Ведущего на открытии ЗДОРОВЬЯ (30). ✍ черновик.</summary>
+        public const string HealthStoryText =
+            "А годы-то берут своё! С этого дня здоровье тает само — просто потому, что ты живёшь.";
+        /// <summary>Задача на открытии ЗДОРОВЬЯ (30). Своего контрола у шкалы нет — лечат ВЫБОРЫ. ✍ черновик.</summary>
+        public const string HealthTaskText =
+            "Контрола у здоровья нет — лечись выборами за деньги, если накопил";
+
+        /// <summary>Рассказ Ведущего на входе в БЛИЦ — то самое объявление кризиса (HostContent.CrisisAnnounce).</summary>
+        public static string BlitzStoryText => HostContent.CrisisAnnounce;
+        /// <summary>Задача на входе в БЛИЦ — правила блица из crisis-content §2. ✍ черновик.</summary>
+        public const string BlitzTaskText =
+            "Пять мыслей по пять секунд — жми «ВСЁ НОРМАЛЬНО». Кнопки прыгают местами!";
+
+        /// <summary>Рассказ Ведущего на входе в ДЕПРЕССИЮ — глухое объявление (HostContent.DepressionAnnounce).</summary>
+        public static string DepressionStoryText => HostContent.DepressionAnnounce;
+        /// <summary>Задача на входе в ДЕПРЕССИЮ (crisis-content §1). Контрол — через константу. ✍ черновик.</summary>
+        public static string DepressionTaskText =>
+            "Лови пульс: жми " + DepressionCatchControlName + " в момент вспышки — пять попаданий вернут краски";
+        /// <summary>Подсказка контрола НА САМОМ экране депрессии (п.3в) — из той же константы.</summary>
+        public static string DepressionBoardHint =>
+            "лови пульс — жми " + DepressionCatchControlName.ToLowerInvariant();
+
+        /// <summary>Рассказ Ведущего на ПЕРВОМ выгорании. ✍ черновик.</summary>
+        public const string BurnoutStoryText =
+            "Перегорел! Бывает с лучшими из нас. Всё теперь даётся туго — и деньги идут вдвое медленнее.";
+        /// <summary>Задача на ПЕРВОМ выгорании — формулировка основательницы дословно (п.5г). ✍ черновик.</summary>
+        public const string BurnoutTaskText =
+            "Зажми датчик высоты и держи, пока не придёшь в себя";
+        /// <summary>Короткая плашка ПОВТОРНОГО выгорания (без блокировки) — заголовок.</summary>
+        public const string BurnoutPlateTitle = "ВЫГОРАНИЕ";
+        /// <summary>…и её вторая строка: что делать, одной фразой.</summary>
+        public const string BurnoutPlateSubtitle = "зажми датчик высоты";
+
+        /// <summary>Реплика Ведущего на ПРОПУЩЕННЫЙ звонок ребёнка (п.9). ✍ черновик.</summary>
+        public const string ChildMissedLine = "Малыш ждал…";
+
+        /// <summary>CTA входного экрана спецрежима — тот же блок и та же грамматика, что у опенера/финала.</summary>
+        public const string SpecialModeCtaText = "ПОНЯЛ — ЖМИ ЗЕЛЁНУЮ";
+
         // Tutorial overlay (S5): dimmed bg + yellow modal + «ПОНЯТНО»; freezes the game while up.
         // Reused for every hint: money (18), energy (25), health (30) and the first burnout.
         private GameObject _tutorialOverlay;
@@ -843,8 +1070,8 @@ namespace ThanksNoThanks
         // a Confirm dismisses a hint we arm this; the rest of THIS frame's non-Confirm input is swallowed.
         // Reset at the top of Update so the next frame behaves normally.
         private bool _dismissedThisFrame;
-        private bool _healthTutorialSeen;  // one-shot per life; reset on a fresh life
-        private bool _burnoutHintSeen;
+        // Тот же приём для входного экрана спецрежима, но строже — см. OnInput. Сбрасывается в Update.
+        private bool _smClosedThisFrame;
         private bool _wasPlaying;
 
         // Burnout state plate (S7): dim-cobalt «ВЫГОРАНИЕ» banner, shown while Game.Burnout is on.
@@ -867,6 +1094,8 @@ namespace ThanksNoThanks
         private Image _depressionVeil;     // near-opaque gray wash — alpha = DepressionGray/5 · max
         private Image _depressionGrain;    // faint static noise (runtime-seeded texture)
         private Image _depressionPulse;    // faint centre dot, visible only while DepressionPulsing
+        private Text _depHint;             // «лови пульс — жми ЗЕЛЁНУЮ» (называет КОНТРОЛ, п.3в)
+        private Text _depKeyHint;          // …и клавиша под ней при клавиатурной эмуляции
         private int _depMutterCount;       // muttering index (one muted host line per catch)
         // Depression colour tokens.
         private static readonly Color GrayWash = new(0.50f, 0.50f, 0.53f);   // the B&W wash tint
@@ -927,17 +1156,11 @@ namespace ThanksNoThanks
         // *TaskText выше, host-content §4). Дублирующие тексты убраны из кода целиком, чтобы вторая
         // формулировка той же задачи не осталась в пуле подсказок. На S5-подсказке остались только
         // ЗДОРОВЬЕ (30) и ВЫГОРАНИЕ — их meeting-revisions §2 не перечисляет.
-        private const string HealthTutorialText =
-            "ЗДОРОВЬЕ НАЧАЛО ТАЯТЬ.\n\n" +
-            "С этого возраста ЗДОРОВЬЕ убывает само по себе.\n" +
-            "Лечиться можно за деньги — если накопили.\n\n" +
-            "Запустите — организм не выдержит.";
-
-        private const string BurnoutHintText =
-            "ВЫГОРАНИЕ!\n\n" +
-            "Всё даётся тяжелее — деньги идут вдвое медленнее.\n" +
-            "Зажмите ДАТЧИК ВЫСОТЫ и держите, чтобы прийти в себя.\n\n" +
-            "Отпустит само, когда энергия восстановится.";
+        // ⚠ И ПОСЛЕДНИЕ ДВА S5-ТЕКСТА СНЯТЫ 2026-08-07 (r3): здоровье (30) и выгорание переехали на
+        // ВХОДНОЙ ЭКРАН СПЕЦРЕЖИМА (HealthStoryText/HealthTaskText, BurnoutStoryText/BurnoutTaskText —
+        // канон-черновики host-content §4). Ни одна ПРОДАКШН-ветка больше не поднимает жёлтую модалку S5:
+        // её механика (ShowTutorial/DismissTutorial + полная заморозка ввода) остаётся общим примитивом
+        // «блокирующая подсказка» и Слой-2-швом (DebugShowTutorial), но своих текстов у неё больше нет.
 
         // ---- public inspection accessors (visual-assembly PlayMode tests) ----
         public RectTransform CanvasRect { get; private set; }
@@ -1054,6 +1277,30 @@ namespace ThanksNoThanks
         /// <summary>§D: OPEN пришёл, но экран ОТЛОЖЕН до снятия помехи (выгорание под ребёнком).
         /// None — ничего не отложено. Открытие не теряется: поднимется само (PumpPendingNewScale).</summary>
         public NewScale NewScalePending => _nsPending;
+        // ---- r3: входной экран СПЕЦРЕЖИМА (Слой-2) ----
+        /// <summary>r3: входной экран спецрежима поднят прямо сейчас.</summary>
+        public bool SpecialModeShowing => _smShowing;
+        /// <summary>r3: какой именно спецрежим объясняется (None, если экрана нет).</summary>
+        public SpecialMode SpecialModeKind => _smShowing ? _smWhich : SpecialMode.None;
+        /// <summary>r3: экран пришёл, но ОТЛОЖЕН — сверху висит другое окно. None — очередь пуста.</summary>
+        public SpecialMode SpecialModePending => _smPending;
+        /// <summary>r3: зелёная CTA входного экрана — та же сборка, что у опенера/финала.</summary>
+        public Image SpecialModeCta => _smCta;
+        /// <summary>r3: тёмный кант этой CTA — внешний контур, по которому и меряется «дыхание» до кромки
+        /// кремового поля окна-задачи (дизайн-скептик, раунд 2).</summary>
+        public GameObject SpecialModeCtaEdge => _smCtaEdge;
+        /// <summary>r3: подпись на этой CTA.</summary>
+        public Text SpecialModeCtaLabel => _smCtaText;
+        /// <summary>r3: короткая плашка ПОВТОРНОГО выгорания (полноэкранный захват S7 снят).</summary>
+        public GameObject BurnoutPlateGroup => _burnoutPlate;
+        /// <summary>r3: контейнер BLOCK$-баннера и чипа цены — создан ПОСЛЕ плашек ответа (z-порядок).</summary>
+        public GameObject BlockOverlay => _blockOverlay;
+        /// <summary>r3: подсказка контрола НА экране депрессии («лови пульс — жми зелёную»).</summary>
+        public Text DepressionHintText => _depHint;
+        /// <summary>r3: клавиша под ней при клавиатурной эмуляции (на стойке пусто).</summary>
+        public Text DepressionKeyHint => _depKeyHint;
+        /// <summary>r3: трубка уехала ПОНИКШЕЙ — последний звонок был проспан.</summary>
+        public bool ChildPhoneMissed => _phoneMissed;
         public Image TutorialModal => _tutorialModal;
         public Image TutorialButton => _tutorialButton;
         public Text TutorialButtonText => _tutorialButtonText;
@@ -1126,6 +1373,20 @@ namespace ThanksNoThanks
         /// <summary>Test seam: снять §D-модалку тихо (без салюта), как при уходе из Playing.</summary>
         public void DebugCloseNewScale() => CloseNewScale(reward: false);
 
+        /// <summary>Слой-2 (r3): поднять входной экран спецрежима тем же путём, каким его поднимает вход
+        /// в сам режим (крупный виджет, канон-черновики, пауза, зелёная CTA).</summary>
+        public void DebugShowSpecialMode(SpecialMode which) => ShowSpecialMode(which);
+
+        /// <summary>Test seam (r3): снять входной экран тем же путём, что и зелёная кнопка.</summary>
+        public void DebugCloseSpecialMode() => CloseSpecialMode();
+
+        /// <summary>
+        /// Test seam: сбросить одноразовые «съесть остаток кадра» гейты — ровно то, что делает начало
+        /// <see cref="Update"/>. Синхронный тест-цикл, который гонит вводы без реальных кадров, иначе
+        /// упёрся бы в гейт, поставленный закрытием подсказки/входного экрана, и остался бы без ввода.
+        /// </summary>
+        public void DebugClearFrameGuards() { _dismissedThisFrame = false; _smClosedThisFrame = false; }
+
         /// <summary>Test seam: снять S5-подсказку тем же путём, что и зелёная кнопка.</summary>
         public void DebugDismissTutorial() => DismissTutorial();
 
@@ -1195,9 +1456,86 @@ namespace ThanksNoThanks
         // pure Game is never touched; these only flip the driver's own overlay Images on for a screenshot. ----
         public void DebugPreviewBurnout()
         {
-            _openerPanel.SetActive(false); _finalePanel.SetActive(false); _gamePanel.SetActive(true);
+            DebugPreviewArcadeShot();          // обычный кадр (доска видна) — плашка её НЕ накрывает
+            ApplyAgeGates(33f);
+            ReflectEnergyLevel(8f);            // выгорание = энергия на дне…
+            DebugPaintAlarm(AlarmScale.Energy);// …и, значит, батарея горит §4-тревогой
             _burnoutPlate.SetActive(true);
+        }
+
+        /// <summary>Screenshot seam: зажечь §4-тревогу шкалы на пике пульса (в позе Update не крутится).</summary>
+        public void DebugPaintAlarm(AlarmScale s)
+        {
+            _alarmOn[(int)s] = true;
+            _alarmWeight[(int)s] = 1f;
+            _alarmClock[(int)s] = 0f;
+            PaintAlarm(s, 1f, AlarmBrightness((int)s));
+        }
+
+        /// <summary>
+        /// Screenshot pose (r3): ВХОДНОЙ ЭКРАН СПЕЦРЕЖИМА поверх обычного кадра — затемнение, крупный
+        /// виджет, облачко-рассказ, окно-задача и зелёная CTA. Драйвер замораживается ради стабильного
+        /// кадра; состояние шкал ставится «как в жизни» для этого режима (здоровье уже тает, батарея на
+        /// дне у выгорания, серая мойка у депрессии).
+        /// </summary>
+        public void DebugPreviewSpecialMode(SpecialMode which)
+        {
+            _openerPanel.SetActive(false); _finalePanel.SetActive(false); _gamePanel.SetActive(true);
+            RestoreNormalPlates();
+            float age = which switch
+            {
+                SpecialMode.Health => 30f,
+                SpecialMode.Burnout => 27f,
+                SpecialMode.Blitz => 45f,
+                _ => 47f,
+            };
+            ApplyAgeGates(age);
+            _ageText.text = Mathf.FloorToInt(age).ToString();
+            _moneyText.text = FormatMoneyJar(140);
+            _cardText.text = "Взять ипотеку на 25 лет?";
+            ReflectEnergyLevel(which == SpecialMode.Burnout ? 8f : 62f);
+            // На экране ВЫГОРАНИЯ батарея обязана быть КРАСНОЙ — этого и просила основательница
+            // («крупная красная батарея вместо программного ВЫГОРАНИЕ!»). В живой игре её красит §4-тревога
+            // (энергия <20 %), а в замороженной позе Update не крутится — зажигаем явно.
+            if (which == SpecialMode.Burnout) DebugPaintAlarm(AlarmScale.Energy);
+            ReflectHealthMarker(which == SpecialMode.Health ? 100f : 64f);
+            ReflectRelationsMarker(55f, redZone: false);
+            _yesPlate.color = Color.white; _noPlate.color = Color.white;
+            ReflectDome(6f, 6f);
+            if (which == SpecialMode.Depression)
+            {
+                // Серая мойка стоит ПОД экраном: игрок уже в «тёмной полосе», ему объясняют, как выйти.
+                _depressionGroup.SetActive(true);
+                _depressionVeil.color = new Color(GrayWash.r, GrayWash.g, GrayWash.b, 0.92f);
+                _depressionGrain.color = new Color(1f, 1f, 1f, 0.06f);
+                _depressionPulse.gameObject.SetActive(true);
+                _depressionPulse.color = new Color(0.90f, 0.90f, 0.97f, 0.42f);
+                _depressionPulse.rectTransform.localScale = Vector3.one * 0.86f;
+                _depHint.text = DepressionBoardHint;
+            }
+            ShowSpecialMode(which);
+            ReflectKeyHints(0f);   // поза замораживает Update — служебные строки заполняем явно
             enabled = false;
+        }
+
+        /// <summary>
+        /// Screenshot pose (r3, п.9): обычный кадр + трубка ПОНИКШАЯ — звонок проспан, спрайт покоя,
+        /// тинт <see cref="PhoneMissedTint"/>, реплика Ведущего в облачке. Сверяется по глазам с позой
+        /// обычного покоя (`phonerest`): пропуск обязан читаться иначе.
+        /// </summary>
+        public void DebugPreviewChildPhoneMissed()
+        {
+            DebugPreviewArcadeShot();
+            _childGroup.SetActive(true);
+            _phoneRinging = false;
+            _phoneMissed = true;
+            _phoneOut = 0.55f;            // «на полпути за край» — момент уезда, а не пустое место
+            _phoneRingClock = 0f;
+            _phoneImg.sprite = _phoneRestSprite;
+            ApplyPhonePose(_phoneOut, 0f);
+            _bubbleTimer.Show(ChildMissedLine);
+            _hostBubble.SetActive(true);
+            _bubbleText.text = ChildMissedLine;
         }
 
         public void DebugPreviewDepression(bool lit = false)
@@ -1417,6 +1755,7 @@ namespace ThanksNoThanks
         public void DebugTick(float dt)
         {
             if (_game == null) return;
+            PumpPendingScreens();   // тот же ПОРЯДОК, что в Update: отложенный экран — до живого тика
             _game.Tick(dt);
             TickNewScale(dt);   // §D-модалка живёт тем же тактом, что и в Update
             if (_game.State != GameState.Playing) return;
@@ -1495,7 +1834,6 @@ namespace ThanksNoThanks
         {
             Input ??= gameObject.AddComponent<ArcadeInputSource>();
             Input.Received += OnInput;
-            Input.Received += OnInputFx;
             SubscribeGame();
             Refresh();
         }
@@ -1505,7 +1843,6 @@ namespace ThanksNoThanks
             if (Input != null)
             {
                 Input.Received -= OnInput;
-                Input.Received -= OnInputFx;
             }
             if (_game != null) UnsubscribeGame();
         }
@@ -1522,6 +1859,7 @@ namespace ThanksNoThanks
             _game.BurnoutEntered += OnBurnoutEntered;
             _game.RelationshipBrokeUp += OnRelationshipBrokeUp;
             _game.ChildOpened += OnChildOpened;
+            _game.ChildCallMissed += OnChildCallMissed;
             _game.CrisisStarted += OnCrisisStarted;
             _game.CrisisBlitzAdvanced += OnCrisisBlitzAdvanced;
             _game.CrisisImpulseStarted += OnCrisisImpulseStarted;
@@ -1541,6 +1879,7 @@ namespace ThanksNoThanks
             _game.BurnoutEntered -= OnBurnoutEntered;
             _game.RelationshipBrokeUp -= OnRelationshipBrokeUp;
             _game.ChildOpened -= OnChildOpened;
+            _game.ChildCallMissed -= OnChildCallMissed;
             _game.CrisisStarted -= OnCrisisStarted;
             _game.CrisisBlitzAdvanced -= OnCrisisBlitzAdvanced;
             _game.CrisisImpulseStarted -= OnCrisisImpulseStarted;
@@ -1583,11 +1922,22 @@ namespace ThanksNoThanks
             // further Confirm passes (harmless during Playing). Cleared next frame in Update.
             if (_dismissedThisFrame && input != GameInput.Confirm) return;
 
+            // …и ЖЁСТЧЕ — после зелёной, снявшей ВХОДНОЙ ЭКРАН спецрежима: там глушится и Confirm тоже.
+            // Причина конкретная: экран депрессии закрывается зелёной, а сразу под ним CONFIRM — это ЛОВЛЯ
+            // ПУЛЬСА. Аккорд «Enter + зелёная» в одном опросе иначе закрыл бы экран и тем же кадром
+            // засчитал/испортил первую ловлю, которую игрок ещё не видел.
+            if (_smClosedThisFrame) return;
+
             // (Раньше здесь глушился ввод на баннер-бите вехи — бит снят вместе с баннером 2026-08-05.)
 
             // §D — модальный экран новой шкалы. Стоит ДО ремапа ДА→CONFIRM: зелёный рычаг здесь обязан
             // остаться инертным (окно не закрывается кнопками-ответами, meeting-revisions §2). Живыми
             // проходят только контролы шкал — их разбирает NewScaleInput.
+            // r3 — ВХОДНОЙ ЭКРАН СПЕЦРЕЖИМА. Стоит ПЕРВЫМ (даже раньше §D-модалки и раньше ремапа ДА→CONFIRM):
+            // это самый верхний слой, и он закрывается ровно зелёной кнопкой. Все прочие вводы под ним
+            // инертны — включая крутилку, которая на паузе иначе печатала бы деньги в замороженном мире.
+            if (_smShowing) { SpecialModeInput(input); return; }
+
             if (_nsShowing) { NewScaleInput(input); return; }
 
             // The arcade cabinet has no dedicated CONFIRM control (founder Gate-2 mapping). FOUNDER DECISION
@@ -1600,10 +1950,6 @@ namespace ThanksNoThanks
             if (input == GameInput.AnswerYes
                 && (_game.State == GameState.Opener || _game.State == GameState.Finale || _tutorialShowing))
                 input = GameInput.Confirm;
-            else if (input == GameInput.AnswerYes && _game.State == GameState.Playing && _game.InDepression)
-                input = GameInput.Confirm;   // depression pulse-catch: the cabinet has no Confirm control
-                                             // during Playing, so GREEN (ДА) is the catch — otherwise the
-                                             // depression mini-game would be unwinnable on the cabinet.
 
             if (_tutorialShowing)
             {
@@ -1655,6 +2001,14 @@ namespace ThanksNoThanks
             // УДАЧНОЕ поднятие отстрелило салют звёзд (revisions §5b/§6).
             if (input == GameInput.ChildPress)
             {
+                // ⚠ В ДЕПРЕССИИ «!» — ЭТО ЛОВЛЯ ПУЛЬСА, а не трубка (решение основательницы 2026-08-08,
+                // п.3г). Уходит в Game напрямую: PressChildPhone здесь врал бы фидбеком (он салютует за
+                // ПОДНЯТЫЙ звонок, а окно звонка под депрессией стоит).
+                if (_game.State == GameState.Playing && _game.InDepression)
+                {
+                    _game.HandleInput(GameInput.ChildPress);
+                    return;
+                }
                 PressChildPhone();
                 return;
             }
@@ -1663,7 +2017,8 @@ namespace ThanksNoThanks
             // returned above), Enter/CONFIRM means «поднять трубку» → CHILD_PRESS. Everywhere else it stays
             // CONFIRM (start the game / restart from the finale / dismiss a hint), so the child mechanic
             // never steals those. Game itself only honours the press inside the open call window. NOT during
-            // depression: there CONFIRM is the pulse catch (Game routes it), so the child press must defer.
+            // depression: там ловлю ведёт «!» (кнопка кабинета), а dev-Enter не ловит и трубку не поднимает —
+            // окно звонка под депрессией всё равно заморожено.
             if (input == GameInput.Confirm
                 && _game.State == GameState.Playing
                 && _game.ChildOpen
@@ -1678,7 +2033,36 @@ namespace ThanksNoThanks
             // же рычаги ГЛУШАТ или ПЕРЕНАЗНАЧАЮТ (блиц/импульс/ловля), и «нажал, но механика отвергла»
             // калибровкой не является: иначе окно §6 открывалось бы без работы игрока и рост шкалы
             // КАРТОЧКОЙ внутри окна выдавал бы ложный салют.
-            if (_game.HandleInput(input)) NoteScaleInput(input);
+            // ПАНЧ ПЛАШКИ — ТОЛЬКО НА ПРИНЯТЫЙ ОТВЕТ (r3, п.4). До 2026-08-07 анимация жила своей веткой
+            // (OnInputFx) и играла на КАЖДОЕ нажатие рычага: в депрессии, на входных экранах, под
+            // подсказкой и на BLOCK$-блокировке плашка бодро дёргалась, хотя игра ввод глушила или
+            // пропускала карточку без последствий. Игрок читал это как «нажалось», а ничего не
+            // происходило. Теперь панч — ФУНКЦИЯ ПРИНЯТИЯ: та же accepted-семантика (r2), по которой
+            // открывается §6-окно. Все не-геймплейные состояния сюда просто не доходят (вернулись выше),
+            // а BLOCK$-блокировка доходит, но ответом не является — карточка пропускается без Δ.
+            bool answer = input == GameInput.AnswerYes || input == GameInput.AnswerNo;
+            bool blockedSkip = answer && _game.CurrentCardBlocked;
+            if (_game.HandleInput(input))
+            {
+                // ⚠ BLOCK$-ПРОПУСК — НЕ РАБОТА ПО ШКАЛЕ (находка ревью r3, MAJOR). Game.HandleInput
+                // возвращает true и на ЗАБЛОКИРОВАННОЙ карточке — ход состоялся, карточка пропущена, — но
+                // ВЫБОРА не было: ни Δ, ни некролога, ни записи ответа. А §6-окно здоровья открывает
+                // именно выбор («лечиться можно только выбором», см. NoteScaleInput). Отметить его здесь
+                // значило бы «недавно чинил здоровье» без единой попытки лечения: следующая карточка,
+                // вытянувшая здоровье из тревоги, выдала бы САЛЮТ за чужую работу. Поэтому пропуск не
+                // отмечает ввод и не панчит плашку — он не ответ. Accepted-семантика r2 доведена до конца.
+                if (blockedSkip) return;
+                NoteScaleInput(input);
+                if (answer) PunchAnswerPlate(input);
+            }
+        }
+
+        /// <summary>Единственная точка, откуда играется панч плашки ответа (см. комментарий в OnInput).</summary>
+        private void PunchAnswerPlate(GameInput input)
+        {
+            if (!isActiveAndEnabled) return;
+            if (input == GameInput.AnswerYes) StartCoroutine(PunchPlate(_yesRect, YesTilt));
+            else if (input == GameInput.AnswerNo) StartCoroutine(PunchPlate(_noRect, NoTilt));
         }
 
         /// <summary>
@@ -1699,6 +2083,8 @@ namespace ThanksNoThanks
             }
             CloseNewScale(reward: false);   // §D: выход из игры прямо с модалки — тихо, без салюта
             _nsPending = NewScale.None;     // …и отложенный OPEN выход из жизни тоже снимает
+            CloseSpecialMode();             // …ровно так же — входной экран спецрежима
+            _smPending = SpecialMode.None;
             _bubbleTimer.Hide();
             _breakupTimer.Hide();
             if (_game != null)
@@ -1725,9 +2111,11 @@ namespace ThanksNoThanks
         private void Update()
         {
             _dismissedThisFrame = false;         // fresh frame → the same-frame dismiss-swallow guard clears
+            _smClosedThisFrame = false;          // …и его строгий брат с входного экрана спецрежима
             SpinBackground(Time.deltaTime);      // ambient §7 ray spin — runs on every screen, pause included
             if (_game == null) return;
             _crankCap.Advance(Time.deltaTime);   // deterministic clock for the income cap
+            PumpPendingScreens();                // ⚠ ДО тика — см. комментарий у самого метода
             _game.Tick(Time.deltaTime);
             TickNewScale(Time.deltaTime);        // §D: условие выхода модалки → фейд → салют → снятие паузы
             if (_game.State == GameState.Playing && _game.InCrisis)
@@ -1744,7 +2132,24 @@ namespace ThanksNoThanks
                 ReflectEnergyLevel(s.Energy);
                 ReflectHealthMarker(s.Health);
                 ReflectRelationsMarker(s.Relationships, _game.RelationshipRedZone);
-                if (_burnoutPlate.activeSelf != _game.Burnout) _burnoutPlate.SetActive(_game.Burnout);
+                // ⚠ ПЛАШКА И ТУТОРИАЛ ВЫГОРАНИЯ — ВЗАИМОИСКЛЮЧАЮЩИ (находка ревью r3, MAJOR). Плашка —
+                // подача ПОВТОРНОГО выгорания (п.5б), а ПЕРВОЕ за жизнь объясняет входной экран с паузой.
+                // Без гейта первый раз показывал ОБА разом: под затемнением экрана в полосе HUD висела ещё
+                // и короткая плашка — второе, лишнее сообщение о том же самом. Ждущий очереди экран
+                // (`_smPending`) считается так же: он поднимется этим же/следующим кадром.
+                // …и ВТОРОЕ условие — ЗВОНОК (дизайн-скептик, раунд 2). Плашка переехала под батарею, про
+                // которую она и говорит, а левая колонка ниже батареи — это дорожка выезжающей трубки
+                // (`PhoneRingRect`: её рисунок идёт с y 330 и до x 350). Свободного коридора там ровно
+                // 55 px — плашке с двумя строками в нём не встать. Разводим их ВРЕМЕНЕМ, а не пикселями:
+                // пока трубка на экране, колонка принадлежит ЕЙ (звонок транзиентен и требует ответа),
+                // плашка возвращается, как только трубка уехала. Инвариант «плашка никогда не заслоняет
+                // трубку» держится буквально, а состояние всё это время читается красной §4-тревогой
+                // батареи (в выгорании энергия ≤10 %, тревога горит по определению).
+                bool burnPlate = _game.Burnout
+                                 && !(_smShowing && _smWhich == SpecialMode.Burnout)
+                                 && _smPending != SpecialMode.Burnout
+                                 && _phoneOut <= 0.001f;
+                if (_burnoutPlate.activeSelf != burnPlate) _burnoutPlate.SetActive(burnPlate);
                 // S10: while the current card is BLOCK$-blocked, mute the two answer plates (the card veil
                 // dims the marquee, this dims the plates) so the whole board reads «недоступно».
                 var plateTint = _game.CurrentCardBlocked ? PlateMute : Color.white;
@@ -1929,11 +2334,13 @@ namespace ThanksNoThanks
         private void SyncPause()
         {
             if (_game == null) return;
-            _game.Paused = _tutorialShowing || _nsShowing;
+            // Входной экран спецрежима (r3) добавлен в ту же ОДНУ заморозку: под ним стоит всё, включая
+            // кризисный таймер блица, планировщик пульса депрессии и дренаж энергии выгорания.
+            _game.Paused = _tutorialShowing || _nsShowing || _smShowing;
             // §D: под модальным экраном новой шкалы ВРЕМЯ стоит так же, как под подсказкой (дренажи, возраст,
             // таймер карточки), но КОНТРОЛЫ ШКАЛ живые — иначе условие выхода недостижимо. Если поверх
             // модалки оказалась S5-подсказка (она глушит ввод целиком), приоритет у неё.
-            _game.PausedInputsLive = _nsShowing && !_tutorialShowing;
+            _game.PausedInputsLive = _nsShowing && !_tutorialShowing && !_smShowing;
         }
 
         /// <summary>
@@ -1948,7 +2355,8 @@ namespace ThanksNoThanks
         private void ReflectDomeUnderModal()
         {
             if (_cardRoot == null) return;
-            bool dome = !_nsShowing;
+            // …и то же самое под входным экраном спецрежима: под ним время тоже стоит.
+            bool dome = !_nsShowing && !_smShowing;
             if (_timerGroup != null && _timerGroup.activeSelf != dome) _timerGroup.SetActive(dome);
         }
 
@@ -1968,7 +2376,13 @@ namespace ThanksNoThanks
             {
                 // ЗАКРЫТАЯ модалка не считает вообще ничего: её строка пуста по определению, и подмешивать
                 // сюда последнюю шкалу (а тем более собирать строку) — работа в пустоту каждый кадр.
-                string line = !_nsShowing ? "" : KeyHintLine(ControlOf(_nsWhich), ref _nsHintCache);
+                // Одна строка на два окна одного оверлея: §D-модалка называет контрол СВОЕЙ шкалы,
+                // входной экран спецрежима — контрол СВОЕГО режима (у здоровья и блица его нет — там
+                // строка пуста по определению).
+                string line =
+                    _nsShowing ? KeyHintLine(ControlOf(_nsWhich), ref _nsHintCache)
+                    : _smShowing ? KeyHintLine(ControlOf(_smWhich), ref _nsHintCache)
+                    : "";
                 if (_nsHintLine.text != line) _nsHintLine.text = line;
                 if (_nsHintLine.color != HintInk) _nsHintLine.color = HintInk;
             }
@@ -1977,6 +2391,19 @@ namespace ThanksNoThanks
             {
                 string line = _tutorialShowing ? KeyHintLine(_tutHintControl, ref _tutHintCache) : "";
                 if (_tutHintLine.text != line) _tutHintLine.text = line;
+            }
+
+            // r3 (п.3в): НА САМОМ экране депрессии тоже написано, ЧЕМ играть — и клавиша при эмуляции.
+            // До сих пор там висело безадресное «нажми в такт пульсу»: игрок видел ритм, но не знал, чем
+            // по нему бить. Контрол — из той же константы DepressionCatchControlName, что и текст входного
+            // экрана (п.3г: смена контрола = правка одной строки).
+            if (_depKeyHint != null)
+            {
+                bool dep = _game != null && _game.State == GameState.Playing && _game.InDepression;
+                string line = dep ? KeyHintLine(ArcadeControlId.BangButton, ref _depHintCache) : "";
+                if (_depKeyHint.text != line) _depKeyHint.text = line;
+                if (_depKeyHint.gameObject.activeSelf != (dep && line.Length > 0))
+                    _depKeyHint.gameObject.SetActive(dep && line.Length > 0);
             }
         }
 
@@ -2050,7 +2477,15 @@ namespace ThanksNoThanks
         // Crisis entered (CR00): the Ведущий ANNOUNCES the blitz in his speech bubble. It used to be a
         // blocking gold rubric band; the band (and its beat) went with the milestone banners on 2026-08-05,
         // and the bubble is the voice that stayed.
-        private void OnCrisisStarted() => _bubbleTimer.Show(HostContent.CrisisAnnounce);
+        // r3: кризис больше не стартует «без объяснений» — объявление уходит на ВХОДНОЙ ЭКРАН блица
+        // (рассказ = то же самое объявление, задача = правила блица), и кризисный таймер стоит, пока экран
+        // висит (Game.Paused обрывает Tick до TickCrisis). Облачко при этом тоже показываем: экран уйдёт по
+        // зелёной, и голос Ведущего останется на первой мысли.
+        private void OnCrisisStarted()
+        {
+            _bubbleTimer.Show(HostContent.CrisisAnnounce);
+            ShowSpecialMode(SpecialMode.Blitz);
+        }
 
         // Each new blitz thought: shout a hurrying host-nag line in the speech bubble (S3).
         // ПЕРВАЯ мысль — исключение: на ней в облачке ещё висит объявление входа в кризис
@@ -2078,7 +2513,8 @@ namespace ThanksNoThanks
                 Quaternion.Euler(0f, 0f, Mathf.Lerp(PhoneRestTilt, PhoneRingTilt, p) + wobble);
             // …и ЯРКОСТЬ по тому же p: спящая трубка притушена (PhoneRestTint), звонящая горит в полную
             // (Color.white). Один и тот же лерп, поэтому выезд/уезд плавно разгорается и гаснет за 0.3 с.
-            _phoneImg.color = Color.Lerp(PhoneRestTint, Color.white, p);
+            // r3 (п.9): если звонок ПРОСПАЛИ, покой берётся ПОНИКШИЙ — трубка уезжает заметно темнее.
+            _phoneImg.color = Color.Lerp(_phoneMissed ? PhoneMissedTint : PhoneRestTint, Color.white, p);
         }
 
         // Трубка ребёнка (§5b): виджет показан ровно пока Game.ChildOpen (не по возрасту — открывается на
@@ -2091,22 +2527,26 @@ namespace ThanksNoThanks
         {
             if (_childGroup == null) return;
             bool open = _game.ChildOpen;
-            // ВЫГОРАНИЕ (S7): плашка — полноэкранный захват, нарисованный ПОВЕРХ трубки, поэтому на время
-            // выгорания трубку прячем совсем (как кризис прячет её в RenderCrisis). Game на то же время
-            // морозит окно звонка (Game.ChildCallFrozen), так что пропусков «вслепую» не набегает; поза и
-            // фаза качания НЕ сбрасываются — по выходу трубка возвращается ровно там, где замерла, и
-            // звонок доигрывает свой остаток.
-            bool visible = open && !_game.Burnout;
+            // ⚠ ВЫГОРАНИЕ БОЛЬШЕ НЕ ПРЯЧЕТ ТРУБКУ (r3, 2026-08-07). Прятали её ровно потому, что плашка
+            // S7 была полноэкранным захватом поверх доски; захвата больше нет — повторное выгорание
+            // показывает КОРОТКУЮ плашку у батареи, накрывать трубку нечем, и Game.ChildCallFrozen
+            // соответственно тоже перестал смотреть на Burnout. Кризис по-прежнему убирает трубку сам
+            // (RenderCrisis), а входной экран спецрежима ставит обычную паузу — там трубка честно замирает.
+            bool visible = open;
             if (_childGroup.activeSelf != visible) _childGroup.SetActive(visible);
             if (!open)
             {
                 _phoneOut = 0f; _phoneRingClock = 0f; _phoneRinging = false;
+                _phoneMissed = false;
                 return;
             }
-            if (!visible) return;   // выгорание: состояние звонка сохраняется как есть, часы трубки стоят
 
             bool ringing = _game.ChildFlashing;
-            if (ringing && !_phoneRinging) _phoneRingClock = 0f;   // ФРОНТ звонка → фаза качания с нуля
+            if (ringing && !_phoneRinging)
+            {
+                _phoneRingClock = 0f;   // ФРОНТ звонка → фаза качания с нуля…
+                _phoneMissed = false;   // …и новый звонок стирает «поникшесть» прошлого
+            }
             _phoneRinging = ringing;
 
             var want = ringing ? _phoneRingSprite : _phoneRestSprite;
@@ -2137,7 +2577,19 @@ namespace ThanksNoThanks
         {
             bool wasRinging = _game.ChildFlashing;
             _game.HandleInput(GameInput.ChildPress);
-            if (wasRinging && !_game.ChildFlashing) StarBurst();
+            if (wasRinging && !_game.ChildFlashing) { _phoneMissed = false; StarBurst(); }
+        }
+
+        /// <summary>
+        /// r3 (п.9): окно звонка закрылось НЕПОДНЯТЫМ. Успех уже салютует звёздами — у пропуска до сих пор
+        /// не было НИКАКОГО отклика, и игрок не понимал, что вообще что-то потерял. Теперь пропуск
+        /// сообщается двумя средствами того же языка: трубка уезжает ПОНИКШЕЙ (спрайт покоя + тинт
+        /// <see cref="PhoneMissedTint"/>, темнее обычного покоя) и Ведущий это озвучивает.
+        /// </summary>
+        private void OnChildCallMissed()
+        {
+            _phoneMissed = true;
+            _bubbleTimer.Show(ChildMissedLine);
         }
 
         // Transient «РАССТАЛИСЬ» plate: advance its own ~2s clock and mirror visibility (only while
@@ -2467,87 +2919,6 @@ namespace ThanksNoThanks
             // deck's longest is 67 chars) otherwise rendered too big and spilled off the cream field.
             _cardText.verticalOverflow = VerticalWrapMode.Truncate;
 
-            // ---- BLOCK$ (S10): dim veil over the card + red block-tag banner (hidden by default) ----
-            // No separate dim veil: the card is dimmed by tinting _cardFrame directly (SetCardBlockedDim) so
-            // the darkening follows the marquee's exact rounded silhouette — a rounded-rect overlay still showed
-            // straight edges cutting across the sunburst rays (design-gate S10 fix).
-            // Rounded red banner (bar-track 9-slice tinted red, navy-outlined white text) low on the card so
-            // the dimmed «Пора подлечиться!» question still reads above it (S10). One sentence-case line.
-            // ЧЁРНЫЙ KEYLINE (долг гейта 2026-08-05): весь арт-пак несёт чёрный кант, и красный баннер с
-            // чипом цены были ЕДИНСТВЕННЫМИ фигурами экрана без него — голая заливка упиралась прямо в
-            // кремовое поле карточки. Кант строится тем же приёмом, что кант тревоги шкал: отдельный
-            // `bar-track`, покрашенный в INK, СОСЕДОМ и НИЖЕ (меньший siblingIndex) — он торчит кольцом
-            // из-под плашки на BlockKeylineInk со всех сторон. Толщина 4 px = верх коридора 3–4 из
-            // задания: у `bar-track` край мягкий (~1 px AA с каждой стороны), и на 3 px в кадре остаётся
-            // ОДНА сплошная чёрная строка — вдвое тоньше собственного keyline арта; на 4 их две.
-            var blockBannerInkImg = NewSprite("BlockBannerInk", _cardRoot, Sprite("bar-track"));
-            blockBannerInkImg.type = Image.Type.Sliced;
-            blockBannerInkImg.color = OnBarTrack(Ink);
-            _blockBannerInk = blockBannerInkImg.gameObject;
-            Anchor(blockBannerInkImg.rectTransform, new Vector2(0.5f, 0.2784f),
-                new Vector2(900 + 2f * BlockKeylineInk, 110 + 2f * BlockKeylineInk));
-
-            var blockBannerImg = NewSprite("BlockBanner", _cardRoot, Sprite("bar-track"));
-            blockBannerImg.type = Image.Type.Sliced;
-            blockBannerImg.color = new Color(0.90f, 0.18f, 0.14f);   // punchy saturated red (S10 banner)
-            _blockBanner = blockBannerImg.gameObject;
-            // Low on the taller art-pack plate but still INSIDE its cream field (screen y≈705..815 of the
-            // field's 286..892) — the old «just below the card» anchor now lands on the answer plates.
-            Anchor(blockBannerImg.rectTransform, new Vector2(0.5f, 0.2784f), new Vector2(900, 110));
-            var blockTxt = NewText("BlockText", _blockBanner.transform,
-                "Как жаль, у вас нет денег на это!", 40, TextAnchor.MiddleCenter, Color.white, _display);
-            blockTxt.horizontalOverflow = HorizontalWrapMode.Overflow;   // single line, best-fit shrinks to width
-            Inset(blockTxt.rectTransform, 40f);
-            blockTxt.resizeTextForBestFit = true; blockTxt.resizeTextMinSize = 20; blockTxt.resizeTextMaxSize = 44;
-            DisplayFx(blockTxt);
-            SetBlockBannerVisible(false);
-
-            // ---- BLOCK$ price sub-line (S10): the required amount, on any BLOCK$-priced card ----
-            // A dark rounded plate (bar-track 9-slice, tinted Ink) BEHIND the text, sat just BELOW the
-            // card so it clears the bottom bulb ring — the S10 dark block-tag: light text on dark, never
-            // the forbidden «gold on yellow». Added AFTER the veil so it reads in the blocked state too.
-            // Plate is created first (lower sibling index → drawn behind the text). Both are sized to the
-            // text and shown/hidden together in ApplyPriceLabel.
-            // «СТОИТ N ₽» (gold) when affordable · «НУЖНО N ₽» (light) when blocked.
-            // Тот же чёрный keyline, что у баннера (см. блок выше): сосед НИЖЕ чипа, размер = чип + 2×кант,
-            // пересчитывается вместе с чипом в ApplyPriceLabel (чип растёт по тексту).
-            _cardPriceInk = NewSprite("CardPriceInk", _cardRoot, Sprite("bar-track"));
-            _cardPriceInk.type = Image.Type.Sliced;
-            _cardPriceInk.color = OnBarTrack(Ink);
-            Anchor(_cardPriceInk.rectTransform, new Vector2(0.5f, 0.1604f),
-                new Vector2(360 + 2f * BlockKeylineInk, 78 + 2f * BlockKeylineInk));
-
-            _cardPricePlate = NewSprite("CardPricePlate", _cardRoot, Sprite("bar-track"));
-            _cardPricePlate.type = Image.Type.Sliced;
-            // ⚠ Заливка чипа — DEEP COBALT, а не INK. Чип был закрашен ровно тем же INK, что и его
-            // чёрный keyline, и кант получался НЕВИДИМЫМ (замер по кадру: и заливка, и кант рисовались
-            // как [10,10,27] — «обводка есть, а глазом её нет»). Тёмная плашка S10 при этом сохраняется:
-            // тёмный синий тег со светлым текстом, ровно тот же тон, каким в проекте уже нарисованы
-            // тёмные подложки (CobaltDeep), только теперь с настоящим чёрным кантом.
-            // ЦВЕТ ЧИПА, три числа — чтобы их больше не путали (Codex MINOR 2026-08-05):
-            //   • сырой тинт Image.color  = #22409C — токен, ПОДЕЛЁННЫЙ на заливку спрайта (OnBarTrack);
-            //   • рендер по модели sRGB   = #1F3A96 — тинт × заливка `bar-track`, т.е. РОВНО токен
-            //     CobaltDeep: OnBarTrack делит на заливку, uGUI умножает обратно (это и пинит тест);
-            //   • пиксель на кадре        = #1D3996 (замер по `inc7-blocked.png`, сплошная середина чипа).
-            // Расхождение ≤2/255 — не ошибка тинта: проект рендерит в ЛИНЕЙНОМ цветовом пространстве
-            // (ProjectSettings m_ActiveColorSpace: 1), а модель теста перемножает в sRGB. Тот же сдвиг
-            // ≤2/255 виден на красном баннере (модель #D02A22 → кадр #D02920) и на всех прочих
-            // OnBarTrack-плашках, поэтому тест пинит МОДЕЛЬ, а фактический пиксель задокументирован тут.
-            _cardPricePlate.color = OnBarTrack(CobaltDeep);
-            // Bottom of the cream field (screen y≈850), under the block banner — the art-pack plate reaches
-            // y≈972, so the old below-the-card anchor would now sit on the answer plates.
-            Anchor(_cardPricePlate.rectTransform, new Vector2(0.5f, 0.1604f), new Vector2(360, 78));
-            _cardPriceText = NewText("CardPrice", _cardRoot, "", 40, TextAnchor.MiddleCenter, Bulb, _body);
-            Anchor(_cardPriceText.rectTransform, new Vector2(0.5f, 0.1604f), new Vector2(820, 78));
-            // ONE line by design («цена N ₽»). ApplyPriceLabel sizes the rect to preferredWidth, and font
-            // metrics round differently at different canvas scales — with Wrap a half-pixel shortfall threw
-            // the «₽» onto a second line that hung off the dark plate. Overflow makes that unreachable.
-            _cardPriceText.horizontalOverflow = HorizontalWrapMode.Overflow;
-            DisplayFx(_cardPriceText);
-            _cardPriceInk.gameObject.SetActive(false);
-            _cardPricePlate.gameObject.SetActive(false);
-            _cardPriceText.gameObject.SetActive(false);
-
             // ---- Answer plates (bottom) — RED «СПАСИБО, НЕ НАДО» LEFT, GREEN «ДА» RIGHT ----
             // Sides/centres/tilts are canon from meeting-revisions §9 + build-spec §B (boxes 165,735,615,275
             // and 1354,732,385,278), i.e. exactly the cabinet levers: left lever = НЕ НАДО (RedButton →
@@ -2588,29 +2959,156 @@ namespace ThanksNoThanks
             _noPlateText = noText;
             UseBakedPlates();   // hides both overlay labels — ordinary play shows the baked art alone
 
+            // ---- BLOCK$ (S10 + r3 п.6): БАННЕР И ЧИП ЦЕНЫ — ПОВЕРХ ПЛАШЕК ОТВЕТА -------------------
+            // ⚠ Z-ПОРЯДОК ИСПРАВЛЕН 2026-08-07 (живой плейтест: «баннер и цена уезжают ПОД кнопки»).
+            // Обе фигуры были детьми `_cardRoot`, а плашки ответа — соседями ПОЗЖЕ него, поэтому кнопки
+            // рисовались поверх: баннер «нет денег» и чип цены оказывались частично срезаны ровно в тот
+            // момент, когда их и надо читать. Лечится не сдвигом (карточка и плашки перекрываются по
+            // геометрии — это канон композиции), а СЛОЕМ: обе фигуры переехали в собственный контейнер,
+            // созданный ПОСЛЕ обеих плашек, и садятся теперь абсолютными боксами (BlockBannerRect /
+            // CardPriceRect — те же экранные координаты, что давали прежние доли карточки: 705…815 и
+            // 811…889 внутри кремового поля).
+            // Плата за это одна и осознанная: баннер больше не едет вместе с анимацией въезда карточки
+            // (CardEntry масштабирует `_cardRoot`) — он просто появляется на своём месте. Это состояние
+            // доски, а не часть картинки карточки.
+            _blockOverlay = NewGroup("BlockOverlay", _gamePanel.transform);
+            // No separate dim veil: the card is dimmed by tinting _cardFrame directly (SetCardBlockedDim) so
+            // the darkening follows the marquee's exact rounded silhouette — a rounded-rect overlay still showed
+            // straight edges cutting across the sunburst rays (design-gate S10 fix).
+            // Rounded red banner (bar-track 9-slice tinted red, navy-outlined white text) low on the card so
+            // the dimmed «Пора подлечиться!» question still reads above it (S10). One sentence-case line.
+            // ЧЁРНЫЙ KEYLINE (долг гейта 2026-08-05): весь арт-пак несёт чёрный кант, и красный баннер с
+            // чипом цены были ЕДИНСТВЕННЫМИ фигурами экрана без него — голая заливка упиралась прямо в
+            // кремовое поле карточки. Кант строится тем же приёмом, что кант тревоги шкал: отдельный
+            // `bar-track`, покрашенный в INK, СОСЕДОМ и НИЖЕ (меньший siblingIndex) — он торчит кольцом
+            // из-под плашки на BlockKeylineInk со всех сторон. Толщина 4 px = верх коридора 3–4 из
+            // задания: у `bar-track` край мягкий (~1 px AA с каждой стороны), и на 3 px в кадре остаётся
+            // ОДНА сплошная чёрная строка — вдвое тоньше собственного keyline арта; на 4 их две.
+            var blockBannerInkImg = NewSprite("BlockBannerInk", _blockOverlay.transform, Sprite("bar-track"));
+            blockBannerInkImg.type = Image.Type.Sliced;
+            blockBannerInkImg.color = OnBarTrack(Ink);
+            _blockBannerInk = blockBannerInkImg.gameObject;
+            AnchorPx(blockBannerInkImg.rectTransform, BlockBannerRect.x, BlockBannerRect.y,
+                BlockBannerRect.z + 2f * BlockKeylineInk, BlockBannerRect.w + 2f * BlockKeylineInk);
+
+            var blockBannerImg = NewSprite("BlockBanner", _blockOverlay.transform, Sprite("bar-track"));
+            blockBannerImg.type = Image.Type.Sliced;
+            blockBannerImg.color = new Color(0.90f, 0.18f, 0.14f);   // punchy saturated red (S10 banner)
+            _blockBanner = blockBannerImg.gameObject;
+            // Low on the taller art-pack plate but still INSIDE its cream field (screen y≈705..815 of the
+            // field's 286..892) — the old «just below the card» anchor now lands on the answer plates.
+            AnchorPx(blockBannerImg.rectTransform, BlockBannerRect.x, BlockBannerRect.y,
+                BlockBannerRect.z, BlockBannerRect.w);
+            var blockTxt = NewText("BlockText", _blockBanner.transform,
+                "Как жаль, у вас нет денег на это!", 40, TextAnchor.MiddleCenter, Color.white, _display);
+            blockTxt.horizontalOverflow = HorizontalWrapMode.Overflow;   // single line, best-fit shrinks to width
+            Inset(blockTxt.rectTransform, 40f);
+            blockTxt.resizeTextForBestFit = true; blockTxt.resizeTextMinSize = 20; blockTxt.resizeTextMaxSize = 44;
+            DisplayFx(blockTxt);
+            SetBlockBannerVisible(false);
+
+            // ---- BLOCK$ price sub-line (S10): the required amount, on any BLOCK$-priced card ----
+            // A dark rounded plate (bar-track 9-slice, tinted Ink) BEHIND the text, sat just BELOW the
+            // card so it clears the bottom bulb ring — the S10 dark block-tag: light text on dark, never
+            // the forbidden «gold on yellow». Added AFTER the veil so it reads in the blocked state too.
+            // Plate is created first (lower sibling index → drawn behind the text). Both are sized to the
+            // text and shown/hidden together in ApplyPriceLabel.
+            // «СТОИТ N ₽» (gold) when affordable · «НУЖНО N ₽» (light) when blocked.
+            // Тот же чёрный keyline, что у баннера (см. блок выше): сосед НИЖЕ чипа, размер = чип + 2×кант,
+            // пересчитывается вместе с чипом в ApplyPriceLabel (чип растёт по тексту).
+            _cardPriceInk = NewSprite("CardPriceInk", _blockOverlay.transform, Sprite("bar-track"));
+            _cardPriceInk.type = Image.Type.Sliced;
+            _cardPriceInk.color = OnBarTrack(Ink);
+            AnchorPx(_cardPriceInk.rectTransform, CardPriceRect.x, CardPriceRect.y,
+                CardPriceRect.z + 2f * BlockKeylineInk, CardPriceRect.w + 2f * BlockKeylineInk);
+
+            _cardPricePlate = NewSprite("CardPricePlate", _blockOverlay.transform, Sprite("bar-track"));
+            _cardPricePlate.type = Image.Type.Sliced;
+            // ⚠ Заливка чипа — DEEP COBALT, а не INK. Чип был закрашен ровно тем же INK, что и его
+            // чёрный keyline, и кант получался НЕВИДИМЫМ (замер по кадру: и заливка, и кант рисовались
+            // как [10,10,27] — «обводка есть, а глазом её нет»). Тёмная плашка S10 при этом сохраняется:
+            // тёмный синий тег со светлым текстом, ровно тот же тон, каким в проекте уже нарисованы
+            // тёмные подложки (CobaltDeep), только теперь с настоящим чёрным кантом.
+            // ЦВЕТ ЧИПА, три числа — чтобы их больше не путали (Codex MINOR 2026-08-05):
+            //   • сырой тинт Image.color  = #22409C — токен, ПОДЕЛЁННЫЙ на заливку спрайта (OnBarTrack);
+            //   • рендер по модели sRGB   = #1F3A96 — тинт × заливка `bar-track`, т.е. РОВНО токен
+            //     CobaltDeep: OnBarTrack делит на заливку, uGUI умножает обратно (это и пинит тест);
+            //   • пиксель на кадре        = #1D3996 (замер по `inc7-blocked.png`, сплошная середина чипа).
+            // Расхождение ≤2/255 — не ошибка тинта: проект рендерит в ЛИНЕЙНОМ цветовом пространстве
+            // (ProjectSettings m_ActiveColorSpace: 1), а модель теста перемножает в sRGB. Тот же сдвиг
+            // ≤2/255 виден на красном баннере (модель #D02A22 → кадр #D02920) и на всех прочих
+            // OnBarTrack-плашках, поэтому тест пинит МОДЕЛЬ, а фактический пиксель задокументирован тут.
+            _cardPricePlate.color = OnBarTrack(CobaltDeep);
+            // Bottom of the cream field (screen y≈850), under the block banner — the art-pack plate reaches
+            // y≈972, so the old below-the-card anchor would now sit on the answer plates.
+            AnchorPx(_cardPricePlate.rectTransform, CardPriceRect.x, CardPriceRect.y,
+                CardPriceRect.z, CardPriceRect.w);
+            _cardPriceText = NewText("CardPrice", _blockOverlay.transform, "", 40, TextAnchor.MiddleCenter, Bulb, _body);
+            AnchorPx(_cardPriceText.rectTransform, CardPriceRect.x, CardPriceRect.y, 820f, CardPriceRect.w);
+            // ONE line by design («цена N ₽»). ApplyPriceLabel sizes the rect to preferredWidth, and font
+            // metrics round differently at different canvas scales — with Wrap a half-pixel shortfall threw
+            // the «₽» onto a second line that hung off the dark plate. Overflow makes that unreachable.
+            _cardPriceText.horizontalOverflow = HorizontalWrapMode.Overflow;
+            // ⚠ БЕЗ DisplayFx (дизайн-скептик, раунд 2: «под чипом проступает вторая серая подпись цены»).
+            // Причина двоения — не второй объект, а САМ эффект: Unity применяет Outline и Shadow ПОСЛЕДОВАТЕЛЬНО
+            // к одному мешу, поэтому Shadow дублирует УЖЕ раздутую обводкой копию, и на кегле 40 она читается
+            // отдельной размытой строкой, торчащей из-под чипа. Здесь эффект и не нужен: чип — ТЁМНАЯ плашка
+            // (CobaltDeep) со светлым текстом, контраст даёт сама подложка. Ровно та же причина, по которой
+            // без DisplayFx живут вопрос карточки (чернила по крему) и обе строки короткой плашки выгорания.
+            _cardPriceInk.gameObject.SetActive(false);
+            _cardPricePlate.gameObject.SetActive(false);
+            _cardPriceText.gameObject.SetActive(false);
+
+
             // ---- Трубка ребёнка (§5b): слой 5 «оверлеи» — создаётся ПОСЛЕ карточки и плашек ответа ----
             BuildChildPhone();
 
-            // ---- Burnout state (S7): full-screen dim-cobalt sunburst takeover, shown while Game.Burnout ----
-            // An OPAQUE deep-cobalt backing hides the show; a cobalt-tinted sunburst sprite over it paints the
-            // muted two-tone cobalt rays of the S7 mockup. Big yellow «ВЫГОРАНИЕ!» (red kant) centred + a
-            // white subtitle below, both fully on-screen.
-            var burnBack = NewSolid("BurnoutPlate", _gamePanel.transform, CobaltDeep);
-            Stretch(burnBack.rectTransform);
-            _burnoutPlate = burnBack.gameObject;
-            var burnRays = NewSprite("BurnoutRays", _burnoutPlate.transform, Sprite("sunburst-bg"));
-            Stretch(burnRays.rectTransform);
-            burnRays.color = new Color(Cobalt.r, Cobalt.g, Cobalt.b, 0.45f);   // lighter-cobalt rays over deep cobalt
-            var burnoutTxt = NewText("BurnoutText", _burnoutPlate.transform,
-                "ВЫГОРАНИЕ!", 150, TextAnchor.MiddleCenter, Energy, _display);
-            Anchor(burnoutTxt.rectTransform, new Vector2(0.5f, 0.52f), new Vector2(1560, 260));
-            burnoutTxt.resizeTextForBestFit = true; burnoutTxt.resizeTextMinSize = 60; burnoutTxt.resizeTextMaxSize = 130;
-            BurnoutTitleFx(burnoutTxt);
-            var burnoutSub = NewText("BurnoutSubtitle", _burnoutPlate.transform,
-                "крутите деньги — идёт туго • зажмите датчик высоты", 40, TextAnchor.MiddleCenter, Color.white, _display);
-            Anchor(burnoutSub.rectTransform, new Vector2(0.5f, 0.34f), new Vector2(1500, 96));
-            burnoutSub.resizeTextForBestFit = true; burnoutSub.resizeTextMinSize = 24; burnoutSub.resizeTextMaxSize = 44;
-            DisplayFx(burnoutSub);
+            // ---- Выгорание, ПОВТОРНОЕ: КОРОТКАЯ ПЛАШКА БЕЗ БЛОКИРОВКИ (r3, п.5б) --------------------
+            // ⚠ Полноэкранный захват S7 (непрозрачная кобальтовая подложка + лучи + «ВЫГОРАНИЕ!» на пол-
+            // экрана) СНЯТ 2026-08-07. Он был двумя проблемами сразу: программной подачей вместо арт-пака
+            // («крупная красная батарея вместо программного ВЫГОРАНИЕ!» — основательница) и глухой
+            // шторой поверх доски, из-за которой приходилось прятать трубку ребёнка и морозить звонок
+            // (Game.ChildCallFrozen), иначе набегали НЕВИДИМЫЕ пропуски.
+            // Теперь: ПЕРВОЕ выгорание объясняет входной экран спецрежима (с паузой дренажа), а каждое
+            // следующее — вот эта короткая плашка ПОД батареей, на своём месте, ничего не накрывающая.
+            // Собрана тем же блоком, что и плашка «РАССТАЛИСЬ»: `bar-track` + кант, чтобы жить в арт-паке.
+            // Контейнер, чтобы кант и плашка гасли одним SetActive и кант лежал СОСЕДОМ НИЖЕ (ребёнок
+            // рисуется поверх родителя, поэтому кант не может быть ребёнком плашки).
+            _burnoutPlate = NewGroup("BurnoutPlate", _gamePanel.transform);
+            var burnEdge = NewSprite("BurnoutPlateEdge", _burnoutPlate.transform, Sprite("bar-track"));
+            burnEdge.type = Image.Type.Sliced;
+            burnEdge.color = OnBarTrack(Ink);
+            AnchorPx(burnEdge.rectTransform, BurnoutPlateRect.x, BurnoutPlateRect.y,
+                BurnoutPlateRect.z + 2f * BlockKeylineInk, BurnoutPlateRect.w + 2f * BlockKeylineInk);
+
+            var burnPlate = NewSprite("BurnoutPlateFill", _burnoutPlate.transform, Sprite("bar-track"));
+            burnPlate.type = Image.Type.Sliced;
+            burnPlate.color = OnBarTrack(BurnoutRed);
+            AnchorPx(burnPlate.rectTransform, BurnoutPlateRect.x, BurnoutPlateRect.y,
+                BurnoutPlateRect.z, BurnoutPlateRect.w);
+            // Заголовок БЕЛЫЙ, как на плашке «РАССТАЛИСЬ»: жёлтый по красному на кегле ~28 читался вяло,
+            // а «фирменный» жёлтый S7 был рассчитан на 150 px во весь экран.
+            var burnoutTxt = NewText("BurnoutText", burnPlate.transform,
+                BurnoutPlateTitle, 46, TextAnchor.MiddleCenter, Color.white, _display);
+            // ⚠ Обе строки обязаны лечь ВНУТРЬ видимой пилюли `bar-track` (её скругление съедает ~16 px с
+            // каждой стороны), поэтому боксы посажены по замеру пилюли, а не «на глаз по плашке».
+            // Кегли и высоты строк подобраны под ВИДИМУЮ пилюлю плашки (её скругление съедает по 16 px):
+            // нарисованный глиф выше своего рект-бокса на ~15 %, поэтому боксы взяты с запасом.
+            Anchor(burnoutTxt.rectTransform, new Vector2(0.5f, 0.6477f), new Vector2(BurnoutPlateRect.z - 56f, 28f));
+            burnoutTxt.resizeTextForBestFit = true; burnoutTxt.resizeTextMinSize = 16; burnoutTxt.resizeTextMaxSize = 22;
+            burnoutTxt.verticalOverflow = VerticalWrapMode.Truncate;
+            // ⚠ НИ BurnoutTitleFx (его КРАСНЫЙ кант со сдвигом 5 px рассчитан на заголовок в 150 px во
+            // весь экран и на кегле ~28 превращает буквы в кашу — да ещё красным по красному), НИ
+            // DisplayFx (его тень −6 px на этом кегле читается вторым, размазанным словом). Тонкий
+            // чернильный кант — ровно то, что нужно короткой плашке.
+            var burnoutKant = burnoutTxt.gameObject.AddComponent<Outline>();
+            burnoutKant.effectColor = Ink;
+            burnoutKant.effectDistance = new Vector2(2f, -2f);
+            var burnoutSub = NewText("BurnoutSubtitle", burnPlate.transform,
+                BurnoutPlateSubtitle, 28, TextAnchor.MiddleCenter, Color.white, _display);
+            Anchor(burnoutSub.rectTransform, new Vector2(0.5f, 0.3295f), new Vector2(BurnoutPlateRect.z - 56f, 24f));
+            burnoutSub.resizeTextForBestFit = true; burnoutSub.resizeTextMinSize = 13; burnoutSub.resizeTextMaxSize = 18;
+            burnoutSub.verticalOverflow = VerticalWrapMode.Truncate;
             _burnoutPlate.SetActive(false);
 
             // ---- Breakup notice: transient red «РАССТАЛИСЬ» plate (shown ~2s on a breakup) ----
@@ -3550,7 +4048,7 @@ namespace ThanksNoThanks
 
             // Hint body (S5): the title rides as the first line of each hint constant. Fully inside the
             // modal's visible pill with margins; best-fit shrinks a long hint to fit above the button.
-            _tutorialText = NewText("TutBody", modal.transform, HealthTutorialText, 40, TextAnchor.MiddleCenter, Ink, _body);
+            _tutorialText = NewText("TutBody", modal.transform, "", 40, TextAnchor.MiddleCenter, Ink, _body);
             var trt = _tutorialText.rectTransform;
             trt.anchorMin = new Vector2(0f, 0.34f); trt.anchorMax = new Vector2(1f, 1f);
             trt.offsetMin = new Vector2(120f, 20f); trt.offsetMax = new Vector2(-120f, -100f);
@@ -3650,10 +4148,65 @@ namespace ThanksNoThanks
             _nsStoryText.resizeTextMaxSize = StoryTextMaxSize;
             _nsStoryText.verticalOverflow = VerticalWrapMode.Truncate;
 
+            // ---- ЗЕЛЁНАЯ CTA входного экрана спецрежима (r3) ----------------------------------------
+            // Собрана ТЕМ ЖЕ блоком, что CTA опенера и финала: тёмный кант `bar-track` + сама плашка
+            // `bar-track`, покрашенная токеном GoGreen через OnBarTrack, + Arimo Bold чернилами БЕЗ
+            // DisplayFx. Значит все три «жми зелёную» кабинета рендерятся одним и тем же зелёным #05CE51,
+            // а не тремя похожими. Скрыта: §D-модалка кнопками не закрывается и CTA не показывает.
+            _smCtaEdge = NewSprite("SpecialCtaEdge", _nsOverlay.transform, Sprite("bar-track")).gameObject;
+            var smEdgeImg = _smCtaEdge.GetComponent<Image>();
+            smEdgeImg.type = Image.Type.Sliced;
+            smEdgeImg.color = OnBarTrack(Ink);
+            AnchorPx(smEdgeImg.rectTransform, SpecialCtaEdgeRect.x, SpecialCtaEdgeRect.y,
+                SpecialCtaEdgeRect.z, SpecialCtaEdgeRect.w);
+
+            _smCta = NewSprite("SpecialCta", _nsOverlay.transform, Sprite("bar-track"));
+            _smCta.type = Image.Type.Sliced;
+            _smCta.color = OnBarTrack(GoGreen);
+            AnchorPx(_smCta.rectTransform, SpecialCtaRect.x, SpecialCtaRect.y, SpecialCtaRect.z, SpecialCtaRect.w);
+            _smCtaText = NewText("SpecialCtaText", _smCta.transform,
+                SpecialModeCtaText, 46, TextAnchor.MiddleCenter, Ink, _display);
+            Inset(_smCtaText.rectTransform, 26f);   // ≥ видимого скругления bar-track (16)
+            _smCtaText.resizeTextForBestFit = true;
+            _smCtaText.resizeTextMinSize = 28; _smCtaText.resizeTextMaxSize = 46;
+            _smCtaText.verticalOverflow = VerticalWrapMode.Truncate;
+            _smCtaEdge.SetActive(false);
+            _smCta.gameObject.SetActive(false);
+
             // Слот КРУПНОЙ шкалы — последний ребёнок: одолженный виджет рисуется поверх обоих окон.
             _nsSlot = NewGroup("BigScaleSlot", _nsOverlay.transform);
 
             _nsOverlay.SetActive(false);
+        }
+
+        /// <summary>
+        /// Раскладка окна-задачи. На §D-модалке в нижней полосе кремового поля стоит одна служебная строка
+        /// (клавиша эмуляции); на входном экране спецрежима под ней стоит ещё и зелёная CTA, поэтому текст
+        /// задачи ужимается сильнее, а служебная строка поднимается. Резерв ПОСТОЯННЫЙ для своего режима,
+        /// чтобы композиция не прыгала от наличия плат.
+        /// </summary>
+        /// <summary>
+        /// Сторона облачка-рассказа. Справа — канон §D (и все экраны, кроме здоровья); слева — рокировка
+        /// под КРУПНЫЙ БАР ЗДОРОВЬЯ, которому правый верх нужен как своё HUD-место (см.
+        /// <see cref="StoryBubbleLeftRect"/>). Зеркалится и сам спрайт (localScale), и посадка текста.
+        /// </summary>
+        private void LayoutStoryBubble(bool left)
+        {
+            var b = left ? StoryBubbleLeftRect : StoryBubbleRect;
+            var f = left ? StoryFieldLeftRect : StoryFieldRect;
+            AnchorPx(_nsBubble.rectTransform, b.x, b.y, b.z, b.w);
+            _nsBubble.rectTransform.localScale = new Vector3(left ? 1f : -1f, 1f, 1f);
+            AnchorPx(_nsStoryText.rectTransform, f.x, f.y,
+                f.z - 2f * StoryTextPadX, f.w - 2f * StoryTextPadY);
+        }
+
+        private void LayoutTaskWindow(bool special)
+        {
+            float reserve = special ? SpecialTaskReserve : HintLineReserve;
+            AnchorPx(_nsTaskText.rectTransform, TaskFieldRect.x, TaskFieldRect.y - reserve / 2f,
+                TaskFieldRect.z - 2f * TaskTextPadX, TaskFieldRect.w - 2f * TaskTextPadY - reserve);
+            AnchorPx(_nsHintLine.rectTransform, TaskFieldRect.x, special ? SpecialHintLineCy : HintLineCy,
+                TaskFieldRect.z - 2f * TaskTextPadX, 34f);
         }
 
         // Depression «тёмная полоса» (S8): a HARD black-&-white wash + static grain over the whole show, a
@@ -3683,25 +4236,40 @@ namespace ThanksNoThanks
             Inset(label.rectTransform, 40f);
             label.resizeTextForBestFit = true; label.resizeTextMinSize = 30; label.resizeTextMaxSize = 60;
 
-            // «нажми в такт пульсу» hint (S8): on a DARK ink plate ABOVE the button so it is clearly READABLE
-            // (founder complaint — gray-on-gray was invisible). Light text on a near-opaque dark plate.
+            // ПОДСКАЗКА КОНТРОЛА (S8 + r3 п.3в): на тёмной плашке НАД кнопкой, чтобы читалась (жалоба
+            // основательницы — серое по серому было не видно). Текст называет КОНТРОЛ, а не только ритм:
+            // «лови пульс — жми зелёную» вместо безадресного «нажми в такт пульсу». Имя контрола берётся
+            // из DepressionCatchControlName — той же константы, что и в задаче входного экрана (п.3г).
             var hintPlate = NewSprite("DepHintPlate", _depressionGroup.transform, Sprite("bar-track"));
             hintPlate.type = Image.Type.Sliced;
             hintPlate.color = new Color(0.08f, 0.08f, 0.10f, 0.96f);
-            AnchorPx(hintPlate.rectTransform, 960f, 874f, 500f, 92f);
-            var hint = NewText("DepHint", hintPlate.transform,
-                "нажми в такт пульсу", 30, TextAnchor.MiddleCenter, new Color(0.96f, 0.96f, 0.98f), _display);
-            Inset(hint.rectTransform, 28f);
-            hint.resizeTextForBestFit = true; hint.resizeTextMinSize = 20; hint.resizeTextMaxSize = 30;
+            AnchorPx(hintPlate.rectTransform, 960f, 866f, 640f, 100f);
+            _depHint = NewText("DepHint", hintPlate.transform,
+                DepressionBoardHint, 34, TextAnchor.MiddleCenter, new Color(0.96f, 0.96f, 0.98f), _display);
+            Inset(_depHint.rectTransform, 24f);
+            _depHint.resizeTextForBestFit = true; _depHint.resizeTextMinSize = 20; _depHint.resizeTextMaxSize = 34;
+
+            // …и вторая строка — КЛАВИША при эмуляции, ровно тем же путём (ArcadeInput.KeyHint), что и на
+            // окнах-подсказках. На стойке её нет: там контрол ведёт настоящая плата.
+            _depKeyHint = NewText("DepKeyHint", _depressionGroup.transform, "", HintTextSize,
+                TextAnchor.MiddleCenter, new Color(0.86f, 0.86f, 0.92f), _body);
+            AnchorPx(_depKeyHint.rectTransform, 960f, 806f, 640f, 40f);
+            _depKeyHint.resizeTextForBestFit = true;
+            _depKeyHint.resizeTextMinSize = 16; _depKeyHint.resizeTextMaxSize = HintTextSize;
+            _depKeyHint.verticalOverflow = VerticalWrapMode.Truncate;
+            _depKeyHint.gameObject.SetActive(false);
 
             // BIG breathing pulse indicator (S8 playtest rework): a large star that is ALWAYS visible during
             // depression and BLINKS on the steady beat — bright + scaled-up flash while the hit-window is open
             // («жми!»), dim-but-visible resting between (never fully gone), so the player sees the rhythm and taps
             // in time. Driven every frame in ReflectDepression. High contrast on the gray wash. (Was a faint 150px
             // dot shown ONLY on the ~0.6s window — «вообще не видно, как дышать».)
+            // r3 (п.3в): индикатор ЗАМЕТНЕЕ — 280 → 360 px и выше пол яркости в покое (0.32 → 0.42).
+            // Он и был «дышащим», но на 4K-стойке 280 px по центру читались как невнятное пятно, а покой
+            // на 0.32 сливался с серой мойкой.
             _depressionPulse = NewSprite("DepressionPulse", _depressionGroup.transform, Sprite("star-white"));
-            _depressionPulse.color = new Color(0.92f, 0.92f, 0.98f, 0.32f);
-            Anchor(_depressionPulse.rectTransform, new Vector2(0.5f, 0.44f), new Vector2(280, 280));
+            _depressionPulse.color = new Color(0.92f, 0.92f, 0.98f, 0.42f);
+            Anchor(_depressionPulse.rectTransform, new Vector2(0.5f, 0.46f), new Vector2(360, 360));
             _depressionPulse.gameObject.SetActive(false);
 
             // No colour-progress pips (S8 mockup has none) — the wash lightening alone reads the recovery.
@@ -3735,6 +4303,7 @@ namespace ThanksNoThanks
         {
             _depMutterCount = 0;
             _bubbleTimer.Show(HostContent.DepressionAnnounce);
+            ShowSpecialMode(SpecialMode.Depression);   // r3: правила ловли — ДО того, как начнёт капать серость
         }
 
         // Each successful catch: a muted host mutter as a step of colour returns.
@@ -3772,7 +4341,7 @@ namespace ThanksNoThanks
             }
             else
             {
-                float a = 0.32f + 0.08f * Mathf.Sin(Time.time * 3f);            // dim but visible resting breath
+                float a = 0.42f + 0.08f * Mathf.Sin(Time.time * 3f);            // dim but visible resting breath
                 _depressionPulse.color = new Color(0.90f, 0.90f, 0.97f, a);
                 _depressionPulse.rectTransform.localScale = Vector3.one * (0.86f + 0.03f * Mathf.Sin(Time.time * 3f));
             }
@@ -3783,9 +4352,13 @@ namespace ThanksNoThanks
         private void OnMoneyOpened()  => ShowNewScale(NewScale.Money);
         private void OnRelationshipsOpened() => ShowNewScale(NewScale.Relations);
         private void OnEnergyOpened() => ShowNewScale(NewScale.Energy);
-        private void OnHealthOpened() { if (!_healthTutorialSeen) ShowTutorial(HealthTutorialText, ref _healthTutorialSeen); }
-        // Выгорание объясняет ДЫХАНИЕ — значит, на клавиатуре подсказка должна назвать клавишу датчика.
-        private void OnBurnoutEntered(){ if (!_burnoutHintSeen)  ShowTutorial(BurnoutHintText,   ref _burnoutHintSeen, ArcadeControlId.HeightA); }
+        // ЗДОРОВЬЕ (30) и ВЫГОРАНИЕ переехали со старой жёлтой S5-подсказки на ВХОДНОЙ ЭКРАН спецрежима
+        // (r3, живой плейтест 2026-08-07): «жёлтая плашка с ПОНЯТНО выпадает из арт-пака». Одноразовость
+        // за жизнь сохранена — только флаг теперь свой (_smHealthSeen / _smBurnoutSeen).
+        private void OnHealthOpened() { if (!_smHealthSeen) { _smHealthSeen = true; ShowSpecialMode(SpecialMode.Health); } }
+        // ВЫГОРАНИЕ: первый раз за жизнь — входной экран с ПАУЗОЙ дренажа (умереть, читая правила, нельзя);
+        // повторные — короткая плашка `_burnoutPlate` без блокировки, она живёт off Game.Burnout в Update.
+        private void OnBurnoutEntered(){ if (!_smBurnoutSeen) { _smBurnoutSeen = true; ShowSpecialMode(SpecialMode.Burnout); } }
         // MD02=ДА opened the child scale: the «ПОПОЛНЕНИЕ!» rubric banner already fired when MD02 was drawn;
         // this sequences the §D modal after the answer (one-shot per life, pauses like every other open).
         private void OnChildOpened()  => ShowNewScale(NewScale.Child);
@@ -3852,20 +4425,20 @@ namespace ThanksNoThanks
         // (здоровье/выгорание) и поверх самой себя — иначе два открытия в одном кадре подрались бы за паузу.
         private void ShowNewScale(NewScale which)
         {
-            if (which == NewScale.None || _nsShowing || _tutorialShowing) return;
+            if (which == NewScale.None) return;
             if (_nsSeen[(int)which]) return;
 
-            // ⚠ ВЫГОРАНИЕ × РЕБЁНОК (находка ревью). Условие детской модалки — ПОДНЯТЬ ЗВОНОК, а под
-            // выгоранием звонок поднять нельзя ПО ДВУМ причинам сразу: плашка S7 — полноэкранный захват,
-            // поэтому драйвер прячет трубку целиком (ReflectChildPhone), а Game морозит и окно, и само
-            // нажатие (Game.ChildCallFrozen = ... || Burnout). Модалка встала бы НЕВЫПОЛНИМОЙ: пауза
-            // держится вечно, выхода нет. Открытие ребёнка приходит на «свадьба+2», то есть уже ПОСЛЕ
-            // энергии (25) — момент, когда выгорание вполне может быть активно.
-            // Решение: OPEN не теряется, а ОТКЛАДЫВАЕТСЯ — `_nsSeen` не помечаем, ставим `_nsPending`, и
-            // TickNewScale поднимет экран сразу, как выгорание снимется. Остальные три шкалы этой развилки
-            // не имеют: деньги (18) и отношения (20) открываются раньше энергии (25), а выгорание требует
-            // открытой энергии ≤10 %, так что при их OPEN оно невозможно.
-            if (which == NewScale.Child && _game != null && _game.Burnout)
+            // ⚠ ЭКРАН ПОВЕРХ ЭКРАНА — НЕЛЬЗЯ. Открытие не теряется, а ОТКЛАДЫВАЕТСЯ (`_nsSeen` не
+            // помечаем, ставим `_nsPending`), и TickNewScale поднимет его, как только место освободится.
+            //
+            // Историческая причина этой развилки была уже: детская модалка требует ПОДНЯТЬ ЗВОНОК, а под
+            // полноэкранной плашкой выгорания S7 трубка была спрятана и окно заморожено — модалка встала
+            // бы НЕВЫПОЛНИМОЙ. Плашка S7 снята r3 (2026-08-07): выгорание объясняет входной экран, а
+            // повторные показывают короткую плашку без блокировки, трубку никто не накрывает, и
+            // Game.ChildCallFrozen больше не смотрит на Burnout. Так что теперь конфликт ровно один и
+            // общий — ЧУЖОЕ ОКНО СВЕРХУ (входной экран спецрежима или S5-подсказка), и обрабатывается он
+            // тем же откладыванием.
+            if (_nsShowing || _tutorialShowing || _smShowing)
             {
                 _nsPending = which;
                 return;
@@ -3883,6 +4456,7 @@ namespace ThanksNoThanks
             _nsFadeT = 0f;
             _nsStoryText.text = NewScaleStory(which);
             _nsTaskText.text = NewScaleTask(which);
+            LayoutStoryBubble(left: false);   // §D всегда канонический: облачко справа
             BorrowBigWidget(which);
             _nsFade.alpha = 1f;
             _nsOverlay.transform.SetAsLastSibling();
@@ -3914,7 +4488,7 @@ namespace ThanksNoThanks
         /// </summary>
         private void TickNewScale(float dt)
         {
-            PumpPendingNewScale();
+            PumpPendingScreens();   // ретрай тем же тактом (см. PumpPendingScreens — порядок задаёт Update)
             if (!_nsShowing) return;
 
             if (_nsDone)
@@ -3958,6 +4532,29 @@ namespace ThanksNoThanks
             if (inMode && _nsHold >= NewScaleHoldSeconds) _nsDone = true;   // → фейд со следующего такта
         }
 
+        /// <summary>
+        /// ⚠ ПОРЯДОК ТИКА КАДРА (находка ревью r3, MAJOR). Отложенные экраны — §D-модалка шкалы
+        /// (<see cref="_nsPending"/>) и входной экран спецрежима (<see cref="_smPending"/>) — поднимаются
+        /// ПЕРЕД <see cref="Game.Tick"/>, а не после него.
+        ///
+        /// Причина. Окно, из-за которого экран отложился, снимается в КОНЦЕ кадра: §D-модалка — фейдом в
+        /// <see cref="TickNewScale"/>, S5-подсказка — зелёной в <see cref="DismissTutorial"/>. Оба снимают
+        /// паузу и НЕ поднимают очередь сами. Если пампить очередь только следующим <c>TickNewScale</c>
+        /// (то есть ПОСЛЕ <c>_game.Tick</c>), между снятием помехи и подъёмом отложенного экрана проходит
+        /// РОВНО ОДИН ЖИВОЙ ТИК ИГРЫ. Для выгорания это прямо запрещённый случай (экран обязан вставать
+        /// С ПАУЗОЙ — «умереть, читая правила, нельзя»), для депрессии — тик серости до объяснения ловли.
+        /// Пампим до тика — и живых тиков без уже поднятого экрана не остаётся ни одного.
+        ///
+        /// Идемпотентен: обе половины выходят сразу, если очередь пуста, поэтому его же зовёт
+        /// <see cref="TickNewScale"/> (ретрай каждый такт: помеха может уйти не в свой кадр, а очередь из
+        /// двух окон должна разбираться по одному).
+        /// </summary>
+        private void PumpPendingScreens()
+        {
+            PumpPendingNewScale();
+            PumpPendingSpecialMode();
+        }
+
         // Отложенный OPEN (см. ShowNewScale): держим его, пока помеха не снята, и поднимаем экран ТЕМ ЖЕ
         // путём — с теми же гейтами `_nsSeen`/подсказки и с тем же RingChildNow. Ретраим каждый такт, а не
         // «один раз по фронту»: на выходе из выгорания сверху может стоять S5-подсказка, и тогда попытка
@@ -3967,7 +4564,7 @@ namespace ThanksNoThanks
         {
             if (_nsPending == NewScale.None) return;
             if (_game == null || _game.State != GameState.Playing) { _nsPending = NewScale.None; return; }
-            if (_game.Burnout || _nsShowing || _tutorialShowing) return;
+            if (_nsShowing || _tutorialShowing || _smShowing) return;
 
             var pending = _nsPending;
             _nsPending = NewScale.None;
@@ -4056,6 +4653,140 @@ namespace ThanksNoThanks
             }
         }
 
+        // ================================================================ r3 — входной экран СПЕЦРЕЖИМА
+
+        /// <summary>Канон-рассказ Ведущего для спецрежима (host-content §4, ✍ черновики).</summary>
+        public static string SpecialStory(SpecialMode m) => m switch
+        {
+            SpecialMode.Health => HealthStoryText,
+            SpecialMode.Blitz => BlitzStoryText,
+            SpecialMode.Depression => DepressionStoryText,
+            SpecialMode.Burnout => BurnoutStoryText,
+            _ => "",
+        };
+
+        /// <summary>Канон-задача для спецрежима (host-content §4, ✍ черновики).</summary>
+        public static string SpecialTask(SpecialMode m) => m switch
+        {
+            SpecialMode.Health => HealthTaskText,
+            SpecialMode.Blitz => BlitzTaskText,
+            SpecialMode.Depression => DepressionTaskText,
+            SpecialMode.Burnout => BurnoutTaskText,
+            _ => "",
+        };
+
+        /// <summary>Какой контрол автомата называет служебная строка входного экрана (клавиша эмуляции).
+        /// Здоровье лечат ВЫБОРЫ (своего контрола нет), блиц играется двумя рычагами ответа — их называет
+        /// сам текст задачи, поэтому там строка пуста.</summary>
+        private static ArcadeControlId? ControlOf(SpecialMode m) => m switch
+        {
+            SpecialMode.Burnout => ArcadeControlId.HeightA,      // «зажми датчик высоты и держи»
+            SpecialMode.Depression => ArcadeControlId.BangButton,  // ловля пульса «!» (DepressionCatchControlName)
+            _ => null,
+        };
+
+        /// <summary>
+        /// Поднять входной экран спецрежима. Один раз на вход в режим (здоровье и выгорание — один раз за
+        /// ЖИЗНЬ, блиц и депрессия входят по одному разу за жизнь сами). Экран НЕ встаёт поверх другого
+        /// окна: конкурент откладывается в <see cref="_smPending"/> и поднимется, как только освободится
+        /// место, — ровно тот же приём, что и у отложенной §D-модалки, и по той же причине (пауза, которую
+        /// нечем снять, — мёртвый прогон).
+        /// </summary>
+        private void ShowSpecialMode(SpecialMode which)
+        {
+            if (which == SpecialMode.None || _game == null) return;
+            if (_smShowing || _nsShowing || _tutorialShowing) { _smPending = which; return; }
+
+            _smPending = SpecialMode.None;
+            _smWhich = which;
+            _smShowing = true;
+            _nsFadeT = 0f;
+
+            _nsStoryText.text = SpecialStory(which);
+            _nsTaskText.text = SpecialTask(which);
+            LayoutTaskWindow(special: true);
+            // Рокировка окон: ЗДОРОВЬЮ нужен правый верх (его HUD-место) — облачко уходит влево.
+            LayoutStoryBubble(left: which == SpecialMode.Health);
+
+            // Крупный виджет: у здоровья/выгорания/блица — НАСТОЯЩИЙ HUD-виджет (бар, батарея, купол),
+            // одолженный тем же блоком, что и на §D; у депрессии — эмблема-звезда в том же слоте.
+            // ⚠ КРУПНЫЙ ВИДЖЕТ ЕСТЬ НЕ У ВСЕХ — и это осознанно. Основательница назвала ровно два:
+            // «КРУПНЫЙ бар здоровья» (п.1) и «крупная красная батарея» (п.5а). Блицу и депрессии
+            // одалживать нечего: у блица «виджет» — это купол-таймер, но раздутый полуэллипс читается
+            // как жёлтое пятно, а не как таймер (проверено кадром), а у депрессии её звезда-пульс
+            // ложится ровно на плашку-задачу и читается как случайная наклейка. Пустой слот на этих
+            // двух экранах честнее: рассказ + задача + CTA и так несут всю подачу.
+            GameObject borrow = which switch
+            {
+                SpecialMode.Health => _healthGroup,
+                SpecialMode.Burnout => _energyGroup,
+                _ => null,
+            };
+            if (borrow != null) BorrowWidget(borrow, BigSpecialSrc(which), BigSpecialDst(which));
+
+            _smCtaEdge.SetActive(true);
+            _smCta.gameObject.SetActive(true);
+            if (_smCtaText.text != SpecialModeCtaText) _smCtaText.text = SpecialModeCtaText;
+
+            _nsFade.alpha = 1f;
+            _nsOverlay.transform.SetAsLastSibling();
+            _nsOverlay.SetActive(true);
+            SyncPause();
+            ReflectDomeUnderModal();   // …и купол уходит/остаётся ЭТИМ же кадром (блиц его как раз одолжил)
+        }
+
+        /// <summary>
+        /// Снять входной экран (зелёная кнопка / уход из Playing). Салюта здесь НЕТ: игрок ничего не
+        /// выполнил, он прочитал правила — салют §6 остаётся наградой за КАЛИБРОВКУ шкалы.
+        /// </summary>
+        private void CloseSpecialMode()
+        {
+            if (!_smShowing) return;
+            _smShowing = false;
+            _smWhich = SpecialMode.None;
+            ReturnBigWidget();
+            _smCtaEdge.SetActive(false);
+            _smCta.gameObject.SetActive(false);
+            LayoutTaskWindow(special: false);   // окно возвращается к §D-раскладке…
+            LayoutStoryBubble(left: false);     // …и облачко — на свою каноническую правую сторону
+            if (!_nsShowing) _nsOverlay.SetActive(false);
+            _nsFade.alpha = 1f;
+            SyncPause();
+            ReflectDomeUnderModal();
+            // Та же причина, что у DismissTutorial/CloseNewScale: вход в режим случается СЕРЕДИНОЙ карточки.
+            if (_game != null && _game.State == GameState.Playing)
+            {
+                UpdateHudValues();
+                ApplyAgeGates(_game.Age);
+            }
+            PumpPendingSpecialMode();
+        }
+
+        // Отложенный входной экран: поднимаем, как только место освободилось. Ретраим каждый такт (а не
+        // «один раз по фронту»), чтобы очередь из двух окон не теряла второе.
+        private void PumpPendingSpecialMode()
+        {
+            if (_smPending == SpecialMode.None) return;
+            if (_game == null || _game.State != GameState.Playing) { _smPending = SpecialMode.None; return; }
+            if (_smShowing || _nsShowing || _tutorialShowing) return;
+            var pending = _smPending;
+            _smPending = SpecialMode.None;
+            ShowSpecialMode(pending);
+        }
+
+        /// <summary>
+        /// Ввод под входным экраном спецрежима. Живой контрол РОВНО ОДИН — ЗЕЛЁНАЯ кнопка (и её скрытая
+        /// dev-эмуляция Enter/CONFIRM), ровно как на опенере и финале. Всё остальное — крутилка, датчик,
+        /// джойстик, «!», красный рычаг — инертно: под экраном время стоит, и «нафармить» на паузе нечего.
+        /// </summary>
+        private void SpecialModeInput(GameInput input)
+        {
+            if (input != GameInput.AnswerYes && input != GameInput.Confirm) return;
+            CloseSpecialMode();
+            _dismissedThisFrame = true;   // тот же swallow-гейт, что у подсказки: аккорд не течёт в геймплей
+            _smClosedThisFrame = true;    // …плюс собственный, который глушит и Confirm (см. OnInput)
+        }
+
         // «Одолжить» настоящий HUD-виджет модалке: перевесить его в слот оверлея (оба родителя —
         // полноэкранные stretched-рект, поэтому раскладка детей не меняется), увеличить и поставить на
         // указанную точку. Масштаб идёт ВОКРУГ точки-источника: localScale масштабирует детей относительно
@@ -4070,6 +4801,17 @@ namespace ThanksNoThanks
                 NewScale.Child => _childGroup,
                 _ => null,
             };
+            BorrowWidget(w, BigScaleSrc(which), BigScaleDst(which));
+        }
+
+        /// <summary>
+        /// Общий блок «одолжить настоящий HUD-виджет крупной копии» — им пользуются И §D-модалка (четыре
+        /// шкалы), И входной экран спецрежима (бар здоровья, батарея выгорания, купол блица). Виджет
+        /// ПЕРЕВЕШИВАЕТСЯ, а не клонируется, поэтому крупная копия живая: батарея краснеет тревогой,
+        /// маркер здоровья стоит там же, где в HUD, дуга купола полная.
+        /// </summary>
+        private void BorrowWidget(GameObject w, Vector4 src, Vector4 dst)
+        {
             if (w == null || _nsBorrowed != null) return;
 
             var rt = (RectTransform)w.transform;
@@ -4085,7 +4827,7 @@ namespace ThanksNoThanks
             rt.SetParent(_nsSlot.transform, worldPositionStays: false);
             rt.SetAsLastSibling();
             w.SetActive(true);
-            PlaceBigWidget(rt, which);
+            PlaceBigWidget(rt, src, dst);
         }
 
         /// <summary>
@@ -4100,9 +4842,11 @@ namespace ThanksNoThanks
         /// промахивалась мимо цели на ~100 px. Сдвиг в ДОЛЯХ (якорями) переживает любой ресайз канваса.
         /// </summary>
         private static void PlaceBigWidget(RectTransform rt, NewScale which)
+            => PlaceBigWidget(rt, BigScaleSrc(which), BigScaleDst(which));
+
+        /// <summary>Тот же расчёт по ПРОИЗВОЛЬНОЙ паре боксов — им пользуются и входные экраны спецрежимов.</summary>
+        private static void PlaceBigWidget(RectTransform rt, Vector4 src, Vector4 dst)
         {
-            var src = BigScaleSrc(which);
-            var dst = BigScaleDst(which);
             if (src.z <= 0f) return;
             float k = dst.z / src.z;
 
@@ -4154,18 +4898,22 @@ namespace ThanksNoThanks
             // Fresh life → every hint is armed again and leftover state is cleared.
             if (playing && !_wasPlaying)
             {
-                _healthTutorialSeen = false;
-                _burnoutHintSeen = false;
+                _smHealthSeen = false;
+                _smBurnoutSeen = false;
                 // §D: свежая жизнь — все четыре модальных экрана взводятся заново и ни один не висит.
                 for (int i = 0; i < _nsSeen.Length; i++) _nsSeen[i] = false;
                 _nsPending = NewScale.None;   // …и отложенный OPEN прошлой жизни с собой не тащим
                 CloseNewScale(reward: false);
+                // r3: входные экраны спецрежимов тоже взводятся заново и ни один не висит.
+                _smPending = SpecialMode.None;
+                CloseSpecialMode();
                 // §5b: свежая жизнь начинается БЕЗ трубки на экране, и любой звонок оборван — поза
                 // сбрасывается в покой (иначе выехавшая трубка пережила бы рестарт).
                 _childGroup.SetActive(false);
                 _phoneOut = 0f;
                 _phoneRingClock = 0f;
                 _phoneRinging = false;
+                _phoneMissed = false;
                 if (_phoneImg != null) _phoneImg.sprite = _phoneRestSprite;
                 ApplyPhonePose(0f);
                 _tutorialShowing = false;
@@ -4191,6 +4939,7 @@ namespace ThanksNoThanks
             if (!playing) { ResetAlarms(); ClearStars(); }
             if (!playing && _tutorialShowing) DismissTutorial();
             if (!playing && _nsShowing) CloseNewScale(reward: false);   // §D: смерть/финал с модалки — тихо
+            if (!playing && _smShowing) { CloseSpecialMode(); _smPending = SpecialMode.None; }
             if (!playing) { _bubbleTimer.Hide(); _hostBubble.SetActive(false); SyncPause(); }
             _wasPlaying = playing;
 
@@ -4320,15 +5069,10 @@ namespace ThanksNoThanks
             _healthGroup.SetActive(a >= HealthAge);
         }
 
-        private void OnInputFx(GameInput input)
-        {
-            // MoneyTick FX (the coin drop into the jar) is triggered from OnInput's ACCEPTED-crank branch
-            // instead — raw (capped/no-op) presses must not flash feedback for income that didn't land.
-            if (_game == null || _game.State != GameState.Playing || !isActiveAndEnabled) return;
-            if (_tutorialShowing) return;
-            if (input == GameInput.AnswerYes) StartCoroutine(PunchPlate(_yesRect, YesTilt));
-            else if (input == GameInput.AnswerNo) StartCoroutine(PunchPlate(_noRect, NoTilt));
-        }
+        // ⚠ OnInputFx СНЯТ 2026-08-07 (r3, п.4). Он был отдельной веткой обратной связи, которая играла
+        // панч плашки на СЫРОЕ нажатие рычага, ничего не зная о том, приняла ли механика ввод. Панч
+        // переехал в OnInput, на accepted-семантику — см. PunchAnswerPlate. Монета в банку (MoneyTick FX)
+        // и так жила в OnInput'е, на ПРИНЯТОМ тике, ровно по той же причине.
 
         // Income-tick feedback: the coin resting over the jar's lid DROPS into the throat (asset-map §8:
         // throat centre 1753,89) and springs back to its perch — the art-pack replacement for the old pill

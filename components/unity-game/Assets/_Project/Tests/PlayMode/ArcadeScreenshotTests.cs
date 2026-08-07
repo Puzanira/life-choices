@@ -105,6 +105,16 @@ namespace ThanksNoThanks.Tests.PlayMode
                 case "tutenergy": driver.DebugPreviewNewScale(NewScale.Energy); break;
                 case "tutchild": driver.DebugPreviewNewScale(NewScale.Child); break;
                 case "host": driver.DebugPreviewHostComment(); break;
+                // r3: ВХОДНЫЕ ЭКРАНЫ СПЕЦРЕЖИМОВ — по кадру на каждый (здоровье / блиц / депрессия /
+                // первое выгорание). Собраны из тех же блоков §D + зелёная CTA.
+                case "tuthealth": driver.DebugPreviewSpecialMode(SpecialMode.Health); break;
+                case "tutblitz": driver.DebugPreviewSpecialMode(SpecialMode.Blitz); break;
+                case "tutdepression": driver.DebugPreviewSpecialMode(SpecialMode.Depression); break;
+                case "tutburnout": driver.DebugPreviewSpecialMode(SpecialMode.Burnout); break;
+                // r3 §5б: повторное выгорание — КОРОТКАЯ плашка, доска под ней видна целиком.
+                case "burnout": driver.DebugPreviewBurnout(); break;
+                // r3 §9: пропущенный звонок — трубка уезжает ПОНИКШЕЙ + реплика Ведущего.
+                case "phonemissed": driver.DebugPreviewChildPhoneMissed(); break;
                 // Веха-TIMELINE в обычном ходу: жёлтая рубрика-баннер снята (плейтест 2026-08-05 §3),
                 // поэтому веха выглядит РОВНО как любая другая карточка — этот кадр и показывает.
                 case "milestone":

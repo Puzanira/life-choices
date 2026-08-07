@@ -221,29 +221,34 @@ namespace ThanksNoThanks.Tests.PlayMode
             driver.GamePanel.SetActive(true);
             driver.BurnoutPlate.SetActive(true);
             var plate = driver.BurnoutPlate;
-            var backing = plate.GetComponent<Image>();
+            var fill = plate.transform.Find("BurnoutPlateFill").GetComponent<Image>();
 
-            var title = plate.transform.Find("BurnoutText").GetComponent<Text>();
-            var sub = plate.transform.Find("BurnoutSubtitle").GetComponent<Text>();
-            StringAssert.Contains("ВЫГОРАНИЕ", title.text, "the S7 title reads «ВЫГОРАНИЕ!»");
-            // ⚠ 2026-08-07: подпись S7 называет НОВЫЙ жест — «зажмите датчик высоты». Прежнее «подышите
-            // рычагом» ушло вместе с ритм-механикой (основательница: «просто зажать датчик высоты»).
-            StringAssert.Contains("зажмите датчик высоты", sub.text,
-                "the S7 subtitle names the CURRENT gesture — hold the height sensor");
+            var title = plate.transform.Find("BurnoutPlateFill/BurnoutText").GetComponent<Text>();
+            var sub = plate.transform.Find("BurnoutPlateFill/BurnoutSubtitle").GetComponent<Text>();
+            StringAssert.Contains("ВЫГОРАНИЕ", title.text, "плашка называет состояние");
+            // ⚠ r3 2026-08-07: ПОЛНОЭКРАННЫЙ ЗАХВАТ S7 СНЯТ. Первое выгорание объясняет входной экран
+            // спецрежима (с паузой дренажа), а эта плашка — КОРОТКОЕ сообщение о повторных: две строки,
+            // на своём месте под батареей, ничего не заслоняет.
+            StringAssert.Contains("датчик высоты", sub.text,
+                "вторая строка называет ЖЕСТ — зажать датчик высоты");
             StringAssert.DoesNotContain("подыш", sub.text, "…и не зовёт «дышать»: ритма в игре больше нет");
 
-            // Both draw inside the full-screen cobalt backing AND fully on-screen (never clipped by the edge).
-            AssertGeneratedInPill(title, backing, 0f, "burnout title on the full-screen backing");
-            AssertGeneratedInPill(sub, backing, 0f, "burnout subtitle on the full-screen backing");
+            // Обе строки — внутри своей плашки И целиком в кадре.
+            AssertGeneratedInPill(title, fill, BarTrackPill, "заголовок на короткой плашке");
+            AssertGeneratedInPill(sub, fill, BarTrackPill, "подпись на короткой плашке");
             AssertOnScreen(title, driver.CanvasRect, "burnout title");
             AssertOnScreen(sub, driver.CanvasRect, "burnout subtitle");
+
+            // Плашка ДЕЙСТВИТЕЛЬНО короткая: не более четверти кадра по обеим осям — иначе это снова захват.
+            Assert.Less(GameDriver.BurnoutPlateRect.z, 1920f * 0.25f, "плашка узкая — это не штора");
+            Assert.Less(GameDriver.BurnoutPlateRect.w, 1080f * 0.25f, "…и низкая");
 
             // Real glyphs for «—», «•», «ё» — the subtitle would tofu on a font lacking them.
             AssertNoTofu(title, "burnout title");
             AssertNoTofu(sub, "burnout subtitle");
 
-            // Exhaustive: exactly the backing + cobalt rays, and exactly the title + subtitle — no stray element.
-            AssertExactImages(plate, "burnout", "BurnoutPlate", "BurnoutRays");
+            // Exhaustive: ровно кант + заливка, и ровно заголовок + подпись — ни лучей, ни шторы.
+            AssertExactImages(plate, "burnout", "BurnoutPlateEdge", "BurnoutPlateFill");
             AssertExactTexts(plate, "burnout", "BurnoutText", "BurnoutSubtitle");
 
             Object.Destroy(go);
@@ -267,7 +272,10 @@ namespace ThanksNoThanks.Tests.PlayMode
             var hint = group.transform.Find("DepHintPlate/DepHint").GetComponent<Text>();
 
             Assert.AreEqual("СОБРАТЬСЯ", label.text, "the S8 button reads «СОБРАТЬСЯ»");
-            Assert.AreEqual("нажми в такт пульсу", hint.text, "the S8 hint reads «нажми в такт пульсу»");
+            // r3 (п.3в): подсказка НАЗЫВАЕТ КОНТРОЛ, а не только ритм — «лови пульс — жми зелёную».
+            Assert.AreEqual(GameDriver.DepressionBoardHint, hint.text, "подсказка собрана из канон-константы");
+            StringAssert.Contains(GameDriver.DepressionCatchControlName.ToLowerInvariant(), hint.text,
+                "…и в ней НАЗВАН контрол ловли (п.3г: имя контрола живёт в одной константе)");
 
             // (founder complaint) the hint must be READABLE: a DARK plate behind LIGHT text — not gray-on-gray.
             var hc = hintPlate.color;
@@ -276,7 +284,7 @@ namespace ThanksNoThanks.Tests.PlayMode
             Assert.Greater(Mathf.Min(htc.r, Mathf.Min(htc.g, htc.b)), 0.8f, "the hint text is light (high contrast on the dark plate)");
 
             // …and both labels' drawn glyphs sit inside their pills (nothing spills off the plate).
-            AssertGeneratedInPill(hint, hintPlate, BarTrackPill, "«нажми в такт пульсу» on its dark plate");
+            AssertGeneratedInPill(hint, hintPlate, BarTrackPill, "подсказка контрола на тёмной плашке");
             AssertGeneratedInPill(label, labelPlate, BarTrackPill, "«СОБРАТЬСЯ» on its light pill");
             AssertNoTofu(hint, "depression hint");
             AssertNoTofu(label, "depression gather");
@@ -297,6 +305,9 @@ namespace ThanksNoThanks.Tests.PlayMode
             AssertExactImages(group, "depression",
                 "DepressionVeil", "DepressionGrain", "DepGatherPlate", "DepHintPlate");
             AssertExactTexts(group, "depression", "DepLabel", "DepHint");
+            // Строка КЛАВИШИ существует, но скрыта на стойке (плата ведёт контрол) — поэтому она не в
+            // перечне активных, но обязана быть собрана.
+            Assert.IsNotNull(driver.DepressionKeyHint, "строка клавиши эмуляции собрана");
 
             Object.Destroy(go);
             yield return null;
@@ -428,10 +439,15 @@ namespace ThanksNoThanks.Tests.PlayMode
             // Exhaustive: the blocked card carries EXACTLY the frame (dimmed via its own tint — no overlay veil)
             // + red banner + price plate, and exactly the question + banner + price texts — a stray sprite/label
             // on the block card fails.
+            // r3 (п.6): баннер и чип цены переехали из карточки в СВОЙ контейнер ПОВЕРХ плашек ответа —
+            // поэтому и перечисляются теперь двумя списками, по своим корням.
             var card = driver.CardRect.gameObject;
-            AssertExactImages(card, "blocked card",
-                "CardFrame", "BlockBannerInk", "BlockBanner", "CardPriceInk", "CardPricePlate");
-            AssertExactTexts(card, "blocked card", "CardText", "BlockText", "CardPrice");
+            AssertExactImages(card, "blocked card", "CardFrame");
+            AssertExactTexts(card, "blocked card", "CardText");
+            var block = driver.BlockOverlay;
+            AssertExactImages(block, "block overlay",
+                "BlockBannerInk", "BlockBanner", "CardPriceInk", "CardPricePlate");
+            AssertExactTexts(block, "block overlay", "BlockText", "CardPrice");
             // …and the dim is a real frame tint (the S10 fix), not the full-bright white of a normal card.
             Assert.Less(driver.CardFrameImage.color.b, 0.9f, "the blocked card frame is dimmed (tinted, not full-bright)");
 

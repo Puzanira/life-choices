@@ -205,6 +205,7 @@ namespace ThanksNoThanks.Tests.PlayMode
             int guard = 0;
             while (guard++ < 12000 && driver.Game.State == GameState.Playing && !sawEnergyModal)
             {
+                if (driver.SpecialModeShowing) { NewScaleTut.ClearSpecial(driver, fake); yield return null; continue; }
                 if (driver.NewScaleShowing)
                 {
                     if (driver.NewScaleKind == NewScale.Energy)
@@ -256,7 +257,7 @@ namespace ThanksNoThanks.Tests.PlayMode
         }
 
         [UnityTest]
-        public IEnumerator HealthHint_Dismiss_SameFrameChord_DoesNotLeak_Crank_Or_EnergyHold()
+        public IEnumerator HealthScreen_Dismiss_SameFrameChord_DoesNotLeak_Crank_Or_EnergyHold()
         {
             // The ENERGY_HOLD variant of the same-frame chord (skeptic HIGH), at the HEALTH hint (age 30)
             // where energy is open and money is bankable — so a leaked crank/hold would be observable.
@@ -265,27 +266,25 @@ namespace ThanksNoThanks.Tests.PlayMode
             driver.DebugReplaceGame(AgeWalkDeck());      // seeded/deterministic walk to 30 (no CSV sampling)
             fake.Confirm();                              // → playing
 
-            // Drive to the HEALTH hint (age 30), dismissing the money(18) + energy(25) hints on the way.
+            // Дойти до ЗДОРОВЬЯ (30). r3: здоровье объясняет ВХОДНОЙ ЭКРАН спецрежима, а не S5-подсказка.
             bool atHealth = false;
             int guard = 0;
             while (guard++ < 20000 && driver.Game.State == GameState.Playing && !atHealth)
             {
-                // §D-модалки открытий (18/20/25) проходятся своими контролами; хинт здоровья (30) остался S5.
-                if (driver.NewScaleShowing) { NewScaleTut.Clear(driver, fake); yield return null; continue; }
-                if (driver.TutorialShowing)
+                if (driver.SpecialModeShowing)
                 {
-                    if (driver.TutorialText.text.Contains("ТАЯТЬ")) { atHealth = true; break; }
-                    fake.Confirm();                      // dismiss any other hint
-                    yield return null;                   // let Update clear the same-frame dismiss guard
-                    continue;
+                    if (driver.SpecialModeKind == SpecialMode.Health) { atHealth = true; break; }
+                    NewScaleTut.ClearSpecial(driver, fake); yield return null; continue;
                 }
+                if (driver.NewScaleShowing) { NewScaleTut.Clear(driver, fake); yield return null; continue; }
+                if (driver.TutorialShowing) { fake.Confirm(); yield return null; continue; }
                 fake.Fire(GameInput.MoneyTick);
                 driver.Game.Tick(0.25f);
                 if (driver.Game.CurrentCard != null && driver.Game.CardTimer < 3.5f)
                     fake.No();
             }
-            Assert.IsTrue(atHealth, "reached the health hint at 30");
-            Assert.IsTrue(driver.Game.Paused, "health hint paused the game");
+            Assert.IsTrue(atHealth, "reached the health screen at 30");
+            Assert.IsTrue(driver.Game.Paused, "health screen paused the game");
             Assert.IsTrue(driver.Game.EnergyOpen, "energy is open (drained below full) by 30");
 
             // Cap breathes while paused so a leaked crank WOULD land — proving the guard, not the cap.
@@ -295,7 +294,7 @@ namespace ThanksNoThanks.Tests.PlayMode
 
             // The chord in source order: Confirm FIRST, then MoneyTick + EnergyHold the SAME frame.
             fake.Confirm();
-            Assert.IsFalse(driver.TutorialShowing, "Enter dismissed the health hint");
+            Assert.IsFalse(driver.SpecialModeShowing, "Enter (dev-эмуляция зелёной) сняла экран здоровья");
             fake.Fire(GameInput.MoneyTick);
             fake.Fire(GameInput.EnergyHold);
             Assert.AreEqual(money0, driver.Game.Money,

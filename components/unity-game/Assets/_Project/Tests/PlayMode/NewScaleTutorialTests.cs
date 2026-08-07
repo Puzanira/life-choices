@@ -105,7 +105,10 @@ namespace ThanksNoThanks.Tests.PlayMode
         /// под уже открытой модалкой). Обычная <see cref="ChildDeck"/> открывает ребёнка на 21, когда шкалы
         /// энергии ещё нет и выгорание физически невозможно.
         /// </summary>
-        private static Game LateChildDeck()
+        /// <param name="timeoutSaysYes">Сторона, которую берёт ТАЙМАУТ (монетка). true — «не успел» на MD02
+        /// открывает ребёнка, то есть §D-модалка приходит не с рычага, а из <see cref="Game.Tick"/>: ровно
+        /// так она и может встретиться с выгоранием В ОДНОМ ТИКЕ.</param>
+        private static Game LateChildDeck(bool timeoutSaysYes = false)
         {
             var deck = new List<Card> { Starter() };
             int order = 2;
@@ -115,14 +118,15 @@ namespace ThanksNoThanks.Tests.PlayMode
             for (int i = 0; i < 3; i++) { var c = Plain("F" + i, 26); c.Order = order++; deck.Add(c); }
             var md = Plain("MD02", 26); md.Order = order++; deck.Add(md);
             for (int i = 0; i < 80; i++) { var c = Plain("G" + i, 26); c.Order = order++; deck.Add(c); }
-            return new Game(deck, coin: () => false) { ChildFlashInterval = () => 2f };
+            return new Game(deck, coin: () => timeoutSaysYes) { ChildFlashInterval = () => 2f };
         }
 
         /// <summary>Довести «поздний» прогон до момента, когда MD02 — ТЕКУЩАЯ карта, энергия открыта, а все
         /// попутные модалки/подсказки сняты. Отвечать на MD02 (ДА) — уже дело теста.</summary>
-        private static void DriveToLateMd02(GameDriver driver, PlayFakeInputSource fake)
+        private static void DriveToLateMd02(GameDriver driver, PlayFakeInputSource fake,
+                                            bool timeoutSaysYes = false)
         {
-            driver.DebugReplaceGame(LateChildDeck());
+            driver.DebugReplaceGame(LateChildDeck(timeoutSaysYes));
             fake.Confirm();                       // опенер → игра (I03)
             int guard = 0;
             while (driver.Game.State == GameState.Playing && guard++ < 3000)
@@ -742,65 +746,49 @@ namespace ThanksNoThanks.Tests.PlayMode
         // =====================================================================================
 
         /// <summary>
-        /// Развилка, которой не бывает у трёх остальных шкал. Условие детского экрана — ПОДНЯТЬ ЗВОНОК, а под
-        /// выгоранием звонок поднять нельзя дважды: драйвер прячет трубку целиком (плашка S7 — полноэкранный
-        /// захват), а <see cref="Game.ChildCallFrozen"/> морозит и окно, и само нажатие. Встань модалка в этот
-        /// момент — она бы висела вечно: пауза держится, условие недостижимо, ответы инертны, прогон мёртв.
+        /// ⚠ КАНОН ПЕРЕПИСАН r3 (2026-08-07). Развилка была такой: условие детской модалки — ПОДНЯТЬ
+        /// ЗВОНОК, а под выгоранием звонок поднять нельзя (плашка S7 — полноэкранный захват, драйвер
+        /// прятал трубку, Game морозил окно). Модалка встала бы НЕВЫПОЛНИМОЙ.
         ///
-        /// Контракт: OPEN не теряется и не выполняется вслепую, а ОТКЛАДЫВАЕТСЯ. Пока горит выгорание, игра
-        /// идёт обычным ходом (паузы нет); выгорание снялось — экран встаёт сам, звонок звонит, «!» его
-        /// закрывает и даёт салют.
+        /// Плашка-захват снята: повторное выгорание показывает короткую плашку, трубка видна, звонок идёт,
+        /// и <see cref="Game.ChildCallFrozen"/> на Burnout больше не смотрит. Но развилка не исчезла, а
+        /// СМЕНИЛА причину: ПЕРВОЕ выгорание поднимает ВХОДНОЙ ЭКРАН спецрежима, и вот ПОД НИМ детская
+        /// модалка встать не может — два модальных окна на одном оверлее. Контракт тот же: открытие не
+        /// теряется и не выполняется вслепую, а ОТКЛАДЫВАЕТСЯ; экран выгорания снимается зелёной — и
+        /// детский экран встаёт сам, звонок звонит, «!» его закрывает и даёт салют.
         /// </summary>
         [UnityTest]
-        public IEnumerator ChildModal_UnderBurnout_IsDeferred_NotRaisedUnwinnable()
+        public IEnumerator ChildModal_UnderTheBurnoutScreen_IsDeferred_NotRaisedUnwinnable()
         {
             var driver = Boot(out var go, out var fake);
             yield return null;
             DriveToLateMd02(driver, fake);
 
-            // Загоняем в ВЫГОРАНИЕ до ответа на MD02 и снимаем его одноразовую подсказку.
+            // Загоняем в ВЫГОРАНИЕ до ответа на MD02 — поднимается его входной экран (первый раз за жизнь).
             driver.Game.Scales.Energy = Game.BurnoutEnterEnergyAtOrBelow;
             driver.DebugTick(0.05f);
             Assert.IsTrue(driver.Game.Burnout, "выгорание активно ДО открытия ребёнка");
-            if (driver.TutorialShowing) fake.Confirm();
-            yield return null;                        // подсказка снята → одноразовый swallow-гейт сброшен
-            Assert.IsFalse(driver.Game.Paused, "подсказка снята — игра не на паузе");
+            Assert.IsTrue(driver.SpecialModeShowing, "…и объяснено входным экраном");
+            Assert.AreEqual(SpecialMode.Burnout, driver.SpecialModeKind, "именно выгорания");
+            Assert.IsTrue(driver.Game.Paused, "под ним стоит всё — в том числе дренаж, который его вызвал");
 
             int stars0 = driver.StarBurstCount;
-            fake.Yes();                               // MD02=ДА → механика ребёнка ОТКРЫТА прямо под выгоранием
+            // Ответ на MD02 под входным экраном ИНЕРТЕН — экран глушит всё, кроме зелёной. Значит сперва
+            // снимаем экран… но проверим и то, что ДА его именно ЗАКРЫЛ, а не ответил на карточку.
+            var cardBefore = driver.Game.CurrentCard;
+            fake.Yes();
+            driver.DebugClearFrameGuards();
+            Assert.IsFalse(driver.SpecialModeShowing, "зелёная сняла экран выгорания");
+            Assert.AreSame(cardBefore, driver.Game.CurrentCard, "…и НЕ ответила за игрока на карточку");
+            yield return null;
+
+            fake.Yes();                               // теперь ДА уходит в MD02 → механика ребёнка открыта
             Assert.IsTrue(driver.Game.ChildOpen, "механика ребёнка открыта");
-
-            // Модалка НЕ встала — она отложена.
-            Assert.IsFalse(driver.NewScaleShowing, "невыполнимый экран под выгоранием НЕ поднимается");
-            Assert.AreEqual(NewScale.Child, driver.NewScalePending, "…но открытие не потеряно — оно отложено");
-            Assert.IsFalse(driver.Game.Paused, "и паузы, которую нечем снять, тоже нет");
-            Assert.IsFalse(driver.Game.ChildFlashing, "туториальный звонок не заведён вслепую под плашкой");
-
-            // Игра при этом ЖИВАЯ и отложенное открытие не всплывает, сколько ни держи выгорание.
-            for (int i = 0; i < 60; i++)
-            {
-                driver.Game.Scales.Energy = Game.BurnoutEnterEnergyAtOrBelow;   // держим в зоне выгорания
-                driver.DebugTick(0.1f);
-                if (driver.TutorialShowing) fake.Confirm();
-            }
-            Assert.IsTrue(driver.Game.Burnout, "всё ещё выгорание");
-            Assert.IsFalse(driver.NewScaleShowing, "экран так и не встал — 6 с под плашкой");
-            Assert.AreEqual(NewScale.Child, driver.NewScalePending, "…и всё ещё ждёт своей очереди");
-
-            // Выгорание СНЯТО (энергия выше порога) → экран встаёт сам, тем же тактом.
-            driver.Game.Scales.Energy = Game.BurnoutExitEnergyAbove + 20;
-            driver.DebugTick(0.05f);
-            Assert.IsFalse(driver.Game.Burnout, "выгорание снято");
-            if (driver.TutorialShowing) fake.Confirm();
-            yield return null;                        // …и кадр, чтобы одноразовый swallow-гейт сбросился
-            driver.DebugTick(0.05f);
-
-            Assert.IsTrue(driver.NewScaleShowing, "…и отложенный экран поднялся сам");
+            Assert.IsTrue(driver.NewScaleShowing, "…и её экран встал сразу — помех больше нет");
             Assert.AreEqual(NewScale.Child, driver.NewScaleKind, "именно детский");
-            Assert.AreEqual(NewScale.None, driver.NewScalePending, "очередь пуста");
-            Assert.IsTrue(driver.Game.Paused, "теперь пауза законна — условие достижимо");
             Assert.IsTrue(driver.Game.ChildFlashing, "звонок заведён — есть что поднимать");
-            Assert.IsTrue(driver.ChildGroup.activeSelf, "…и трубка ВИДНА (плашки выгорания больше нет)");
+            Assert.IsTrue(driver.ChildGroup.activeSelf,
+                "…и трубка ВИДНА, хотя выгорание ещё горит: короткая плашка её не накрывает");
 
             // …и он проходится своим контролом: «!» → салют → пауза снята.
             fake.Fire(GameInput.ChildPress);
@@ -811,6 +799,87 @@ namespace ThanksNoThanks.Tests.PlayMode
             Assert.IsFalse(driver.NewScaleShowing, "окно ушло");
             Assert.AreEqual(stars0 + 1, driver.StarBurstCount, "салют звёзд на выходе");
             Assert.IsFalse(driver.Game.Paused, "пауза снята — игра продолжается");
+
+            Object.Destroy(go);
+            yield return null;
+        }
+
+        /// <summary>
+        /// ОЧЕРЕДЬ ДВУХ ЭКРАНОВ — честно, без единого Debug-закрытия (переписан по ревью r3, MINOR:
+        /// прежняя версия сама звала <c>DebugCloseNewScale</c> и принимала «showing ИЛИ pending», то есть
+        /// не проверяла ни очередь, ни момент подъёма).
+        ///
+        /// ⚠ НАПРАВЛЕНИЕ ОЧЕРЕДИ ЗАДАНО МЕХАНИКОЙ, а не выбором теста. «Выгорание приходит ПОД открытой
+        /// §D-модалкой» НЕВОЗМОЖНО: под модалкой время стоит, дренаж энергии заморожен, а единственный
+        /// живой путь пересчёта (поднятый датчик, <c>TickModalBreath</c>) энергию только ПОДНИМАЕТ —
+        /// это отдельно доказано соседним тестом
+        /// <see cref="BurnoutCannotStart_UnderAnOpenChildModal_SoTheScreenStaysWinnable"/>. Возможна ровно
+        /// ОБРАТНАЯ очередь, и она приходит из ОДНОГО тика: дренаж роняет энергию в выгорание (входной
+        /// экран встаёт), и тем же тиком истекает таймер карточки — таймаут MD02 открывает механику
+        /// ребёнка, а её §D-модалка поверх чужого экрана встать не имеет права и ОТКЛАДЫВАЕТСЯ.
+        ///
+        /// Проверяется главное (связка с находкой ревью MAJOR о порядке тика): отложенный экран встаёт
+        /// ДО ПЕРВОГО ЖИВОГО ТИКА после того, как место освободилось. Свидетель живого тика — таймер
+        /// карточки: под паузой он стоит, в живом ходе убывает каждым кадром. Если очередь разбирается
+        /// после <c>_game.Tick</c>, между зелёной кнопкой и модалкой проходит кадр НАСТОЯЩЕЙ игры — с
+        /// дренажом горящего выгорания и без единого объяснения на экране.
+        /// </summary>
+        [UnityTest]
+        public IEnumerator TwoScreensQueueUp_TheDeferredOneRisesBeforeAnyLiveTick()
+        {
+            var driver = Boot(out var go, out var fake);
+            yield return null;
+            DriveToLateMd02(driver, fake, timeoutSaysYes: true);   // таймаут на MD02 = ДА (открытие ребёнка)
+            var g = driver.Game;
+            Assert.IsFalse(driver.SpecialModeShowing, "перед развилкой экранов нет");
+            Assert.IsFalse(driver.NewScaleShowing, "…ни одного");
+
+            // Подводим таймер карточки к самому краю ОБЫЧНЫМ ходом времени (энергия при этом здоровая).
+            int guard = 0;
+            while (g.CardTimer > 0.2f && guard++ < 3000 && g.State == GameState.Playing)
+                driver.DebugTick(0.1f);
+            Assert.AreEqual("MD02", g.CurrentCard?.Id, "на краю таймера всё ещё MD02");
+            Assert.IsFalse(g.Burnout, "…и выгорания ещё нет");
+
+            // ОДИН тик делает обе вещи сразу: роняет энергию в выгорание (экран) и добивает таймер
+            // карточки (таймаут MD02 = ДА → OPEN:Реб → §D-модалка, которой некуда встать).
+            g.Scales.Energy = Game.BurnoutEnterEnergyAtOrBelow;
+            driver.DebugTick(0.25f);
+
+            Assert.IsTrue(g.Burnout, "выгорание защёлкнулось этим тиком");
+            Assert.IsTrue(driver.SpecialModeShowing, "…и объяснено входным экраном (первый раз за жизнь)");
+            Assert.AreEqual(SpecialMode.Burnout, driver.SpecialModeKind, "именно выгорания");
+            Assert.IsTrue(g.ChildOpen, "тем же тиком таймаут открыл механику ребёнка");
+            Assert.IsFalse(driver.NewScaleShowing, "…но её §D-модалка поверх чужого экрана НЕ встала");
+            Assert.AreEqual(NewScale.Child, driver.NewScalePending, "она честно стоит в очереди");
+            Assert.IsTrue(g.Paused, "под входным экраном стоит всё");
+
+            // Игрок читает правила выгорания и закрывает экран ЗЕЛЁНОЙ — его собственным контролом.
+            fake.Yes();
+            driver.DebugClearFrameGuards();
+            Assert.IsFalse(driver.SpecialModeShowing, "экран выгорания снят зелёной");
+
+            float timer0 = g.CardTimer;
+            float age0 = g.Age;
+            yield return null;                       // ← ОДИН настоящий кадр Update
+
+            Assert.IsTrue(driver.NewScaleShowing, "отложенная модалка встала САМА, без Debug-закрытий");
+            Assert.AreEqual(NewScale.Child, driver.NewScaleKind, "именно детская");
+            Assert.AreEqual(NewScale.None, driver.NewScalePending, "…и очередь пуста");
+            Assert.AreEqual(timer0, g.CardTimer, 1e-4f,
+                "…и подняли её ДО живого тика: таймер карточки не сдвинулся ни на кадр "
+                + "(иначе выгорание успело бы капнуть дренажом при пустом экране)");
+            Assert.AreEqual(age0, g.Age, 1e-4f, "…и возраст тоже стоял");
+            Assert.IsTrue(g.Paused, "модалка держит паузу");
+
+            // …и она ПРОХОДИМА своим контролом: трубка звонит, «!» её поднимает, экран уходит сам.
+            Assert.IsTrue(g.ChildFlashing, "звонок заведён — есть что поднимать");
+            fake.Fire(GameInput.ChildPress);
+            Assert.IsTrue(driver.NewScaleArmed, "условие выполнено");
+            guard = 0;
+            while (driver.NewScaleShowing && guard++ < 600) yield return null;
+            Assert.IsFalse(driver.NewScaleShowing, "модалка ушла своим ходом");
+            Assert.IsFalse(g.Paused, "…и пауза снята — игра продолжается");
 
             Object.Destroy(go);
             yield return null;

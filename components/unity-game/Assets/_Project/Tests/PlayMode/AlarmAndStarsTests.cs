@@ -697,6 +697,70 @@ namespace ThanksNoThanks.Tests.PlayMode
             yield return null;
         }
 
+        /// <summary>Та же BLOCK$-колода, но с хвостом: после блокированной MD03 есть куда ходить дальше
+        /// (контрольная половина теста отвечает ещё раз, и колода не имеет права кончиться финалом).</summary>
+        private static Game BlockSkipDeck()
+        {
+            var deck = new List<Card>
+            {
+                Starter(), Plain("FILL", 18), Plain("MD03", 30), Plain("NORMAL", 40), Plain("TAIL", 41),
+            };
+            deck[2].IsBlockCost = true;   // MD03 → BLOCK$ (Game.BlockPrices["MD03"] = 60)
+            return new Game(deck, coin: () => false);
+        }
+
+        // BLOCK$-ПРОПУСК ≠ ВЫБОР (находка ревью r3, MAJOR). Заблокированная карточка пропускается любым
+        // рычагом БЕЗ Δ, без некролога и без записи ответа — но Game.HandleInput при этом возвращает true
+        // (ход состоялся). Драйвер отмечал по нему §6-окно ЗДОРОВЬЯ, хотя разводка вводов говорит прямо
+        // обратное: здоровье чинят ВЫБОРЫ, а выбора не было. Получалось «недавно чинил здоровье» без
+        // единой попытки лечения, и следующая же карточка, вытянувшая здоровье из тревоги, выдавала за
+        // это САЛЮТ. Панч плашки на этом пути уже был отключён (п.4) — теперь отметка ходит с ним в паре.
+        [UnityTest]
+        public IEnumerator BlockedSkip_DoesNotOpenTheHealthWindow_AndGivesNoFalseStarBurst()
+        {
+            var driver = Boot(out var go, out var fake);
+            yield return null;
+            driver.DebugReplaceGame(BlockSkipDeck());
+            fake.Confirm();                              // опенер → I03
+            fake.No();                                   // I03 → FILL
+            yield return OpenMoneyInGame(driver, fake);  // деньги открыты В ИГРЕ (но их всё равно < 60₽)
+            fake.No();                                   // FILL → MD03: цена 60₽, карман пуст → БЛОКИРОВКА
+            driver.DebugApplyAgeGates(40f);
+            Assert.IsTrue(driver.Game.CurrentCardBlocked, "MD03 действительно заблокирована ценой");
+
+            driver.Game.Scales.Health = 12;              // здоровье в тревоге → ложный салют ВОЗМОЖЕН
+            driver.DebugPumpAlarms(GameDriver.AlarmRecentInputSeconds + 0.5f);   // окна §6 протухли
+            driver.DebugPumpAlarms(0.02f);
+            Assert.IsTrue(driver.AlarmActive(AlarmScale.Health), "тревога здоровья живая");
+            Assert.Greater(driver.SinceScaleInput(AlarmScale.Health), GameDriver.AlarmRecentInputSeconds,
+                "…и окно §6 по здоровью закрыто — считать будем ровно то, что откроет пропуск");
+            int before = driver.StarBurstCount;
+            var blocked = driver.Game.CurrentCard;
+
+            fake.No();                                   // рычаг на ЗАБЛОКИРОВАННОЙ карточке = ПРОПУСК
+            Assert.AreNotSame(blocked, driver.Game.CurrentCard, "ход состоялся: карточка пропущена…");
+            Assert.Greater(driver.SinceScaleInput(AlarmScale.Health), GameDriver.AlarmRecentInputSeconds,
+                "…но окно §6 по здоровью он НЕ открыл: лечат ВЫБОРЫ, а выбора на блокировке не было");
+
+            driver.Game.Scales.Health = 70;              // здоровье вытянула СЛЕДУЮЩАЯ карточка, не игрок
+            driver.DebugApplyAgeGates(40f);
+            driver.DebugPumpAlarms(0.02f);
+            Assert.IsFalse(driver.AlarmActive(AlarmScale.Health), "тревога снята");
+            Assert.AreEqual(before, driver.StarBurstCount, "ложного салюта после BLOCK$-пропуска нет");
+            Assert.AreEqual(0, driver.ActiveStarCount, "…и звёзд в воздухе нет");
+
+            // Контроль тем же путём: на НЕ заблокированной карточке ТОТ ЖЕ рычаг окно §6 открывает —
+            // фикс режет ровно пропуск, а не ответы вообще.
+            Assert.IsFalse(driver.Game.CurrentCardBlocked, "текущая карточка обычная");
+            driver.DebugPumpAlarms(GameDriver.AlarmRecentInputSeconds + 0.5f);
+            fake.No();
+            Assert.AreEqual(0f, driver.SinceScaleInput(AlarmScale.Health), 1e-4f,
+                "принятый ОТВЕТ (а не пропуск) окно §6 по здоровью открывает");
+
+            Object.Destroy(go);
+            yield return null;
+        }
+
         // Окно §6 по деньгам открывает только ПРИНЯТЫЙ кэпом тик: «крутил» ≠ «механика засчитала».
         // Иначе мэшинг ручкой (кэп ~5/с режет всё лишнее) выпрашивал бы салют за чужую заслугу.
         [UnityTest]
@@ -787,15 +851,18 @@ namespace ThanksNoThanks.Tests.PlayMode
         private static Game CrisisGame(string csv, bool toDepression)
         {
             var byId = CardLoader.ParseAll(csv).ToDictionary(c => c.Id);
-            var filler = new Card
-            {
-                Id = "FILL", Question = "FILL?", When = "60", Age = 60, Order = 999,
-                YesDeltas = new List<ScaleDelta>(), NoDeltas = new List<ScaleDelta>(),
-                NoNecrolog = "жил дальше", Flags = new List<string>(),
-            };
+            // r3: после кризиса нужен запас обычных карточек — депрессия входит только через зазор.
+            var fillers = new List<Card>();
+            for (int i = 0; i < Game.DepressionGapCards + 6; i++)
+                fillers.Add(new Card
+                {
+                    Id = "FILL" + i, Question = "FILL?", When = "60", Age = 60, Order = 999 + i,
+                    YesDeltas = new List<ScaleDelta>(), NoDeltas = new List<ScaleDelta>(),
+                    NoNecrolog = "жил дальше", Flags = new List<string>(),
+                });
             var plan = new DeckPlan
             {
-                Deck = new List<Card> { byId["I03"], filler },
+                Deck = new List<Card> { byId["I03"] }.Concat(fillers).ToList(),
                 Reserve = new List<Card>(),
                 Crisis = CrisisIds.Select(id => byId[id]).ToList(),
                 Depression = byId["CR09"],
@@ -817,11 +884,19 @@ namespace ThanksNoThanks.Tests.PlayMode
             int guard = 0;
             while (guard++ < 12000 && g.Phase == CrisisPhase.None && g.State == GameState.Playing)
             {
+                // r3: по дороге к 45 годам встают и §D-модалки шкал, и ВХОДНЫЕ ЭКРАНЫ спецрежимов
+                // (здоровье на 30). Каждый — своя пауза, поэтому снимаем их своим контролом, иначе
+                // цикл просто крутится на замороженном Tick.
+                if (driver.SpecialModeShowing) { NewScaleTut.ClearSpecial(driver, fake); yield return null; continue; }
                 if (driver.NewScaleShowing) { NewScaleTut.Clear(driver, fake); yield return null; continue; }
                 if (driver.TutorialShowing) { fake.Confirm(); yield return null; continue; }
                 g.Tick(0.2f);
             }
             Assert.AreEqual(CrisisPhase.Blitz, g.Phase, "доехали до блица кризиса");
+            // …и сам ВХОДНОЙ ЭКРАН БЛИЦА: кризис теперь объявляется экраном, а не молча.
+            Assert.AreEqual(SpecialMode.Blitz, driver.SpecialModeKind, "вход в блиц объявлен экраном");
+            NewScaleTut.ClearSpecial(driver, fake);
+            yield return null;
             driver.DebugPumpHost(GameDriver.BubbleSeconds + 0.1f);   // состарить объявление кризиса
         }
 
@@ -835,8 +910,17 @@ namespace ThanksNoThanks.Tests.PlayMode
 
             var g = CrisisGame(Csv(), toDepression: true);
             yield return ReachBlitz(driver, g, fake);
-            for (int i = 0; i < 5; i++) fake.Yes();                   // чистый блиц → хвост скатывается в депрессию
-            Assert.IsTrue(g.InDepression, "хвост кризиса завёл депрессию");
+            for (int i = 0; i < 5; i++) fake.Yes();                   // чистый блиц → хвост арминг депрессии
+            // r3: депрессия больше не влетает ВСТЫК за блицем — между ними зазор в обычных карточках.
+            Assert.IsTrue(g.DepressionArmed, "хвост кризиса зарядил депрессию…");
+            for (int i = 0; i < Game.DepressionGapCards; i++)
+            {
+                if (g.CurrentCard != null) g.HandleInput(GameInput.AnswerNo);
+                NewScaleTut.ClearAny(driver, fake);
+            }
+            Assert.IsTrue(g.InDepression, "…и она началась, когда зазор был выбран");
+            NewScaleTut.ClearSpecial(driver, fake);                   // входной экран депрессии — по зелёной
+            yield return null;
             driver.DebugPumpHost(GameDriver.BubbleSeconds + 0.1f);    // состарить облачко «ТЁМНАЯ ПОЛОСА…»
             yield return null;
 

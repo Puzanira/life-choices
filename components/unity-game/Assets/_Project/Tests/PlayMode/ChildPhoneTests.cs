@@ -17,7 +17,8 @@ namespace ThanksNoThanks.Tests.PlayMode
     /// выезд/уезд 0.3 с, качание, длина окна через <c>DebugTick</c>, драйверный путь «!»-кнопки
     /// (<c>GameInput.ChildPress</c>, как его шлёт ArcadeInputSource) → салют и отсутствие штрафа, тот же
     /// путь через РЕАЛЬНУЮ цепочку кабинета (FakeBackend → ArcadeInput → ArcadeInputSource → драйвер),
-    /// заморозка звонка на ВЫГОРАНИИ (плашка S7 накрывает трубку — окно стоять, трубку прятать),
+    /// заморозка звонка ПАУЗОЙ входного экрана выгорания (а короткая плашка повторного — не морозит
+    /// и не накрывает трубку, r3),
     /// проспанный звонок → серия пропусков → «плохой родитель», двойная роль CONFIRM вплоть до финала
     /// (рестарт), и рестарт-выход (трубка в покое, звонок оборван).
     /// </summary>
@@ -220,16 +221,29 @@ namespace ThanksNoThanks.Tests.PlayMode
             Assert.AreEqual(1f, ring.g, 1e-3f, "…по G");
             Assert.AreEqual(1f, ring.b, 1e-3f, "…и по B");
 
-            // Переход плавный: НА ПОЛПУТИ уезда яркость строго между покоем и звонком (а не щёлкает).
-            int guard = 0;
-            while (driver.Game.ChildFlashing && guard++ < 200) driver.DebugTick(0.1f);   // проспали звонок
-            Assert.IsFalse(driver.Game.ChildFlashing, "окно закрылось — трубка поехала за край");
+            // Переход плавный: НА ПОЛПУТИ уезда яркость строго между «целью» и звонком (а не щёлкает).
+            // ⚠ r3 (п.9): уезд ПОСЛЕ ПОДНЯТОГО звонка идёт в ОБЫЧНЫЙ покой, а после ПРОСПАННОГО — в
+            // ПОНИКШИЙ (темнее). Здесь меряем уезд УСПЕХА, поэтому звонок именно ПОДНИМАЕМ.
+            fake.Fire(GameInput.ChildPress);            // подняли трубку
+            Assert.IsFalse(driver.Game.ChildFlashing, "трубку подняли — она поехала за край");
+            Assert.IsFalse(driver.ChildPhoneMissed, "…и это НЕ пропуск");
             driver.DebugTick(GameDriver.PhoneSlideSeconds / 2f);
             var mid = driver.ChildPhoneImage.color;
             Assert.Greater(driver.ChildPhoneOut, 0f, "трубка ещё в пути");
             Assert.Less(driver.ChildPhoneOut, 1f, "…но уже не в позе звонка");
             Assert.Greater(mid.b, rest.b + 1e-3f, "на полпути яркость ещё не упала до покоя");
             Assert.Less(mid.b, 1f - 1e-3f, "…и уже не полная — тинт лерпается вместе с позой");
+
+            // …а ПРОСПАННЫЙ звонок уезжает ЗАМЕТНО темнее обычного покоя — это и есть «поникшая» (п.9).
+            DriveToCall(driver, fake);
+            Tick(driver, GameDriver.PhoneSlideSeconds, 0.05f);
+            int guard = 0;
+            while (driver.Game.ChildFlashing && guard++ < 200) driver.DebugTick(0.1f);   // проспали
+            Assert.IsTrue(driver.ChildPhoneMissed, "пропуск помечен");
+            driver.DebugTick(GameDriver.PhoneSlideSeconds);
+            var sad = driver.ChildPhoneImage.color;
+            Assert.Less(sad.g, rest.g - 1e-3f,
+                $"поникшая ({sad.g:0.000}) темнее обычного покоя ({rest.g:0.000})");
 
             Object.Destroy(go);
             yield return null;
@@ -420,14 +434,22 @@ namespace ThanksNoThanks.Tests.PlayMode
         // ================================================ ВЫГОРАНИЕ: звонок замирает и прячется
 
         /// <summary>
-        /// Плашка «ВЫГОРАНИЕ» (S7) — полноэкранный захват, нарисованный ПОВЕРХ трубки. Пока она висит,
-        /// звонящей трубки не видно, поэтому окно поднятия ОБЯЗАНО стоять: иначе игрок копит невидимые
-        /// пропуски и получает «плохого родителя» за звонок, которого не видел. Проверяем обе половины:
-        /// Game не убавляет окно (и не штрафует), драйвер прячет трубку, а по выходу звонок продолжается
-        /// РОВНО с того же остатка (2 с из 5), а не начинается заново.
+        /// ⚠ КАНОН ПЕРЕПИСАН r3 (2026-08-07). До сих пор выгорание МОРОЗИЛО звонок и ПРЯТАЛО трубку —
+        /// ровно потому, что плашка S7 была полноэкранным захватом поверх доски, и бегущее окно копило
+        /// НЕВИДИМЫЕ пропуски (два = «плохой родитель» за звонок, которого игрок не видел).
+        ///
+        /// Захвата больше нет. Инвариант «невидимых пропусков не бывает» держится теперь ДВУМЯ разными
+        /// средствами, и тест проверяет ОБА:
+        /// <list type="number">
+        /// <item>ПЕРВОЕ выгорание объясняет ВХОДНОЙ ЭКРАН спецрежима. Он ставит ОБЫЧНУЮ паузу, поэтому
+        /// звонок замирает вместе со всей игрой — как под любой подсказкой;</item>
+        /// <item>ПОВТОРНЫЕ показывают КОРОТКУЮ плашку без блокировки. Трубка при ней ВИДНА, окно честно
+        /// идёт — и накрывать её нечем: боксы плашки и нарисованной трубки не пересекаются.</item>
+        /// </list>
+        /// Плюс остаток окна по-прежнему ПРОДОЛЖАЕТСЯ после разморозки, а не начинается заново.
         /// </summary>
         [UnityTest]
-        public IEnumerator Burnout_FreezesTheCallWindow_AndHidesTheHandset_UntilItLifts()
+        public IEnumerator Burnout_FirstTimePausesTheCall_RepeatShowsAShortPlate_AndNeverHidesTheHandset()
         {
             var driver = Boot(out var go, out var fake);
             yield return null;
@@ -441,51 +463,59 @@ namespace ThanksNoThanks.Tests.PlayMode
             Assert.IsTrue(driver.ChildGroup.activeSelf, "трубка на экране");
             Assert.AreEqual(1f, driver.ChildPhoneOut, 1e-3f, "…и полностью выехала");
 
-            // ВЫГОРАНИЕ приходит ПОСРЕДИ звонка: энергия проваливается в зону латча (≤10 %), ближайший
-            // тик её защёлкивает. Одноразовую подсказку выгорания снимаем сразу — дальше морозить обязано
-            // именно выгорание, а не пауза-подсказка (иначе тест мерил бы не ту заморозку).
+            // ---- (1) ПЕРВОЕ выгорание: входной экран, пауза, звонок ЗАМЕР ---------------------------
             driver.Game.Scales.Energy = Game.BurnoutEnterEnergyAtOrBelow;
             driver.DebugTick(0.05f);
             Assert.IsTrue(driver.Game.Burnout, "выгорание включилось посреди звонка");
-            if (driver.TutorialShowing) fake.Confirm();
-            Assert.IsFalse(driver.Game.Paused, "подсказка снята — игра НЕ на паузе");
-            Assert.IsTrue(driver.Game.ChildFlashing, "звонок никуда не делся — он ЗАМЕР");
-            Assert.IsFalse(driver.ChildGroup.activeSelf,
-                "трубка спрятана: плашка выгорания всё равно накрывает её целиком");
+            Assert.IsTrue(driver.SpecialModeShowing, "первое выгорание объясняется ВХОДНЫМ ЭКРАНОМ");
+            Assert.AreEqual(SpecialMode.Burnout, driver.SpecialModeKind, "…именно выгорания");
+            Assert.IsTrue(driver.Game.Paused, "экран ставит обычную паузу — под ней стоит ВСЁ");
+            Assert.IsTrue(driver.Game.ChildCallFrozen, "…в том числе звонок");
 
-            // 10 с «вслепую» — ВДВОЕ дольше окна. Ни окно, ни серия пропусков не двигаются.
             int child0 = driver.Game.Scales.Child;
             int rel0 = driver.Game.Scales.Relationships;
-            for (int i = 0; i < 100; i++)
-            {
-                driver.Game.Scales.Energy = Game.BurnoutEnterEnergyAtOrBelow;  // держим в зоне выгорания:
-                driver.DebugTick(0.1f);                                        // тест про звонок, не про смерть
-            }
-            Assert.IsTrue(driver.Game.Burnout, "всё ещё выгорание");
-            Assert.IsFalse(driver.Game.Paused, "и всё ещё без паузы-подсказки");
-            Assert.IsTrue(driver.Game.ChildFlashing,
-                "окно ЗАМОРОЖЕНО: за 10 с под плашкой оно не истекло");
-            Assert.IsFalse(driver.ChildGroup.activeSelf, "…и трубка всё это время спрятана");
+            for (int i = 0; i < 100; i++) driver.DebugTick(0.1f);   // 10 с под экраном — ВДВОЕ дольше окна
+            Assert.IsTrue(driver.Game.ChildFlashing, "окно ЗАМОРОЖЕНО паузой: за 10 с оно не истекло");
             Assert.AreEqual(child0, driver.Game.Scales.Child, "невидимых пропусков не начислено");
-            Assert.Greater(driver.Game.Scales.Relationships, rel0 - Game.ChildBadParentRelPenalty,
-                "…и «плохого родителя» вслепую не выдали");
+            Assert.AreEqual(rel0, driver.Game.Scales.Relationships, "…и отношения под паузой не двигались");
 
-            // Выход из выгорания (энергия выше порога снятия) → трубка снова на экране, звонок доигрывает.
-            driver.Game.Scales.Energy = Game.BurnoutExitEnergyAbove + 20;
-            driver.DebugTick(0.05f);
-            Assert.IsFalse(driver.Game.Burnout, "выгорание снято");
-            Assert.IsTrue(driver.ChildGroup.activeSelf, "трубка вернулась на экран");
+            // Зелёная снимает экран — игра продолжается с того же места.
+            NewScaleTut.ClearSpecial(driver, fake);
+            yield return null;
+            Assert.IsFalse(driver.SpecialModeShowing, "экран снят зелёной");
+            Assert.IsFalse(driver.Game.Paused, "паузы больше нет");
+            Assert.IsTrue(driver.Game.Burnout, "выгорание при этом никуда не делось");
+            Assert.IsTrue(driver.ChildGroup.activeSelf, "трубка ВИДНА — короткая плашка её не накрывает");
             Assert.AreEqual("phone-ring-v2", driver.ChildPhoneImage.sprite.name, "…и она всё ещё звонит");
-            Assert.AreEqual(1f, driver.ChildPhoneOut, 1e-3f,
-                "поза сохранилась — за время выгорания трубка не уезжала за край");
+            Assert.AreEqual(1f, driver.ChildPhoneOut, 1e-3f, "поза сохранилась");
 
-            // Остаток ПРОДОЛЖИЛСЯ, а не начался заново: на 1.85 с после разморозки окно ещё живо, а на
-            // 2.05 с — истекло (сожгли 3 из 5 до выгорания). Если бы окно перезапустилось, оно бы дожило.
+            // ---- (2) КОРОТКАЯ ПЛАШКА повторного выгорания НИКОГДА НЕ НАКРЫВАЕТ ТРУБКУ ----------------
+            // ⚠ 2026-08-08 (дизайн-скептик): плашка переехала ПОД БАТАРЕЮ — туда, про что она и говорит.
+            // Свободный коридор там 55 px, и выехавшая трубка в него не помещается ни при какой ширине
+            // плашки. Инвариант «трубку не заслоняем» держится теперь ВРЕМЕНЕМ, а не пикселями: пока
+            // трубка на экране, левая колонка принадлежит ей (звонок транзиентен и требует ответа),
+            // плашка возвращается сразу, как трубка уехала. Состояние всё это время читается красной
+            // §4-тревогой батареи — в выгорании энергия ≤10 %, тревога горит по определению.
+            Assert.AreEqual(1f, driver.ChildPhoneOut, 1e-3f, "трубка на экране…");
+            Assert.IsFalse(driver.BurnoutPlateGroup.activeSelf,
+                "…и плашка уступила ей место, а не легла поверх");
+            Assert.IsTrue(driver.BatteryAlarmImage.gameObject.activeSelf,
+                "состояние при этом видно: батарея горит красной §4-тревогой");
+
+            // ---- (3) остаток окна ПРОДОЛЖИЛСЯ, а не начался заново ----------------------------------
             Tick(driver, 1.8f, 0.1f);
             Assert.IsTrue(driver.Game.ChildFlashing, "остаток окна ещё не вышел");
             driver.DebugTick(0.2f);
             Assert.IsFalse(driver.Game.ChildFlashing,
                 "окно истекло ровно на своём остатке (2 с), а не отсчиталось заново");
+
+            // ---- (4) …и как только трубка уехала за край, плашка вернулась на своё место -------------
+            int guard = 0;
+            while (guard++ < 400 && driver.ChildPhoneOut > 0f) yield return null;
+            Assert.AreEqual(0f, driver.ChildPhoneOut, 1e-3f, "трубка уехала за левый край");
+            yield return null;                      // кадр Update: ветка плашки пересчиталась
+            Assert.IsTrue(driver.Game.Burnout, "выгорание всё ещё горит");
+            Assert.IsTrue(driver.BurnoutPlateGroup.activeSelf, "…и короткая плашка вернулась под батарею");
 
             Object.Destroy(go);
             yield return null;
