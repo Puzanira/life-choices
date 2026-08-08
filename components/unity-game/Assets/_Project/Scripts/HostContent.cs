@@ -3,7 +3,13 @@ using System.Collections.Generic;
 namespace ThanksNoThanks
 {
     /// <summary>The host's fallback reaction tone when a card has no named line (see <see cref="HostVoice"/>).</summary>
-    public enum HostTone { Positive, Risky, Absurd, Cautious, Fatal, Skip }
+    /// <summary>
+    /// Тон запасной реплики Ведущего (см. <see cref="HostVoice"/>).
+    /// <see cref="Debt"/> — не «оценка выбора», а РЕАКЦИЯ НА СОБЫТИЕ: счёт ушёл ниже нуля. Поэтому
+    /// <see cref="HostVoice.Classify"/> его никогда не возвращает и тегом «Тон» в CSV он не ставится —
+    /// пул дёргает драйвер по <see cref="Game.DebtEntered"/>.
+    /// </summary>
+    public enum HostTone { Positive, Risky, Absurd, Cautious, Fatal, Skip, Debt }
 
     /// <summary>
     /// FINAL host content, baked from <c>docs/new_concept/host-content.md</c> (commit 6ef28fc) — the
@@ -66,6 +72,15 @@ namespace ThanksNoThanks
             { HostTone.Cautious, new[] { "И правильно!", "Скучно…", "Перестраховщик!", "Как благоразумно!", "Зевота…", "Тихоня!" } },
             { HostTone.Fatal,    new[] { "Ой.", "Спасибо за игру!", "Занавес!", "Ну вот и всё!", "Аплодисменты!", "…" } },
             { HostTone.Skip,     new[] { "Молчание — тоже ответ!", "Задумались? Бывает.", "Ау, вы тут?", "Время-время!", "Решили не решать!", "Тишина в студии!" } },
+            // Уход счёта в минус (отрезок 0, §3.2 — «долг должен звучать, а не просто краснеть»).
+            { HostTone.Debt,     new[] { "В долг! Красота!", "Живём один раз!", "Банк вас любит!", "Смело, но глупо!", "Ой, минус!", "Заплатите потом!" } },
         };
+
+        /// <summary>Реплика про долг номер <paramref name="number"/> (1-based), по кругу пула.</summary>
+        public static string DebtLineFor(int number)
+        {
+            var lines = Pool[HostTone.Debt];
+            return lines[((number - 1) % lines.Length + lines.Length) % lines.Length];
+        }
     }
 }

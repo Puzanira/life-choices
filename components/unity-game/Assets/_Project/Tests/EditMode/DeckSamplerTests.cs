@@ -162,14 +162,26 @@ namespace ThanksNoThanks.Tests
 
         // ---- deck size cap ----
 
+        /// <summary>
+        /// Длина забега сидит в коридоре сэмплера [<see cref="DeckSampler.MinDeck"/>…
+        /// <see cref="DeckSampler.MaxDeck"/>] на любом сиде.
+        ///
+        /// ⚠ ИМЯ И СООБЩЕНИЕ ГОВОРИЛИ «[25,30]», А ASSERT СВЕРЯЛСЯ С 40…66 (находка ревью). Число 25–30 —
+        /// исходный контракт, но пейсинг-фикс основательницы (2026-07-23, ≥8 обычных карточек между
+        /// открытиями механик) арифметически в тридцать карточек не влезает, и коридор тогда же подняли до
+        /// 40…66; тест переехал на константы, а название осталось врать. Числа НЕ трогаем — конфликт
+        /// «25–30 vs пейсинг» решает основательница; здесь только честное имя фактического инварианта.
+        /// Вторая половина того же инварианта — «длина забега НЕ РАСТЁТ вместе с пулом» (колода до ~243) —
+        /// живёт в <c>DeckScaleTests</c>.
+        /// </summary>
         [Test]
-        public void DeckSize_Within_25_to_30_AcrossSeeds()
+        public void DeckSize_StaysInSamplerCorridor_AcrossSeeds()
         {
             for (int seed = 0; seed < 40; seed++)
             {
                 int n = Sample(seed).Count;
                 Assert.That(n, Is.InRange(DeckSampler.MinDeck, DeckSampler.MaxDeck),
-                    $"deck size {n} within [25,30] (seed {seed})");
+                    $"deck size {n} within [{DeckSampler.MinDeck},{DeckSampler.MaxDeck}] (seed {seed})");
             }
         }
 

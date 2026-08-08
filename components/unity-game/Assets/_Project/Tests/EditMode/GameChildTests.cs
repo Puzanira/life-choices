@@ -288,20 +288,25 @@ namespace ThanksNoThanks.Tests
         [Test]
         public void Lt04_Yes_ClosesChild_AndCostsOneRelationship()
         {
-            var deck = new List<Card>
-            {
-                Starter(), Plain("MD02", 21),
-                WithYesDelta(Plain("LT04", 22), Scale.Relationships, DeltaKind.Add, -1)  // canon «Отн −1»
-            };
+            // Канон отрезка 0: LT04-ДА поднят с «Отн −1» до «Отн −2» — «навязчивость должна быть
+            // слышна», это −12 п.п., а не −5. Карточка помечена открывающей отношения, иначе Δ по ещё
+            // не открытой шкале не применилась бы (второе правило отрезка), — колода теста возраст 20 не
+            // проходит.
+            var lt04 = WithYesDelta(Plain("LT04", 22), Scale.Relationships, DeltaKind.Add, -2);
+            lt04.Flags = new List<string>(lt04.Flags) { "OPEN:" + Card.OpenRelations };
+            var deck = new List<Card> { Starter(), Plain("MD02", 21), lt04 };
             deck.AddRange(Filler(23));
             var g = new Game(deck, coin: () => false) { ChildFlashInterval = () => 5f };
             g.StartLife(); No(g); Yes(g);         // open child via MD02
             Assert.IsTrue(g.ChildOpen);
             int rel0 = g.Scales.Relationships;
+            int want = DeltaScale.Resolve(Scale.Relationships, DeltaKind.Add, -2);
             Yes(g);                               // LT04=ДА «навязчивая опека»
             Assert.IsFalse(g.ChildOpen, "children grown → child scale/button off");
             Assert.IsFalse(g.ChildFlashing, "no more flashing after LT04");
-            Assert.AreEqual(rel0 - 1, g.Scales.Relationships, "ДА (опека) costs one relationship point");
+            Assert.AreEqual(-12, want, "канон отрезка 0: «Отн −2» = −12 п.п.");
+            Assert.AreEqual(rel0 + want, g.Scales.Relationships,
+                "ДА (навязчивая опека) стоит заметных отношений, а не одного пункта");
         }
 
         [Test]

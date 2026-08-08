@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Linq;
 using NUnit.Framework;
 using ThanksNoThanks;
 
@@ -54,7 +55,10 @@ namespace ThanksNoThanks.Tests
             });
             var story = r.ComposeStory();
 
-            StringAssert.StartsWith("Но не переживайте! Ведь вы… родились у прекрасных родителей.", story);
+            // Схлопывание двойного многоточия на шве сохранено (дизайн-док §6.2(3): «механика склейки
+            // остаётся как есть — меняется только разделитель»). Перенос строки — ЛИТЕРАЛОМ, не через
+            // Necrolog.LineSeparator: сверять константу с самой собой значит не проверять ничего.
+            StringAssert.StartsWith("Но не переживайте! Ведь вы…\nродились у прекрасных родителей.", story);
             StringAssert.DoesNotContain("… …", story, "no double ellipsis anywhere in the glued story");
             StringAssert.DoesNotContain("……", story, "…nor a glued-together one");
             StringAssert.Contains("Ели жуков и ничего не боялись.", story, "the CSV line itself is untouched");
@@ -86,17 +90,133 @@ namespace ThanksNoThanks.Tests
 
             var r = Necrolog.Build("весёлая старость", entries);
 
-            // parents (1) + kept lines must be <= 15
-            Assert.LessOrEqual(r.StoryLines.Count, Necrolog.MaxLines);
-            // all weighty lines survive; only ROND were dropped
-            foreach (var e in entries)
-                if (!e.IsRond)
-                    CollectionAssert.Contains(r.StoryLines, e.Line);
+            // Плашка держит ровно MaxLines строк, считая фиксированных родителей.
+            Assert.AreEqual(Necrolog.MaxLines, r.StoryLines.Count);
+            Assert.AreEqual(Necrolog.ParentsLine, r.StoryLines[0]);
 
+            // ROND — низший приоритет: пока есть весомые строки, ни одна кековая не попадает.
             int rondKept = 0;
             foreach (var line in r.StoryLines)
                 if (line.StartsWith("rond")) rondKept++;
-            Assert.AreEqual(4, rondKept, "1 parents + 10 weighty + 4 rond = 15");
+            Assert.AreEqual(0, rondKept, "бюджет целиком выбран весомыми строками — ROND не попал ни одной");
+
+            // …и добраны они с начала хронологии, а не из середины списка.
+            for (int i = 0; i < Necrolog.MaxLines - 1; i++)
+                Assert.AreEqual("weighty" + i, r.StoryLines[i + 1]);
+        }
+
+        [Test]
+        public void EveryLine_StartsOnItsOwnLine_NotOneLongParagraph()
+        {
+            // Главная жалоба живого плейтеста: «некролог большущей простынёй, сплошным текстом, никто
+            // читать не будет». Проверяем ровно её: сколько строк отобрано — столько РЯДОВ и на экране,
+            // плюс отдельный ряд под зачин. Литеральный '\n' — тест не должен зависеть от константы.
+            var r = Necrolog.Build("спокойная старость", new List<NecrologEntry>
+            {
+                new() { Age = 7,  Order = 0, Line = "Рыжий кот из детства прожил с вами всю жизнь." },
+                new() { Age = 19, Order = 1, Line = "Первую зарплату спустили за один вечер." },
+                new() { Age = 30, Order = 2, Line = "Свадьбу сыграли, и это было громко.", IsMilestone = true },
+            });
+
+            var rows = r.ComposeStory().Split('\n');
+            Assert.AreEqual(1 + r.StoryLines.Count, rows.Length,
+                "зачин + КАЖДАЯ строка истории отдельным рядом (а не всё одним абзацем через пробел)");
+            Assert.AreEqual(Necrolog.StoryIntro, rows[0]);
+            Assert.AreEqual("родились у прекрасных родителей.", rows[1], "многоточие схлопнулось на шве");
+            Assert.AreEqual("Свадьбу сыграли, и это было громко.", rows[rows.Length - 1]);
+            foreach (var row in rows)
+                Assert.IsFalse(row.Contains("  "), "внутри ряда не остаётся склеек через двойной пробел");
+        }
+
+        [Test]
+        public void Milestones_AreNeverDropped_EvenWhenOrdinaryLinesAreOlder()
+        {
+            // Отрезок 0 §6.2(2): отбор ПО ВЕСУ. Раньше при переполнении резалась СЕРЕДИНА хронологии —
+            // то есть ровно та часть жизни, где игрок больше всего наделал. Теперь вехи (TIMELINE)
+            // забираются первыми, а обычные строки добивают остаток.
+            var entries = new List<NecrologEntry>();
+            for (int i = 0; i < 12; i++)   // 12 обычных строк детства — с запасом больше бюджета
+                entries.Add(new NecrologEntry { Age = 5, Order = i, Line = "ordinary" + i });
+            entries.Add(new NecrologEntry { Age = 30, Order = 100, Line = "свадьба", IsMilestone = true });
+            entries.Add(new NecrologEntry { Age = 62, Order = 101, Line = "дети выросли", IsMilestone = true });
+
+            var r = Necrolog.Build("спокойная старость", entries);
+
+            Assert.AreEqual(Necrolog.MaxLines, r.StoryLines.Count);
+            CollectionAssert.Contains(r.StoryLines, "свадьба", "веха не выкидывается…");
+            CollectionAssert.Contains(r.StoryLines, "дети выросли", "…ни одна");
+            // …и печатается в хронологическом порядке, а не в порядке отбора.
+            Assert.Less(r.StoryLines.IndexOf("ordinary0"), r.StoryLines.IndexOf("свадьба"));
+            Assert.Less(r.StoryLines.IndexOf("свадьба"), r.StoryLines.IndexOf("дети выросли"));
+        }
+
+        [Test]
+        public void OrdinaryLines_SpreadOverLifeStages_BeforeFillingUp()
+        {
+            // «по одной на этап жизни (детство · юность · молодость · зрелость · старость), чтобы
+            // получилась биография, а не список». Проверяем на перекошенном входе: детство завалено
+            // строками, у остальных этапов — по одной. Все пять этапов обязаны прозвучать.
+            var entries = new List<NecrologEntry>();
+            for (int i = 0; i < 10; i++)
+                entries.Add(new NecrologEntry { Age = 6, Order = i, Line = "детство" + i });
+            entries.Add(new NecrologEntry { Age = 18, Order = 50, Line = "юность" });
+            entries.Add(new NecrologEntry { Age = 25, Order = 51, Line = "молодость" });
+            entries.Add(new NecrologEntry { Age = 40, Order = 52, Line = "зрелость" });
+            entries.Add(new NecrologEntry { Age = 70, Order = 53, Line = "старость" });
+
+            var r = Necrolog.Build("спокойная старость", entries);
+
+            foreach (var stage in new[] { "юность", "молодость", "зрелость", "старость" })
+                CollectionAssert.Contains(r.StoryLines, stage, "этап " + stage + " обязан прозвучать");
+            CollectionAssert.Contains(r.StoryLines, "детство0", "…и детство тоже");
+            // Перекошенный этап не съедает плашку: сначала каждый этап получает по строке, и только
+            // ОСТАТОК бюджета (6 − 5 = 1) достаётся второй детской. Пяти подряд про шесть лет не бывает.
+            Assert.AreEqual(2, r.StoryLines.Count(l => l.StartsWith("детство")),
+                "детство берёт свою строку + единственный оставшийся слот, не больше");
+        }
+
+        [Test]
+        public void ShortLife_FillsTheBudget_InsteadOfPrintingOnePerStage()
+        {
+            // Обратная сторона правила: «по одной на этап» — это ПОРЯДОК отбора, а не потолок. Если
+            // строк мало и место осталось, оставшиеся добираются, иначе короткая жизнь печатала бы две
+            // строки при месте на шесть.
+            var entries = new List<NecrologEntry>();
+            for (int i = 0; i < 4; i++)
+                entries.Add(new NecrologEntry { Age = 7, Order = i, Line = "детство" + i });
+
+            var r = Necrolog.Build("спокойная старость", entries);
+
+            Assert.AreEqual(5, r.StoryLines.Count, "родители + все четыре строки — место есть");
+        }
+
+        [Test]
+        public void IdenticalLines_TakeOneSlot_AndTheFreedSlotGoesToTheNextEntry()
+        {
+            // Находка ревью (MINOR): защита от повтора стояла на ОБЪЕКТЕ записи (`chosen.Contains(e)`), а
+            // на плашке дублем читается ОДИНАКОВЫЙ ТЕКСТ. Кек-карточки и филлеры делят строки законно, так
+            // что при семи местах всего два «…купили ненужную вещь» подряд съедали слот у настоящей вехи.
+            var entries = new List<NecrologEntry>
+            {
+                new() { Age = 19, Order = 0, Line = "Купили ненужную вещь на распродаже." },
+                new() { Age = 21, Order = 1, Line = "Купили ненужную вещь на распродаже." },
+                new() { Age = 30, Order = 2, Line = "Свадьбу сыграли, и это было громко.", IsMilestone = true },
+                new() { Age = 33, Order = 3, Line = "Родился ребёнок.", IsMilestone = true },
+                new() { Age = 40, Order = 4, Line = "Ушли с офисной работы в никуда." },
+                new() { Age = 52, Order = 5, Line = "Второй язык так и остался на уровне A1." },
+                new() { Age = 70, Order = 6, Line = "Внуки приезжали каждое лето." },
+            };
+
+            var r = Necrolog.Build("весёлая старость", entries);
+
+            Assert.AreEqual(1, r.StoryLines.Count(l => l == "Купили ненужную вещь на распродаже."),
+                "одинаковый текст занимает РОВНО ОДИН слот");
+            Assert.AreEqual(r.StoryLines.Count, r.StoryLines.Distinct().Count(),
+                "…и вообще ни одна строка плашки не повторяется");
+            Assert.AreEqual(Necrolog.MaxLines, r.StoryLines.Count,
+                "освободившийся слот не пропал — плашка заполнена до конца");
+            CollectionAssert.Contains(r.StoryLines, "Внуки приезжали каждое лето.",
+                "…и достался следующему кандидату, который раньше не влезал");
         }
 
         [Test]

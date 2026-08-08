@@ -1790,11 +1790,143 @@ namespace ThanksNoThanks
         public void DebugAdvanceStars(float dt) => AdvanceStars(dt);
 
         // Set the two finale labels that go INTO the baked plate. The plate itself is part of `end.png`, so
-        // nothing here resizes a plate any more — best-fit is what makes a 15-line necrolog fit the field.
+        // nothing here resizes a plate any more — подбор кегля и есть то, что сажает некролог в поле.
         private void RenderFinaleTexts(NecrologResult n, int age)
         {
             _finaleOutcome.text = n.OutcomeBlock(age);
-            _finaleStory.text = n.ComposeStory();
+            _finaleStory.text = FitStoryPerLine(n.ComposeStory());
+        }
+
+        /// <summary>
+        /// ОДНА ВЕХА — ОДНА СТРОКА НА ЭКРАНЕ. Подбирает кегль некролога и возвращает разметку для
+        /// <see cref="_finaleStory"/>.
+        ///
+        /// ⚠ ЗАЧЕМ ЭТО ВМЕСТО ОБЫЧНОГО best-fit (дизайн-гейт 2026-08-08, MAJOR). uGUI-best-fit меряет
+        /// БЛОК: он ужимает текст, только когда не сходится ВЫСОТА. Строка, которая не влезла в ширину
+        /// поля, при этом спокойно переносится — и худший случай колоды давал сироту («жизнь.», 101 px)
+        /// ПОСЕРЕДИНЕ блока. Это ломает и инвариант «одна веха = одна строка», и вертикальный ритм: между
+        /// соседними вехами вдруг полторы межстрочных.
+        ///
+        /// Поэтому кегль подбирается ПОСТРОЧНО: блок берёт самый крупный кегль, при котором сходится
+        /// высота, а КАЖДАЯ строка, которой этого кегля мало по ширине, ужимается персонально тегом
+        /// `&lt;size&gt;` — ровно настолько, чтобы лечь в одну строку. Соседи своего размера не теряют
+        /// (в этом вся разница с общим ужатием: одна длинная строка не мельчит весь некролог).
+        /// Контейнер и поля не трогаются — сажаем ТЕКСТ, а не бокс.
+        ///
+        /// Пол ужатия общий с блоком (<see cref="FinaleStoryMinSize"/>): ниже порога читаемости строку не
+        /// давим — если и там не влезло, перенос честнее нечитаемой строки.
+        /// </summary>
+        private string FitStoryPerLine(string story)
+        {
+            var t = _finaleStory;
+            if (t == null || string.IsNullOrEmpty(story)) return story;
+
+            float boxW = t.rectTransform.rect.width;
+            float boxH = t.rectTransform.rect.height;
+            // Рект ещё не разложен (или шрифт не поднялся) — молча отдаём текст как есть, без гадания.
+            if (boxW <= 1f || boxH <= 1f || t.font == null) return story;
+
+            var rows = story.Split('\n');
+            string markup = story;
+            for (int size = FinaleStoryMaxSize; size >= FinaleStoryMinSize; size--)
+            {
+                markup = ComposeFittedRows(t, rows, size, boxW);
+                if (PreferredBlockHeight(t, markup, size, boxW) <= boxH)
+                {
+                    t.fontSize = size;
+                    return markup;
+                }
+            }
+            // Не сошлось даже на полу читаемости: берём пол (verticalOverflow=Truncate дорисует остальное).
+            t.fontSize = FinaleStoryMinSize;
+            return markup;
+        }
+
+        // Собрать блок при базовом кегле `size`: строки, влезающие по ширине, идут как есть; остальные —
+        // в персональном `<size=k>`, где k — САМЫЙ КРУПНЫЙ кегль, при котором строка ложится в одну.
+        private static string ComposeFittedRows(Text t, string[] rows, int size, float boxW)
+        {
+            var sb = new System.Text.StringBuilder();
+            for (int i = 0; i < rows.Length; i++)
+            {
+                if (i > 0) sb.Append('\n');
+                int k = LargestSizeFittingOneLine(t, rows[i], size, boxW);
+                if (k >= size) sb.Append(rows[i]);
+                else sb.Append("<size=").Append(k).Append('>').Append(rows[i]).Append("</size>");
+            }
+            return sb.ToString();
+        }
+
+        /// <summary>
+        /// ЗАПАС ПО ШИРИНЕ при подборе построчного кегля — 7 %.
+        ///
+        /// ⚠ ЗАМЕР ВРЁТ, И ЭТО ИЗМЕРЕНО, А НЕ УГАДАНО. `TextGenerator.GetPreferredWidth` (и даже полный
+        /// `Populate` с экстентами = размеру ректа) отвечает «переноса нет», а живой кадр аркадного захвата
+        /// строку ВСЁ РАВНО переносит: рисуется подпись позже и при другом масштабе канваса
+        /// (`Text.pixelsPerUnit` = 0.385), шрифт растеризуется в другой сетке. Поймано ГЛАЗАМИ на
+        /// `inc00-finalelong` — генератор рапортовал lineCount = 8, а на картинке сирота «жизнь.».
+        ///
+        /// Порог откалиброван по самому кадру: строка с замером 987 px рисуется одной строкой, строка с
+        /// замером ≈1020 px при том же поле 1058 — переносится. Значит фактически доступно ≈0.93 ширины;
+        /// берём именно это. Меньше нельзя (некролог начнёт мельчить без нужды), больше — возвращается
+        /// сирота. Проверять этот порог обязательно КАРТИНКОЙ: ни один headless-замер его не видит.
+        /// </summary>
+        public const float FinaleStoryFitMargin = 0.93f;
+
+        private static int LargestSizeFittingOneLine(Text t, string row, int from, float boxW)
+        {
+            if (string.IsNullOrEmpty(row)) return from;
+            float limit = boxW * FinaleStoryFitMargin;
+            for (int k = from; k > FinaleStoryMinSize; k--)
+                if (PreferredRowWidth(t, row, k) <= limit) return k;
+            return FinaleStoryMinSize;
+        }
+
+        // Ширина ОДНОЙ строки без переноса (generationExtents = 0 + Overflow → натуральная ширина).
+        private static float PreferredRowWidth(Text t, string row, int size)
+        {
+            var s = t.GetGenerationSettings(Vector2.zero);
+            s.fontSize = size;
+            s.resizeTextForBestFit = false;
+            s.richText = true;
+            s.horizontalOverflow = HorizontalWrapMode.Overflow;
+            return t.cachedTextGeneratorForLayout.GetPreferredWidth(row, s) / t.pixelsPerUnit;
+        }
+
+        /// <summary>
+        /// МАСШТАБ КАНВАСА КАБИНЕТА. Экран автомата — ровно 1920×1080, т.е. `referenceResolution` скалера
+        /// один в один, и `Canvas.scaleFactor` там равен 1. В нём — и только в нём — блок некролога и
+        /// рисуется по-настоящему.
+        /// </summary>
+        public const float CabinetCanvasScale = 1f;
+
+        /// <summary>
+        /// Высота ВСЕГО блока (с уже проставленными `&lt;size&gt;`) в ширину поля, В ЭКРАННЫХ ПИКСЕЛЯХ
+        /// КАБИНЕТА. Генератор честно учитывает персональные кегли строк.
+        ///
+        /// ⚠ МЕРИТЬ ОБЯЗАТЕЛЬНО В МАСШТАБЕ КАБИНЕТА, А НЕ В ТЕКУЩЕМ (регрессия 2026-08-08, поймана глазами
+        /// по кадру: у полного некролога пропала СЕДЬМАЯ веха). `TextGenerator` растеризует шрифт в сетке
+        /// `settings.scaleFactor` = <see cref="Text.pixelsPerUnit"/> = `Canvas.scaleFactor`, и межстрочье
+        /// КВАНТУЕТСЯ в этой сетке. В батч-прогоне игровое окно не 16:9, скалер выдаёт scaleFactor 0.3849 —
+        /// и те же восемь рядов кеглем 34 меряются как 311.8 px (влезают в поле 314!), тогда как в кабинете
+        /// (scaleFactor 1) им нужно 320 px. Подборщик брал 34, а `verticalOverflow = Truncate` на живом
+        /// кадре молча срезал последний ряд. Замер делением на `pixelsPerUnit` эту разницу НЕ ловит: делится
+        /// уже проквантованное число.
+        ///
+        /// Поэтому здесь фиксируется `scaleFactor` = <see cref="CabinetCanvasScale"/>: замер перестаёт
+        /// зависеть от того, в каком окне сейчас крутится сцена, и всегда отвечает про ту сетку, в которой
+        /// кадр рисуется. Делить на `pixelsPerUnit` после этого НЕЛЬЗЯ — результат уже в экранных пикселях.
+        /// (Ширина строк — <see cref="PreferredRowWidth"/> — намеренно оставлена в текущем масштабе: её
+        /// порог <see cref="FinaleStoryFitMargin"/> откалиброван ПО КАДРУ именно против того замера.)
+        /// </summary>
+        private static float PreferredBlockHeight(Text t, string markup, int size, float boxW)
+        {
+            var s = t.GetGenerationSettings(new Vector2(boxW, 0f));
+            s.fontSize = size;
+            s.resizeTextForBestFit = false;
+            s.richText = true;
+            s.scaleFactor = CabinetCanvasScale;
+            return t.cachedTextGeneratorForLayout.GetPreferredHeight(markup, s);
         }
 
         private void Awake()
@@ -1858,6 +1990,7 @@ namespace ThanksNoThanks
             _game.HealthOpened += OnHealthOpened;
             _game.BurnoutEntered += OnBurnoutEntered;
             _game.RelationshipBrokeUp += OnRelationshipBrokeUp;
+            _game.DebtEntered += OnDebtEntered;
             _game.ChildOpened += OnChildOpened;
             _game.ChildCallMissed += OnChildCallMissed;
             _game.CrisisStarted += OnCrisisStarted;
@@ -1878,6 +2011,7 @@ namespace ThanksNoThanks
             _game.HealthOpened -= OnHealthOpened;
             _game.BurnoutEntered -= OnBurnoutEntered;
             _game.RelationshipBrokeUp -= OnRelationshipBrokeUp;
+            _game.DebtEntered -= OnDebtEntered;
             _game.ChildOpened -= OnChildOpened;
             _game.ChildCallMissed -= OnChildCallMissed;
             _game.CrisisStarted -= OnCrisisStarted;
@@ -2041,7 +2175,10 @@ namespace ThanksNoThanks
             // открывается §6-окно. Все не-геймплейные состояния сюда просто не доходят (вернулись выше),
             // а BLOCK$-блокировка доходит, но ответом не является — карточка пропускается без Δ.
             bool answer = input == GameInput.AnswerYes || input == GameInput.AnswerNo;
-            bool blockedSkip = answer && _game.CurrentCardBlocked;
+            // Спрашиваем ИГРУ, будет ли этот ответ пропуском: гашёная карточка ЛИБО цена, ставшая
+            // неподъёмной, пока игрок думал (перепроверка платёжеспособности на ДА). Один источник истины
+            // с Game.Answer — иначе поздний пропуск панчил бы плашку за покупку, которая не состоялась.
+            bool blockedSkip = answer && _game.AnswerWouldSkipAsBlocked(input == GameInput.AnswerYes);
             if (_game.HandleInput(input))
             {
                 // ⚠ BLOCK$-ПРОПУСК — НЕ РАБОТА ПО ШКАЛЕ (находка ревью r3, MAJOR). Game.HandleInput
@@ -3945,15 +4082,23 @@ namespace ThanksNoThanks
         // Раскладка внутри бокса повторяет эталон: строка исхода вверху, некролог — ниже.
         //   эталон: исход  y 334…442 (2 строки, шаг 60, кегль ≈56) · некролог y 476…820 (шаг 40, кегль ≈33)
         private static readonly Vector4 FinaleOutcomeRect = new(959f, 391f, 1058f, 122f);   // y 330…452
-        private static readonly Vector4 FinaleStoryRect = new(959f, 644f, 1058f, 356f);     // y 466…822
+        // ⚠ БЛОК НЕКРОЛОГА СДВИНУТ НА +20 px ВНИЗ (дизайн-гейт 2026-08-08, MINOR). Было (959, 644, 1058,
+        // 356) — y 466…822, центр 644. Блок сидел ВЫШЕ оптического центра доступной области: зазор от
+        // строки исхода 41 px против нижнего поля 83 px, и плашка читалась «съехавшей вверх». Доступная
+        // область — от низа ректа исхода (452) до низа кремового поля (885.2), её центр 668.6. Новый центр
+        // 664 стоит фактически в нём. Двигаем ВЕРХОМ, а не целиком: низ ректа обязан остаться внутри
+        // безопасного бокса (<see cref="FinaleTextBox"/>, y 330…822), иначе текст поехал бы на скруглённый
+        // угол плашки. Текст в ректе центрирован (MiddleCenter), поэтому сдвиг центра = сдвиг блока.
+        private static readonly Vector4 FinaleStoryRect = new(959f, 664f, 1058f, 314f);     // y 507…821
         /// <summary>Кегли строки исхода (Arimo Bold): верх — с эталона, низ — предел ужатия.</summary>
         public const int FinaleOutcomeMaxSize = 56, FinaleOutcomeMinSize = 34;
         /// <summary>
         /// Кегли некролога (Rubik). Верх 34 — кегль эталона. НИЗ 24 — задокументированный порог
-        /// читаемости: длиннейший реальный некролог колоды (15 строк лимита scenes-table кол.11–12,
-        /// самые длинные строки CSV, ≈820 знаков склейки) садится в бокс на ≈28 px, т.е. с запасом над
-        /// полом; ниже 24 px на кабинетном экране текст перестаёт читаться, и упор в пол здесь означал бы
-        /// не «ужали», а «контент перерос плашку» — тогда режется лимит строк, а не кегль.
+        /// читаемости: длиннейший реальный некролог колоды (лимит <see cref="Necrolog.MaxLines"/> строк,
+        /// самые длинные строки CSV) садится в бокс с запасом над полом; ниже 24 px на кабинетном экране
+        /// текст перестаёт читаться, и упор в пол здесь означал бы не «ужали», а «контент перерос плашку» —
+        /// тогда режется лимит строк, а не кегль. Пол общий: и для блока, и для ОТДЕЛЬНОЙ строки
+        /// (<see cref="FitStoryPerLine"/>).
         /// </summary>
         public const int FinaleStoryMaxSize = 34, FinaleStoryMinSize = 24;
 
@@ -4004,9 +4149,13 @@ namespace ThanksNoThanks
                 "", FinaleStoryMaxSize, TextAnchor.MiddleCenter, Ink, _body);
             AnchorPx(_finaleStory.rectTransform, FinaleStoryRect.x, FinaleStoryRect.y,
                 FinaleStoryRect.z, FinaleStoryRect.w);
-            _finaleStory.resizeTextForBestFit = true;
+            // Кегль подбирает НЕ uGUI-best-fit, а FitStoryPerLine: блочный best-fit меряет только высоту и
+            // потому спокойно переносит слишком широкую строку (сирота в середине блока, дизайн-гейт
+            // 2026-08-08). Границы кеглей те же — они и есть вход подборщика.
+            _finaleStory.resizeTextForBestFit = false;
             _finaleStory.resizeTextMinSize = FinaleStoryMinSize;
             _finaleStory.resizeTextMaxSize = FinaleStoryMaxSize;
+            _finaleStory.supportRichText = true;    // персональный `<size=k>` на слишком широкой строке
             _finaleStory.verticalOverflow = VerticalWrapMode.Truncate;
 
             // (4) Restart CTA. The plate IS the green cabinet button its label names, so its fill must be the
@@ -4366,6 +4515,16 @@ namespace ThanksNoThanks
         // Breakup: flash the transient «РАССТАЛИСЬ» plate (auto-hides on its own ~2s clock, reflected in
         // Update). The balancer HUD hides itself off Game.RelationshipsLost on the next ApplyAgeGates.
         private void OnRelationshipBrokeUp() => _breakupTimer.Show("РАССТАЛИСЬ");
+
+        // Счёт ушёл в минус (отрезок 0, §3.2): Ведущий это КОММЕНТИРУЕТ, а не только пилюля краснеет.
+        // Реплики идут по кругу пула, а не случайно, — за жизнь их слышно один-два раза, и повтор подряд
+        // читался бы как заедание.
+        private int _debtLineCount;
+        private void OnDebtEntered()
+        {
+            _debtLineCount++;
+            _bubbleTimer.Show(HostContent.DebtLineFor(_debtLineCount));
+        }
 
         // Shared S5 hint: pauses the game (freezes age, drains, cost-of-living, decay and the card timer)
         // and shows the modal. The one-shot «seen» flag is set at show time (the hint always resolves via

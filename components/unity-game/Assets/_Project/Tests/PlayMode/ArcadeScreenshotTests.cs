@@ -21,15 +21,20 @@ namespace ThanksNoThanks.Tests.PlayMode
         private const int W = 1920;
         private const int H = 1080;
 
-        // A representative finished life for the «finale» pose — a handful of real necrolog lines + a cause.
+        // ОБЫЧНАЯ прожитая жизнь для позы «finale» — ПОЛНЫЕ семь строк (родители + шесть выборов), как
+        // их отбирает отрезок 0: вехи (свадьба, ребёнок) плюс по кусочку каждого возраста. До 2026-08-08
+        // эта поза показывала всего четыре строки и потому ничего не говорила о вёрстке — а именно она
+        // сломалась в живом плейтесте («некролог большущей простынёй»).
         private static NecrologResult SampleNecrolog()
         {
             var entries = new System.Collections.Generic.List<NecrologEntry>
             {
-                new NecrologEntry { Age = 7,  Order = 0, Line = "В семь лет вы завели рыжего кота и назвали его Борщ.", IsRond = false },
-                new NecrologEntry { Age = 24, Order = 1, Line = "В двадцать четыре вы уехали в другой город и ни разу не пожалели.", IsRond = false },
-                new NecrologEntry { Age = 41, Order = 2, Line = "К сорока одному у вас была работа, которую вы почти любили.", IsRond = false },
-                new NecrologEntry { Age = 68, Order = 3, Line = "В шестьдесят восемь внуки научили вас проигрывать в карты.", IsRond = false },
+                new NecrologEntry { Age = 7,  Order = 0, Line = "В семь лет вы завели рыжего кота и назвали его Борщ." },
+                new NecrologEntry { Age = 19, Order = 1, Line = "Первую зарплату спустили за один вечер." },
+                new NecrologEntry { Age = 24, Order = 2, Line = "В двадцать четыре уехали в другой город и ни разу не пожалели." },
+                new NecrologEntry { Age = 30, Order = 3, Line = "Свадьбу сыграли, и это было громко.", IsMilestone = true },
+                new NecrologEntry { Age = 32, Order = 4, Line = "Ребёнка растили как умели.", IsMilestone = true },
+                new NecrologEntry { Age = 68, Order = 5, Line = "В шестьдесят восемь внуки научили вас проигрывать в карты." },
             };
             return Necrolog.Build("спокойная старость", entries);
         }
@@ -41,10 +46,14 @@ namespace ThanksNoThanks.Tests.PlayMode
         {
             var csv = Resources.Load<TextAsset>("scenes");
             var lines = new System.Collections.Generic.List<string>();
+            // РАЗНЫЕ строки: некролог дедуплицирует по тексту (ревью 2026-08-08), и повтор в этом списке
+            // просто съел бы строку у худшего случая — кадр перестал бы показывать полную плашку.
             foreach (var c in CardLoader.ParseAll(csv.text))
             {
-                if (!string.IsNullOrEmpty(c.YesNecrolog)) lines.Add(c.YesNecrolog);
-                if (!string.IsNullOrEmpty(c.NoNecrolog)) lines.Add(c.NoNecrolog);
+                if (!string.IsNullOrEmpty(c.YesNecrolog) && !lines.Contains(c.YesNecrolog))
+                    lines.Add(c.YesNecrolog);
+                if (!string.IsNullOrEmpty(c.NoNecrolog) && !lines.Contains(c.NoNecrolog))
+                    lines.Add(c.NoNecrolog);
             }
             lines.Sort((a, b) => b.Length.CompareTo(a.Length));
             var entries = new System.Collections.Generic.List<NecrologEntry>();

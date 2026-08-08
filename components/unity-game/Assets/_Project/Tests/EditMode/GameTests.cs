@@ -227,9 +227,13 @@ namespace ThanksNoThanks.Tests
 
             var n = g.Necrolog;
             Assert.AreEqual(Necrolog.ParentsLine, n.StoryLines[0], "parents line first");
-            Assert.AreEqual("Росли аккуратным, брезгливым ребёнком.", n.StoryLines[1],
-                "CH01 НЕТ line is the first real story line (age order, intro excluded)");
-            Assert.AreEqual(13, n.StoryLines.Count, "parents + 12 choice lines");
+            // Отрезок 0: отбор по ВЕСУ и лимит 7. Первой реальной строкой идёт самая ранняя ВЕСОМАЯ
+            // (CH02 «розетка»), а не самая ранняя вообще — детские ROND-строки (CH01 и компания) теперь
+            // попадают только по остаточному принципу.
+            Assert.AreEqual("В детстве чуть не тронули розетку — но вовремя одумались.", n.StoryLines[1],
+                "первая реальная строка — самая ранняя ВЕСОМАЯ, а не первый попавшийся ROND");
+            Assert.LessOrEqual(n.StoryLines.Count, Necrolog.MaxLines,
+                "плашка финала держит не больше семи строк, считая родителей");
         }
 
         // ---- CHAIN honesty: a gated child only appears if the parent resolved ДА ----
@@ -289,7 +293,10 @@ namespace ThanksNoThanks.Tests
             Assert.AreEqual(GameState.Finale, g.State);
         }
 
-        // Contract row 2: the ACTUALLY DRAWN count stays 25–30 regardless of the answer path.
+        // Contract row 2: the ACTUALLY DRAWN count stays inside the sampler corridor
+        // [DeckSampler.MinDeck…MaxDeck] regardless of the answer path — chain-gated skips are topped up
+        // from the reserve, so ДА-везде и НЕТ-везде дают забег одной длины.
+        // (Коридор был 25–30 до пейсинг-фикса 2026-07-23; имена/сообщения врали — см. DeckSamplerTests.)
 
         private static int PlayCountingCards(Game g, Func<Card, bool> answerYes)
         {
@@ -305,7 +312,7 @@ namespace ThanksNoThanks.Tests
         }
 
         [Test]
-        public void DrawnCount_AllNo_StaysWithin25to30()
+        public void DrawnCount_AllNo_StaysInSamplerCorridor()
         {
             var asset = Resources.Load<TextAsset>("scenes");
             Assert.IsNotNull(asset);
@@ -318,12 +325,13 @@ namespace ThanksNoThanks.Tests
                 int drawn = PlayCountingCards(g, _ => false); // все НЕТ → all chains closed
                 Assert.AreEqual(GameState.Finale, g.State, $"all-НЕТ run ends (seed {seed})");
                 Assert.That(drawn, Is.InRange(DeckSampler.MinDeck, DeckSampler.MaxDeck),
-                    $"drawn count {drawn} within [25,30] on all-НЕТ (seed {seed})");
+                    $"drawn count {drawn} within [{DeckSampler.MinDeck},{DeckSampler.MaxDeck}]"
+                    + $" on all-НЕТ (seed {seed})");
             }
         }
 
         [Test]
-        public void DrawnCount_AllYes_StaysWithin25to30()
+        public void DrawnCount_AllYes_StaysInSamplerCorridor()
         {
             var asset = Resources.Load<TextAsset>("scenes");
             Assert.IsNotNull(asset);
@@ -338,7 +346,8 @@ namespace ThanksNoThanks.Tests
                     c => !c.YesIsFatal && c.DelayedFatalYears == 0);
                 Assert.AreEqual(GameState.Finale, g.State, $"all-ДА run ends (seed {seed})");
                 Assert.That(drawn, Is.InRange(DeckSampler.MinDeck, DeckSampler.MaxDeck),
-                    $"drawn count {drawn} within [25,30] on all-ДА (seed {seed})");
+                    $"drawn count {drawn} within [{DeckSampler.MinDeck},{DeckSampler.MaxDeck}]"
+                    + $" on all-ДА (seed {seed})");
             }
         }
 
@@ -443,7 +452,11 @@ namespace ThanksNoThanks.Tests
             {
                 Id = id, Question = id + "?", Age = age, Order = age,
                 YesDeltas = yes, NoDeltas = new List<ScaleDelta>(),
-                YesNecrolog = "y", NoNecrolog = "n", Flags = new List<string>(),
+                YesNecrolog = "y", NoNecrolog = "n",
+                // Отрезок 0: Δ применяется ТОЛЬКО по открытым шкалам. Шкала отношений открывается по
+                // возрасту (20) — а этот тест не тикает временем вовсе, поэтому карточка объявляет себя
+                // открывающей: ровно тот случай, ради которого правило и знает про `OPEN:*`.
+                Flags = new List<string> { "OPEN:" + Card.OpenRelations },
             };
         }
 
@@ -467,10 +480,10 @@ namespace ThanksNoThanks.Tests
             Assert.AreEqual("одинокая старость", g.Cause);
         }
 
-        // ---- necrolog 15-cap exercised on a long run (ROND dropped first) ----
+        // ---- necrolog cap exercised on a long run (ROND dropped first) ----
 
         [Test]
-        public void LongRun_Necrolog_CapsAt15_DroppingRondFirst()
+        public void LongRun_Necrolog_CapsAtLimit_DroppingRondFirst()
         {
             var deck = new List<Card>();
             for (int i = 0; i < 8; i++)                    // 8 weighty (non-ROND)
@@ -489,9 +502,10 @@ namespace ThanksNoThanks.Tests
 
             var n = g.Necrolog;
             Assert.AreEqual(GameState.Finale, g.State);
-            Assert.AreEqual(Necrolog.MaxLines, n.StoryLines.Count, "capped at 15 lines");
-            for (int i = 0; i < 8; i++)
-                CollectionAssert.Contains(n.StoryLines, "weighty" + i, "every weighty line survives");
+            Assert.AreEqual(Necrolog.MaxLines, n.StoryLines.Count, "capped at Necrolog.MaxLines");
+            foreach (var line in n.StoryLines)
+                Assert.IsFalse(line.StartsWith("kek"),
+                    "ROND-строки уходят первыми — пока есть весомые, кек в семь строк не попадает");
         }
 
         // ---- full sampled run to a known ending with a fixed seed ----
@@ -505,7 +519,7 @@ namespace ThanksNoThanks.Tests
 
             var g = new Game(() => DeckSampler.Build(all, new System.Random(4242)), coin: () => false);
             Assert.That(g.DeckCount, Is.InRange(DeckSampler.MinDeck, DeckSampler.MaxDeck),
-                "sampled deck sized 25-30 already in the opener");
+                $"sampled deck sized [{DeckSampler.MinDeck},{DeckSampler.MaxDeck}] already in the opener");
 
             g.StartLife();
             int guard = 0;

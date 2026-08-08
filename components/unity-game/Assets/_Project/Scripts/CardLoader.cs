@@ -125,6 +125,14 @@ namespace ThanksNoThanks
                 card.IsBlitz = flags.Contains("BLITZ");     // кризис-мысль (CR00–CR05)
                 card.IsInvert = flags.Contains("INVERT");   // импульс-карта (CR06–CR08): молчание=ДА
                 card.LongEffects = ParseLongEffects(Field(row, ColLong));
+                // --- метки отрезка 0 (2026-08-08) ---
+                card.BreaksRelationships = flags.Contains(BreakRelationsFlag);
+                // BREAK вместе с DELAY(n) — отложенный разрыв (RND05 «через 2 года развод»). DELAY читается
+                // ровно тем же парсером, что и у FATAL, поэтому у карточек с DELAY БЕЗ BREAK/FATAL
+                // (YA01/MD01/MD04/YA04 — прозаические пометки) ничего не меняется.
+                card.BreakDelayYears = card.BreaksRelationships ? ParseDelayYears(flags) : 0;
+                card.ExclusiveGroup = ParseExclusiveGroup(flags);
+                card.IsPrenup = flags.Contains("PRENUP");
                 // Probabilistic inclusion keys on RANDOM_TRIGGER; legacy "RANDOM" means the same
                 // (old snapshot). RANDOM_OUTCOME is a separate, mechanically-inert marker.
                 card.IsRandomTrigger = flags.Contains("RANDOM_TRIGGER") || flags.Contains("RANDOM");
@@ -233,11 +241,35 @@ namespace ThanksNoThanks
             return 0;
         }
 
+        /// <summary>
+        /// <c>BREAK:Отн</c> — единственная форма разрыва, которая сейчас имеет смысл (рвутся ОТНОШЕНИЯ).
+        /// Токен шкалы тот же, что в Δ-колонке (<see cref="Card.OpenRelations"/>), чтобы CSV говорил на
+        /// одном языке сокращений.
+        /// </summary>
+        private const string BreakRelationsFlag = "BREAK:" + Card.OpenRelations;
+
+        // «EXCL:ипотека» / «EXCL:реб» → ключ группы («ипотека» / «реб»). Ключ произвольный: движку важно
+        // только совпадение строк, поэтому новые ветки заводятся дизайнером без правки кода.
+        private const string ExclusivePrefix = "EXCL:";
+
+        internal static string ParseExclusiveGroup(IEnumerable<string> flags)
+        {
+            foreach (var f in flags)
+                if (f.StartsWith(ExclusivePrefix, StringComparison.Ordinal))
+                {
+                    var key = f.Substring(ExclusivePrefix.Length).Trim();
+                    if (key.Length > 0) return key;
+                }
+            return null;
+        }
+
         // «Длительный эффект» grammar (entries split by ';'):
         //   MULT:Дн=x2 FROM:25   income multiplier ×2 from age 25
         //   MULT:Дн=x1.5         income multiplier ×1.5 (stacks)
         //   MULT:Дн=x5|0         random ×5 OR wipe money to 0 (with RANDOM_OUTCOME)
         //   DRAIN:Дн=-0.3/s DUR:10y   installment drain −0.3₽/сек for 10 game-years
+        //   DRIFT:Отн=x2 [DUR:10y]    множитель пассивного дрейфа шкалы (отрезок 0); без DUR — бессрочно
+        // Любую запись можно префиксовать стороной: «НЕТ:DRIFT:Отн=x2» (без префикса = ДА, как было).
         // Culture-invariant number parse so "1.5"/"0.3" never depend on the machine locale.
         private static readonly Regex MultRx = new(
             @"MULT:\s*(Здр|Эн|Дн|Отн|Реб)\s*=\s*x\s*([0-9]+(?:\.[0-9]+)?)\s*(\|\s*0)?\s*(?:FROM:\s*(\d+))?",
@@ -245,6 +277,12 @@ namespace ThanksNoThanks
         private static readonly Regex DrainRx = new(
             @"DRAIN:\s*(Здр|Эн|Дн|Отн|Реб)\s*=\s*(-?[0-9]+(?:\.[0-9]+)?)\s*/s\s+DUR:\s*(\d+)\s*y",
             RegexOptions.Compiled);
+        private static readonly Regex DriftRx = new(
+            @"DRIFT:\s*(Здр|Эн|Дн|Отн|Реб)\s*=\s*x\s*([0-9]+(?:\.[0-9]+)?)\s*(?:DUR:\s*(\d+)\s*y)?",
+            RegexOptions.Compiled);
+        // Префикс стороны: «ДА:…» / «НЕТ:…» (латиница DA/NO тоже принимается — CSV правят руками).
+        private static readonly Regex SideRx = new(
+            @"^\s*(ДА|НЕТ|DA|NO|YES)\s*:\s*", RegexOptions.Compiled);
 
         private static readonly System.Globalization.CultureInfo Inv =
             System.Globalization.CultureInfo.InvariantCulture;
@@ -260,6 +298,17 @@ namespace ThanksNoThanks
                 var part = raw.Trim();
                 if (part.Length == 0) continue;
 
+                // Сторона: «ДА:» / «НЕТ:» перед записью. Без префикса — ДА (все существующие строки).
+                bool onNo = false;
+                var sideMatch = SideRx.Match(part);
+                if (sideMatch.Success)
+                {
+                    var tag = sideMatch.Groups[1].Value;
+                    onNo = tag == "НЕТ" || tag == "NO";
+                    part = part.Substring(sideMatch.Length).Trim();
+                    if (part.Length == 0) continue;
+                }
+
                 var m = MultRx.Match(part);
                 if (m.Success && Abbrevs.TryGetValue(m.Groups[1].Value, out var mscale))
                 {
@@ -272,6 +321,7 @@ namespace ThanksNoThanks
                         MultValue = val,
                         RandomZero = m.Groups[3].Success,
                         FromAge = from,
+                        OnNoSide = onNo,
                     });
                     continue;
                 }
@@ -287,6 +337,23 @@ namespace ThanksNoThanks
                         Scale = dscale,
                         DrainPerSec = rate,
                         DurYears = dur,
+                        OnNoSide = onNo,
+                    });
+                    continue;
+                }
+
+                var f = DriftRx.Match(part);
+                if (f.Success && Abbrevs.TryGetValue(f.Groups[1].Value, out var fscale))
+                {
+                    double.TryParse(f.Groups[2].Value, System.Globalization.NumberStyles.Float, Inv, out var mult);
+                    int.TryParse(f.Groups[3].Value, out var fdur);   // без DUR → 0 = бессрочно
+                    result.Add(new LongEffect
+                    {
+                        Kind = LongEffectKind.Drift,
+                        Scale = fscale,
+                        MultValue = mult,
+                        DurYears = fdur,
+                        OnNoSide = onNo,
                     });
                 }
                 // Unknown grammar → tolerated (ignored), never throws (contract: all 50 rows parse).

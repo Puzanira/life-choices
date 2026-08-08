@@ -384,10 +384,22 @@ namespace ThanksNoThanks.Tests.PlayMode
         // (Реальный худший случай, собранный из scenes.csv, живёт в LongestRealStory ниже.)
         private static NecrologResult LongStory()
         {
-            const string longLine = "Рыжий кот из детства, его котята и их котята прожили с вами всю жизнь.";
+            // ⚠ СТРОКИ ОБЯЗАНЫ БЫТЬ РАЗНЫМИ. Раньше здесь одна и та же строка повторялась 11 раз, и после
+            // дедупа некролога по ТЕКСТУ (ревью 2026-08-08) «худший случай» схлопнулся бы в две строки —
+            // приёмка вёрстки перестала бы что-либо проверять. Меняем первое слово, длина сохраняется.
+            var coats = new[]
+            {
+                "Рыжий", "Серый", "Белый", "Чёрный", "Полосатый", "Трёхцветный",
+                "Пятнистый", "Дымчатый", "Рябой", "Огненный", "Синеглазый",
+            };
             var entries = new List<NecrologEntry>();
             for (int i = 0; i < Necrolog.MaxLines + 4; i++)   // over the cap → still clamps to MaxLines
-                entries.Add(new NecrologEntry { Age = i, Order = i, Line = longLine, IsRond = false });
+                entries.Add(new NecrologEntry
+                {
+                    Age = i, Order = i, IsRond = false,
+                    Line = coats[i % coats.Length]
+                           + " кот из детства, его котята и их котята прожили с вами всю жизнь.",
+                });
             return Necrolog.Build("весёлая старость", entries);
         }
 
@@ -407,6 +419,8 @@ namespace ThanksNoThanks.Tests.PlayMode
                 if (!string.IsNullOrEmpty(c.YesNecrolog) && c.YesNecrolog != "—") lines.Add(c.YesNecrolog);
                 if (!string.IsNullOrEmpty(c.NoNecrolog) && c.NoNecrolog != "—") lines.Add(c.NoNecrolog);
             }
+            // РАЗНЫЕ строки: некролог дедуплицирует по тексту, а худший случай обязан набрать полный лимит.
+            lines = lines.Distinct().ToList();
             lines.Sort((a, b) => b.Length.CompareTo(a.Length));
             var entries = new List<NecrologEntry>();
             for (int i = 0; i < Necrolog.MaxLines - 1 && i < lines.Count; i++)
@@ -415,6 +429,50 @@ namespace ThanksNoThanks.Tests.PlayMode
                 "в колоде хватает строк, чтобы набрать лимит некролога целиком");
             // Длиннейшая причина колоды тоже участвует: строка исхода делит с некрологом одну плашку.
             return Necrolog.Build("вы сунули палец в розетку", entries);
+        }
+
+        /// <summary>
+        /// ОБЫЧНАЯ прожитая жизнь на полный лимит вех — ровно та поза, которую снимает кадр `finale`
+        /// (<c>ArcadeScreenshotTests.SampleNecrolog</c>). Для ВЫСОТЫ блока это худший случай из всех:
+        /// строки короткие, ни одна не получает персонального <c>&lt;size&gt;</c>, поэтому все восемь рядов
+        /// стоят полным кеглем блока. Худшие «длинные» случаи, наоборот, часть рядов ужимают и по высоте
+        /// оказываются мягче.
+        /// </summary>
+        private static NecrologResult OrdinaryFullStory()
+        {
+            var entries = new List<NecrologEntry>
+            {
+                new NecrologEntry { Age = 7,  Order = 0, Line = "В семь лет вы завели рыжего кота и назвали его Борщ." },
+                new NecrologEntry { Age = 19, Order = 1, Line = "Первую зарплату спустили за один вечер." },
+                new NecrologEntry { Age = 24, Order = 2, Line = "В двадцать четыре уехали в другой город и ни разу не пожалели." },
+                new NecrologEntry { Age = 30, Order = 3, Line = "Свадьбу сыграли, и это было громко.", IsMilestone = true },
+                new NecrologEntry { Age = 32, Order = 4, Line = "Ребёнка растили как умели.", IsMilestone = true },
+                new NecrologEntry { Age = 68, Order = 5, Line = "В шестьдесят восемь внуки научили вас проигрывать в карты." },
+            };
+            return Necrolog.Build("спокойная старость", entries);
+        }
+
+        /// <summary>
+        /// Поставить канвас в МАСШТАБ КАБИНЕТА (`Canvas.scaleFactor` = 1) — ровно то, что делает капчер
+        /// перед съёмкой кадра, и ровно то, что стоит на экране автомата 1920×1080. В батч-прогоне игровое
+        /// окно не 16:9, и скалер по умолчанию выдаёт 0.3849: шрифт растеризуется в ДРУГОЙ сетке, межстрочье
+        /// квантуется иначе, и всякий замер высоты в этом масштабе врёт про живой кадр.
+        /// </summary>
+        private static IEnumerator PinCabinetCanvas(GameDriver driver)
+        {
+            var scaler = driver.CanvasRect.GetComponent<CanvasScaler>();
+            scaler.uiScaleMode = CanvasScaler.ScaleMode.ConstantPixelSize;
+            scaler.scaleFactor = GameDriver.CabinetCanvasScale;
+            scaler.referencePixelsPerUnit = 100f;
+            yield return null;
+            foreach (var t in driver.GetComponentsInChildren<Text>(true)) { t.FontTextureChanged(); t.SetAllDirty(); }
+            Canvas.ForceUpdateCanvases();
+            yield return null;
+            Canvas.ForceUpdateCanvases();
+            yield return null;
+            Assert.AreEqual(GameDriver.CabinetCanvasScale,
+                driver.CanvasRect.GetComponent<Canvas>().scaleFactor, 0.001f,
+                "канвас действительно встал в масштаб кабинета (иначе проверка ничего не значит)");
         }
 
         /// <summary>
@@ -435,6 +493,35 @@ namespace ThanksNoThanks.Tests.PlayMode
             Assert.LessOrEqual(inner.x + inner.z / 2f, outer.x + outer.z / 2f, what + " (справа)");
             Assert.GreaterOrEqual(inner.y - inner.w / 2f, outer.y - outer.w / 2f, what + " (сверху)");
             Assert.LessOrEqual(inner.y + inner.w / 2f, outer.y + outer.w / 2f, what + " (снизу)");
+        }
+
+        /// <summary>
+        /// НАРИСОВАННЫЕ глифы подписи как бокс (cx, cy-от-верха, w, h) в 1920×1080 reference px — та же
+        /// математика, что у <see cref="AssertGlyphsInRefBox"/>, но результатом, а не проверкой: композиция
+        /// (зазоры между блоками) судится по чернилам, а не по ректам.
+        /// </summary>
+        private static Vector4 GlyphBoxOf(Text t)
+        {
+            var settings = t.GetGenerationSettings(t.rectTransform.rect.size);
+            var tg = t.cachedTextGenerator;
+            tg.Populate(t.text, settings);
+            Assert.Greater(tg.characterCountVisible, 0, t.name + " renders glyphs");
+
+            float upp = 1f / t.pixelsPerUnit;
+            float minX = float.MaxValue, maxX = float.MinValue, minY = float.MaxValue, maxY = float.MinValue;
+            var verts = tg.verts;
+            for (int i = 0; i < verts.Count; i++)
+            {
+                float x = verts[i].position.x * upp, y = verts[i].position.y * upp;
+                if (x < minX) minX = x; if (x > maxX) maxX = x;
+                if (y < minY) minY = y; if (y > maxY) maxY = y;
+            }
+
+            var rt = t.rectTransform;
+            float cx = rt.anchorMin.x * 1920f, cyTop = (1f - rt.anchorMin.y) * 1080f;
+            float gLeft = cx + minX, gRight = cx + maxX;
+            float gTop = cyTop - maxY, gBottom = cyTop - minY;
+            return new Vector4((gLeft + gRight) / 2f, (gTop + gBottom) / 2f, gRight - gLeft, gBottom - gTop);
         }
 
         /// <summary>
@@ -565,10 +652,10 @@ namespace ThanksNoThanks.Tests.PlayMode
             AssertGlyphsInRefBox(driver.FinaleStoryText, BakedCreamField, 0f, "длиннейший реальный некролог");
             AssertNoTofu(driver.FinaleStoryText, "длиннейший реальный некролог");
 
-            // …и best-fit НЕ УПЁРСЯ в пол читаемости. Проверяем прямо: набираем ту же строку кеглем
-            // ПОЛА в тот же бокс и меряем нужную высоту. Влезло → best-fit (он берёт САМЫЙ КРУПНЫЙ
-            // влезающий кегль) заведомо выбрал ≥ пола. Не влезло бы — «влез» означало бы «нечитаемо»,
-            // и резать надо лимит строк, а не кегль.
+            // …и подбор кегля НЕ УПЁРСЯ в пол читаемости. Проверяем прямо: набираем ту же строку кеглем
+            // ПОЛА в тот же бокс и меряем нужную высоту. Влезло → подборщик (он идёт сверху вниз и берёт
+            // САМЫЙ КРУПНЫЙ влезающий кегль) заведомо выбрал ≥ пола. Не влезло бы — «влез» означало бы
+            // «нечитаемо», и резать надо лимит строк, а не кегль.
             var t = driver.FinaleStoryText;
             float boxW = t.rectTransform.rect.width, boxH = t.rectTransform.rect.height;
             bool bf = t.resizeTextForBestFit;
@@ -583,6 +670,185 @@ namespace ThanksNoThanks.Tests.PlayMode
             Assert.LessOrEqual(needed, boxH,
                 $"на пороге читаемости {GameDriver.FinaleStoryMinSize} px худший некролог всё ещё влезает "
                     + $"в поле плашки (нужно {needed:0.#} px из {boxH:0.#}) — значит best-fit взял кегль КРУПНЕЕ порога");
+
+            Object.Destroy(go);
+            yield return null;
+        }
+
+        /// <summary>
+        /// ОДНА ВЕХА — ОДНА СТРОКА НА ЭКРАНЕ (дизайн-гейт 2026-08-08, MAJOR). Блочный uGUI-best-fit ужимал
+        /// текст только по ВЫСОТЕ, поэтому слишком широкая строка худшего случая спокойно переносилась и
+        /// давала сироту («жизнь.», ≈101 px) ПОСЕРЕДИНЕ некролога: ломался и смысл строки, и вертикальный
+        /// ритм блока. Кегль подбирается построчно — визуальных строк ровно столько, сколько строк истории.
+        /// </summary>
+        [UnityTest]
+        public IEnumerator Finale_EveryNecrologLine_RendersAsExactlyOneVisualLine(
+            [Values("worst-real", "worst-synthetic")] string which)
+        {
+            var driver = Boot(out var go, out var fake);
+            yield return null;
+
+            driver.DebugRenderFinale(which == "worst-real" ? LongestRealStory() : LongStory(), 100);
+            yield return null;
+
+            var t = driver.FinaleStoryText;
+            int rows = t.text.Split('\n').Length;
+            Assert.AreEqual(Necrolog.MaxLines + 1, rows,
+                "худший случай набран целиком: зачин + лимит строк истории");
+
+            // Меряем ТЕМ ЖЕ генератором и теми же настройками, какими подпись рисуется, — включая кегль,
+            // который проставил подборщик, и персональные `<size>` на ужатых строках.
+            var settings = t.GetGenerationSettings(t.rectTransform.rect.size);
+            var tg = t.cachedTextGenerator;
+            tg.Populate(t.text, settings);
+            Assert.AreEqual(rows, tg.lineCount,
+                $"[{which}] визуальных строк ровно столько, сколько строк истории — ни одного переноса "
+                    + "и ни одной сироты в середине блока");
+
+            // ⚠ ОДНОГО lineCount МАЛО. Генератор отвечает «переноса нет» и тогда, когда живой кадр строку
+            // ВСЁ РАВНО переносит: рисуется подпись при другом масштабе канваса, шрифт растеризуется в
+            // другой сетке (поймано глазами на `inc00-finalelong`, headless был зелёный). Поэтому проверяем
+            // ЗАПАС: каждая строка обязана лечь в поле с полем FinaleStoryFitMargin — ровно тот критерий,
+            // по которому подборщик и работает. Без запаса тест снова стал бы слепым к сироте.
+            float boxW = t.rectTransform.rect.width;
+            float limit = boxW * GameDriver.FinaleStoryFitMargin;
+            foreach (var row in t.text.Split('\n'))
+            {
+                var plain = System.Text.RegularExpressions.Regex.Replace(row, "</?size(=\\d+)?>", "");
+                int size = t.fontSize;
+                var m = System.Text.RegularExpressions.Regex.Match(row, "<size=(\\d+)>");
+                if (m.Success) size = int.Parse(m.Groups[1].Value);
+
+                var ws = t.GetGenerationSettings(Vector2.zero);
+                ws.fontSize = size;
+                ws.resizeTextForBestFit = false;
+                ws.richText = true;
+                ws.horizontalOverflow = HorizontalWrapMode.Overflow;
+                float w = t.cachedTextGeneratorForLayout.GetPreferredWidth(plain, ws) / t.pixelsPerUnit;
+
+                Assert.LessOrEqual(w, limit,
+                    $"[{which}] строка «{plain.Substring(0, System.Math.Min(30, plain.Length))}…» ложится "
+                        + $"в поле с запасом ({w:0.#} из {limit:0.#} px при кегле {size})");
+            }
+
+            // …и ужимали именно строку, а не всю плашку: кегль блока остался в своём коридоре.
+            Assert.That(t.fontSize, Is.InRange(GameDriver.FinaleStoryMinSize, GameDriver.FinaleStoryMaxSize),
+                "кегль блока — внутри задокументированного коридора читаемости");
+            AssertGlyphsInRefBox(t, BakedCreamField, 0f, "некролог без переносов (" + which + ")");
+
+            Object.Destroy(go);
+            yield return null;
+        }
+
+        /// <summary>
+        /// ПОЛНЫЙ НЕКРОЛОГ ДОРИСОВЫВАЕТСЯ ДО ПОСЛЕДНЕЙ ВЕХИ — на кадре КАБИНЕТА ровно
+        /// <see cref="Necrolog.MaxLines"/> + 1 визуальных рядов (зачин + семь вех).
+        ///
+        /// ⚠ РЕГРЕССИЯ 2026-08-08, ПОЙМАНА ГЛАЗАМИ ПО КАДРУ, А НЕ ТЕСТАМИ. Подбор кегля мерил высоту блока
+        /// делением на <see cref="Text.pixelsPerUnit"/>, т.е. в сетке ТЕКУЩЕГО канваса. В батч-прогоне это
+        /// 0.3849, и восемь рядов кеглем 34 меряются как 311.8 px — влезают в поле 314. На кадре кабинета
+        /// (scaleFactor 1) тем же восьми рядам нужно 320 px, и `verticalOverflow = Truncate` МОЛЧА срезал
+        /// седьмую веху. Suite при этом был зелёный: все проверки финала мерили в том же лгущем масштабе.
+        ///
+        /// Поэтому тест: (1) собирает кадр в обычном для батча масштабе — как это делает капчер и как это
+        /// делает игра до первого кадра; (2) ТОЛЬКО ПОТОМ ставит канвас в масштаб кабинета; (3) считает
+        /// ряды у ТОГО ЖЕ генератора и с тем же `Truncate`, каким подпись рисуется. Подбор кегля обязан
+        /// пережить смену масштаба — именно этого он и не делал.
+        ///
+        /// Три случая: обычная жизнь (кадр `finale` — самый жёсткий по ВЫСОТЕ: ни один ряд не ужат
+        /// персонально), реальный худший случай колоды и синтетический (кадр `finalelong`).
+        /// </summary>
+        [UnityTest]
+        public IEnumerator Finale_FullNecrolog_DrawsEveryMilestone_OnTheCabinetCanvas(
+            [Values("ordinary", "worst-real", "worst-synthetic")] string which)
+        {
+            var driver = Boot(out var go, out var fake);
+            yield return null;
+
+            var story = which == "ordinary" ? OrdinaryFullStory()
+                      : which == "worst-real" ? LongestRealStory()
+                      : LongStory();
+            Assert.AreEqual(Necrolog.MaxLines, story.StoryLines.Count,
+                $"[{which}] случай действительно набирает ПОЛНЫЙ лимит вех — иначе гард ничего не стережёт");
+
+            driver.DebugRenderFinale(story, 78);
+            yield return null;
+            yield return PinCabinetCanvas(driver);
+
+            var t = driver.FinaleStoryText;
+            int rows = t.text.Split('\n').Length;
+            Assert.AreEqual(Necrolog.MaxLines + 1, rows,
+                $"[{which}] в подпись отдан весь некролог: зачин + {Necrolog.MaxLines} вех");
+
+            // (1) РЯДОВ НА ЭКРАНЕ — ровно столько же. Настройки берём у самой подписи, т.е. вместе с её
+            // `verticalOverflow = Truncate`: если блок не влез в поле, генератор отдаст меньше рядов —
+            // ровно то, что произошло с седьмой вехой.
+            var drawn = t.GetGenerationSettings(t.rectTransform.rect.size);
+            Assert.AreEqual(VerticalWrapMode.Truncate, drawn.verticalOverflow,
+                "подпись всё ещё режет по высоте — значит недобор рядов возможен и его надо стеречь");
+            var tg = t.cachedTextGenerator;
+            tg.Populate(t.text, drawn);
+            Assert.AreEqual(rows, tg.lineCount,
+                $"[{which}] на кадре кабинета нарисованы ВСЕ {rows} рядов (зачин + {Necrolog.MaxLines} вех), "
+                    + "ни один не срезан по высоте");
+
+            // (2) …и срезано не «полряда»: знаков нарисовано столько же, сколько без ограничения по высоте.
+            var unclipped = t.GetGenerationSettings(t.rectTransform.rect.size);
+            unclipped.verticalOverflow = VerticalWrapMode.Overflow;
+            int drawnGlyphs = tg.characterCountVisible;
+            tg.Populate(t.text, unclipped);
+            Assert.AreEqual(tg.characterCountVisible, drawnGlyphs,
+                $"[{which}] ни один знак некролога не потерян при отрисовке в поле плашки");
+
+            // (3) …и это не совпадение: подобранный кегль честно влезает по МЕРКЕ КАБИНЕТА. Считаем ту же
+            // высоту, что и подборщик (scaleFactor = масштаб кабинета) — при возврате замера в текущий
+            // масштаб канваса это число расходится с полем, и тест краснеет.
+            var fit = t.GetGenerationSettings(new Vector2(t.rectTransform.rect.width, 0f));
+            fit.fontSize = t.fontSize;
+            fit.resizeTextForBestFit = false;
+            fit.richText = true;
+            fit.scaleFactor = GameDriver.CabinetCanvasScale;
+            float needed = t.cachedTextGeneratorForLayout.GetPreferredHeight(t.text, fit);
+            Assert.LessOrEqual(needed, t.rectTransform.rect.height,
+                $"[{which}] блок кеглем {t.fontSize} влезает в поле по мерке кабинета "
+                    + $"({needed:0.#} px из {t.rectTransform.rect.height:0.#})");
+            // (4) …и влез НЕ «схлопыванием в пол». Пол — это аварийный выход подборщика («не сошлось ни на
+            // одном кегле»), а не рабочий результат: упор в него означает «контент перерос плашку», и
+            // резать тогда надо ЛИМИТ СТРОК, а не кегль (см. FinaleStoryMinSize). Без этой проверки гард
+            // зелёный и на сломанном подборщике: восемь рядов кеглем 24 влезают в поле с огромным запасом.
+            Assert.Greater(t.fontSize, GameDriver.FinaleStoryMinSize,
+                $"[{which}] кегль подобран, а не сорвался в аварийный пол {GameDriver.FinaleStoryMinSize}");
+
+            Object.Destroy(go);
+            yield return null;
+        }
+
+        /// <summary>
+        /// Блок некролога стоит в ОПТИЧЕСКОМ ЦЕНТРЕ доступной области плашки (дизайн-гейт 2026-08-08,
+        /// MINOR): зазор «строка исхода → некролог» и зазор «некролог → низ кремового поля» равны. Было
+        /// 41 против 83 px — блок читался съехавшим вверх; контейнер сдвинут на +20 px вниз.
+        /// </summary>
+        [UnityTest]
+        public IEnumerator Finale_NecrologBlock_SitsAtTheOpticalCentreOfThePlate()
+        {
+            var driver = Boot(out var go, out var fake);
+            yield return null;
+
+            driver.DebugRenderFinale(LongestRealStory(), 100);
+            yield return null;
+
+            var head = GlyphBoxOf(driver.FinaleOutcomeText);
+            var body = GlyphBoxOf(driver.FinaleStoryText);
+
+            float above = (body.y - body.w / 2f) - (head.y + head.w / 2f);      // исход → некролог
+            float below = (BakedCreamField.y + BakedCreamField.w / 2f) - (body.y + body.w / 2f);
+
+            Assert.Greater(above, 0f, "некролог не наезжает на строку исхода");
+            Assert.Greater(below, 0f, "…и не свисает за низ кремового поля");
+            // Допуск 20 px при сдвиге 20: возврат контейнера на старое место разводит зазоры на 40 —
+            // тест краснеет. Идеальная симметрия недостижима, глифы у шрифтов разной высоты.
+            Assert.AreEqual(above, below, 20f,
+                $"зазоры над и под некрологом уравнены (сверху {above:0.#}, снизу {below:0.#} px)");
 
             Object.Destroy(go);
             yield return null;

@@ -30,7 +30,8 @@ namespace ThanksNoThanks
     public enum LongEffectKind
     {
         Mult,   // income multiplier (MULT:Дн=x2 FROM:25 / x1.5 / x5|0)
-        Drain   // timed drain / installment (DRAIN:Дн=-0.3/s DUR:10y)
+        Drain,  // timed drain / installment (DRAIN:Дн=-0.3/s DUR:10y)
+        Drift   // множитель ПАССИВНОГО дрейфа шкалы (DRIFT:Отн=x2 [DUR:10y]) — отрезок 0
     }
 
     /// <summary>
@@ -50,7 +51,15 @@ namespace ThanksNoThanks
 
         // --- Drain ---
         public double DrainPerSec; // signed ₽/сек while active (e.g. -0.3)
-        public int DurYears;       // DUR:Ny → active for N game-years from its start
+        public int DurYears;       // DUR:Ny → active for N game-years from its start (0 = бессрочно, для Drift)
+
+        /// <summary>
+        /// СТОРОНА, на которой эффект применяется (отрезок 0). Колонка «Длительный эффект» одна на строку,
+        /// а Δ у карточки две — ДА и НЕТ; после `MD01` («СВАДЬБА!» смягчает дрейф на ДА и УСКОРЯЕТ его на
+        /// НЕТ) одной стороны стало мало. Формат: запись можно префиксовать <c>ДА:</c> или <c>НЕТ:</c>;
+        /// БЕЗ префикса — ДА, как было всегда (обратная совместимость со всеми существующими строками).
+        /// </summary>
+        public bool OnNoSide;
     }
 
     /// <summary>
@@ -143,6 +152,35 @@ namespace ThanksNoThanks
                     return true;
             return false;
         }
+
+        /// <summary>
+        /// <c>BREAK:Отн</c> (отрезок 0) — карточка РВЁТ отношения на ДА: партнёр уходит немедленно, шкала
+        /// гаснет, дальше живёшь один. До 2026-08-08 разрыв был описан только прозой, а движку доставалась
+        /// Δ «Отн −3» — на `CR06` «БРОСИТЬ ПАРТНЁРА ПРЯМО СЕЙЧАС! Немедленный развод» это двигало шкалу
+        /// 55 → 52 и оставляло в зелёной зоне. Механика ухода партнёра в игре уже была (накопленные ~10 с
+        /// в красной зоне); флаг просто вызывает её напрямую (<see cref="Game"/>).
+        /// </summary>
+        public bool BreaksRelationships;
+
+        /// <summary>
+        /// <c>BREAK:Отн</c> вместе с <c>DELAY(n)</c> — разрыв ОТЛОЖЕН на n игровых лет («Роман на стороне?»
+        /// `RND05`: «через 2 года развод», ровно как обещает проза карточки). 0 — рвёт сразу.
+        /// </summary>
+        public int BreakDelayYears;
+
+        /// <summary>
+        /// <c>EXCL:&lt;ключ&gt;</c> (отрезок 0) — ВЗАИМОИСКЛЮЧАЮЩАЯ ветка. Как только карточка этой группы
+        /// разрешилась в ДА, остальные карточки с тем же ключом в этом забеге не появляются: две ипотеки
+        /// (`FC02` ранняя 25–29 и `MD04` поздняя 30–40) — одно и то же событие в двух отрезках, а ветка
+        /// «детей не будет» (`EXCL:реб`) — равноценный путь, а не пустота. null — карточка не в группе.
+        /// </summary>
+        public string ExclusiveGroup;
+
+        /// <summary>
+        /// <c>PRENUP</c> (отрезок 0) — брачный договор: гасит штраф <see cref="Game.DivorceCost"/> при
+        /// разводе. Разовый, на всю жизнь, ставится ответом ДА.
+        /// </summary>
+        public bool IsPrenup;
 
         public bool IsNoCons;         // NOCONS — intro card, apply nothing / no necrolog line
         public bool IsRond;           // ROND   — droppable from the necrolog first when over the limit

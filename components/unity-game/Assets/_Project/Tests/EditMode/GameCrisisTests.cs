@@ -63,6 +63,19 @@ namespace ThanksNoThanks.Tests
                 g.Tick(0.1f);
         }
 
+        // …то же взросление, но с КРУТИЛКОЙ: кризис глушит все шкальные контролы, поэтому деньги на
+        // платный импульс (CR07/CR08 — 70 ₽ каждый, отрезок 0) копятся только ДО него.
+        private static void TickToCrisisBanking(Game g, double target)
+        {
+            int guard = 0;
+            while (g.Phase == CrisisPhase.None && g.State == GameState.Playing && guard++ < 400)
+            {
+                g.Tick(0.1f);
+                int spin = 0;
+                while (g.Money < target && spin++ < 500 && g.HandleInput(GameInput.MoneyTick)) { }
+            }
+        }
+
         // ---- trigger: once, at 45–50, not before ----
 
         [Test]
@@ -203,10 +216,11 @@ namespace ThanksNoThanks.Tests
         }
 
         // Reach the impulse round on CR06 (2 fails), for the INVERT / consequence tests.
-        private static Game ReachImpulse(string csv)
+        // bank > 0 → накрутить столько ₽ до кризиса (платные импульсы отрезка 0).
+        private static Game ReachImpulse(string csv, double bank = 0)
         {
             var g = StartAndReach(csv, normalOnYes: () => true);
-            TickToCrisis(g);
+            if (bank > 0) TickToCrisisBanking(g, bank); else TickToCrisis(g);
             g.HandleInput(GameInput.AnswerNo);
             g.HandleInput(GameInput.AnswerNo);
             for (int i = 0; i < 3; i++) g.HandleInput(GameInput.AnswerYes);
@@ -220,11 +234,17 @@ namespace ThanksNoThanks.Tests
         [Test]
         public void Impulse_Invert_Timeout_IsYes_AppliesConsequence()
         {
+            // Отрезок 0: у CR06 «БРОСИТЬ ПАРТНЁРА ПРЯМО СЕЙЧАС! Немедленный развод» больше НЕТ Δ «Отн −3»
+            // (она двигала шкалу 55 → 52 и оставляла в зелёной зоне). Теперь карточка несёт `BREAK:Отн` —
+            // партнёр уходит немедленно. Молчание в импульсе = ДА, значит и разрыв должен случиться.
             var g = ReachImpulse(Csv());
-            int rel0 = g.Scales.Relationships;    // CR06 ДА = Отн −3
+            Assert.IsTrue(g.RelationshipsOpen, "к кризису отношения открыты — иначе рвать нечего");
 
             g.Tick(Game.ImpulseSeconds + 0.01f);  // silence → INVERT → ДА
-            Assert.AreEqual(rel0 - 3, g.Scales.Relationships, "timeout accepted CR06 → Отн −3 applied");
+            Assert.IsTrue(g.RelationshipsLost, "молчание приняло CR06 → партнёр ушёл");
+            Assert.IsFalse(g.RelationshipsOpen, "шкала отношений гаснет");
+            Assert.AreEqual(Game.RelBreakupValue, g.Scales.Relationships, "…и падает в «одиноко»");
+            Assert.AreEqual(GameState.Playing, g.State, "разрыв — не смерть");
             Assert.AreEqual("CR07", g.CurrentCard.Id, "advanced to the next impulse card");
         }
 
@@ -236,21 +256,48 @@ namespace ThanksNoThanks.Tests
 
             g.HandleInput(GameInput.AnswerNo);    // рычаг НЕТ = «СПАСИБО, НЕ НАДО» = decline
             Assert.AreEqual(rel0, g.Scales.Relationships, "declining CR06 applies no ДА-Δ (Отн unchanged)");
+            Assert.IsFalse(g.RelationshipsLost, "отказ от CR06 партнёра не уводит");
             Assert.AreEqual("CR07", g.CurrentCard.Id, "advanced to the next impulse card");
         }
 
         [Test]
         public void Impulse_CardConsequences_Apply_OnAccept()
         {
-            var g = ReachImpulse(Csv());
-            g.HandleInput(GameInput.AnswerNo);    // decline CR06 → CR07 «мотоцикл» (Эн +2, Дн −2)
+            // CR07 «мотоцикл» — платный импульс (70 ₽, `BLOCK$`): основательница решила правило денег в
+            // кризисе НЕ ломать. Значит и проверять последствия можно только на платёжеспособном игроке;
+            // безденежному карточка приходит гашёной (см. Impulse_Blocked_WhenBroke_SkipsWithoutDelta).
+            var g = ReachImpulse(Csv(), bank: Game.BlockPrices["CR07"] + 30);
+            g.HandleInput(GameInput.AnswerNo);    // decline CR06 → CR07 «мотоцикл»
             Assert.AreEqual("CR07", g.CurrentCard.Id);
+            Assert.IsFalse(g.CurrentCardBlocked, "денег хватает — импульс не гашёный");
 
             int energy0 = g.Scales.Energy;
             double money0 = g.Money;
+            int wantEnergy = DeltaScale.Resolve(Scale.Energy, DeltaKind.Add, 2);
             g.HandleInput(GameInput.AnswerYes);   // accept CR07 (рычаг ДА = поддаться)
-            Assert.AreEqual(energy0 + 2, g.Scales.Energy, "CR07 accept applies Эн +2");
-            Assert.AreEqual(money0 - 2, g.Money, 0.001, "CR07 accept applies Дн −2");
+            Assert.AreEqual(System.Math.Min(100, energy0 + wantEnergy), g.Scales.Energy,
+                "CR07 accept applies «Эн +2» = +18 п.п.");
+            Assert.AreEqual(money0 - Game.BlockPrices["CR07"], g.Money, 0.001,
+                "мотоцикл стоит ровно свою цену (70 ₽), а не −2 ₽ из CSV-Δ");
+        }
+
+        [Test]
+        public void Impulse_Blocked_WhenBroke_SkipsWithoutDelta()
+        {
+            // Зеркало предыдущего: у нищего игрока платный импульс приходит гашёным и проходит мимо без
+            // Δ и без траты — «на то и правило денег, что импульс его не ломает».
+            var g = ReachImpulse(Csv());
+            g.HandleInput(GameInput.AnswerNo);    // decline CR06 → CR07
+            Assert.AreEqual("CR07", g.CurrentCard.Id);
+            Assert.Less(g.Money, Game.BlockPrices["CR07"], "денег на мотоцикл нет");
+            Assert.IsTrue(g.CurrentCardBlocked, "…значит карточка гашёная");
+
+            int energy0 = g.Scales.Energy;
+            double money0 = g.Money;
+            g.HandleInput(GameInput.AnswerYes);   // «поддаться» гашёной карточке — просто пропуск
+            Assert.AreEqual(energy0, g.Scales.Energy, "гашёная карточка не даёт Δ");
+            Assert.AreEqual(money0, g.Money, 0.001, "…и ничего не списывает");
+            Assert.AreEqual("CR08", g.CurrentCard.Id, "просто следующий импульс");
         }
 
         [Test]

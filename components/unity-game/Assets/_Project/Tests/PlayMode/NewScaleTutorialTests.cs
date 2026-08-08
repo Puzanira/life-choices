@@ -876,8 +876,16 @@ namespace ThanksNoThanks.Tests.PlayMode
             Assert.IsTrue(g.ChildFlashing, "звонок заведён — есть что поднимать");
             fake.Fire(GameInput.ChildPress);
             Assert.IsTrue(driver.NewScaleArmed, "условие выполнено");
-            guard = 0;
-            while (driver.NewScaleShowing && guard++ < 600) yield return null;
+            // ⚠ ФЛАК (пойман на suite ×2, 2026-08-08). Здесь стоял отсчёт КАДРАМИ
+            // (`while (NewScaleShowing && guard++ < 600) yield return null`), а фейд модалки идёт по
+            // ВРЕМЕНИ (`NewScaleFadeSeconds` через Time.deltaTime): на быстрой машине шестисот кадров
+            // batch-режима не хватало на 0.2 секунды, и тест падал примерно раз из трёх. Переведён на тот
+            // же детерминированный такт, которым этот файл гоняет фейд во всех остальных шести местах.
+            // Смысл проверки цел: DebugAdvanceNewScale только КРУТИТ часы, закрыть модалку принудительно
+            // он не может — она обязана уйти сама, по выполненному условию. Тактов ДВА, как и во всех
+            // остальных местах файла: первый защёлкивает выполненное условие, фейд идёт со следующего.
+            driver.DebugAdvanceNewScale(0.05f);
+            driver.DebugAdvanceNewScale(GameDriver.NewScaleFadeSeconds);
             Assert.IsFalse(driver.NewScaleShowing, "модалка ушла своим ходом");
             Assert.IsFalse(g.Paused, "…и пауза снята — игра продолжается");
 

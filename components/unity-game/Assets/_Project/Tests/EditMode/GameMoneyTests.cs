@@ -43,6 +43,18 @@ namespace ThanksNoThanks.Tests
             return c;
         }
 
+        /// <summary>
+        /// Пометить синтетическую карточку как ОТКРЫВАЮЩУЮ шкалу. Отрезок 0 ввёл правило «Δ только по
+        /// открытым шкалам», а колоды этих тестов не доводят возраст до 20/25 — без пометки Δ по энергии
+        /// или отношениям молча не применилась бы, и тест проверял бы пустоту. `OPEN:*` — ровно тот
+        /// законный случай, который правило и знает (карточка применяет свою Δ, шкала открывается следом).
+        /// </summary>
+        private static Card Opening(Card c, string scale)
+        {
+            c.Flags = new List<string>(c.Flags) { "OPEN:" + scale };
+            return c;
+        }
+
         // Deck = an age-timer starter (I03) + the given cards (must be handed in ascending age).
         private static Game NewGame(System.Func<bool> coin, params Card[] cards)
         {
@@ -239,7 +251,7 @@ namespace ThanksNoThanks.Tests
             // (MD03 = 60₽), and the card's CSV money-Δ («Дн −2») is NOT applied — the price is the single
             // authoritative money cost. Any non-money Δ (here «Эн +2») still applies.
             var open = Plain("OPEN", 18);
-            var block = Block("MD03", 30);
+            var block = Opening(Block("MD03", 30), Card.OpenEnergy);
             block.YesDeltas = new[]
             {
                 new ScaleDelta(Scale.Energy, DeltaKind.Add, 2),   // applies
@@ -257,10 +269,17 @@ namespace ThanksNoThanks.Tests
             Assert.IsFalse(g.CurrentCardBlocked, "affordable BLOCK$ card is a normal card");
             Assert.AreEqual(60.0, g.CurrentCardPrice, Eps, "single source: shown/gate/spend price = 60");
 
-            double m = g.Money; int e = g.Scales.Energy;
+            double m = g.Money;
+            // Энергия просаживается заранее: Δ теперь разворачивается по канону отрезка 0 («Эн +2» = +18
+            // п.п.), и с полной шкалы прибавка была бы съедена потолком 100 — тест перестал бы что-либо
+            // проверять. Шкала при этом ОТКРЫТА (иначе Δ по ней не применяется — второе правило отрезка).
+            g.Scales.Energy = 50;
+            int e = g.Scales.Energy;
+            int wantEnergy = DeltaScale.Resolve(Scale.Energy, DeltaKind.Add, 2);
             Yes(g);                                   // ДА → spend exactly 60, skip the −2, apply Эн +2
             Assert.AreEqual(m - 60.0, g.Money, Eps, "ДА spent exactly the price (−60), not −2 or −62");
-            Assert.AreEqual(e + 2, g.Scales.Energy, "non-money Δ (Эн +2) still applies on a BLOCK$ card");
+            Assert.AreEqual(e + wantEnergy, g.Scales.Energy,
+                "non-money Δ («Эн +2» → +18 п.п.) still applies on a BLOCK$ card");
 
             int guard = 0;
             while (g.State == GameState.Playing && guard++ < 50) No(g);
@@ -273,8 +292,11 @@ namespace ThanksNoThanks.Tests
             // Per-id spend + health/energy Δ for all three BLOCK$ ids, exactly per the CSV:
             //   MD03 −60 & Эн +2 · LT02 −120 & Здр +40 · LT08 −100 & Здр → 80%.
             // (Health is pre-dropped to 40 so LT02's «Здр<50» draw gate lets it through.)
+            // MD03 «Эн +2» = +18 п.п. по канону отрезка 0; шкала стоит на 100 и упирается в потолок,
+            // поэтому проверяем именно потолок (Δ применилась и не выкинула маркер за край).
             AssertSpend("MD03", 60, new[] { new ScaleDelta(Scale.Energy, DeltaKind.Add, 2) },
-                g => Assert.AreEqual(102, g.Scales.Energy, "MD03 Эн +2 (from 100)"));
+                g => Assert.AreEqual(100, g.Scales.Energy, "MD03 «Эн +2» упирается в потолок 100"),
+                opens: Card.OpenEnergy);
             AssertSpend("LT02", 120, new[] { new ScaleDelta(Scale.Health, DeltaKind.Add, 40) },
                 g => Assert.AreEqual(80, g.Scales.Health, "LT02 heals +40 (40 → 80)"));
             AssertSpend("LT08", 100, new[] { new ScaleDelta(Scale.Health, DeltaKind.Set, 80) },
@@ -292,9 +314,11 @@ namespace ThanksNoThanks.Tests
 
         // Bank enough, drop health under LT02's gate, draw the BLOCK$ card affordable, answer ДА, assert
         // money dropped by EXACTLY the registered price and the health/energy side-effect landed.
-        private static void AssertSpend(string id, double price, ScaleDelta[] yesDeltas, System.Action<Game> effectCheck)
+        private static void AssertSpend(string id, double price, ScaleDelta[] yesDeltas,
+                                        System.Action<Game> effectCheck, string opens = null)
         {
             var block = Block(id, 40);
+            if (opens != null) Opening(block, opens);   // Δ по не-открытой шкале не применяется (отрезок 0)
             block.YesDeltas = yesDeltas;
             var g = NewGame(() => false, Plain("OPEN", 18), Drop(30, 40), block, Plain("N", 60));
 
