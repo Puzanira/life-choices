@@ -50,10 +50,12 @@ namespace ThanksNoThanks.Tests
         [Test]
         public void ExcludedIds_NeverDrawn_AcrossSeeds()
         {
-            // After the depression increment (2026-07-19) only MD06 + RND05 stay hard-excluded. CR00–CR08
-            // (crisis) and CR09 (депрессия) are un-excluded — carried on the plan and played as sequenced
-            // states — and LT08 was un-excluded earlier (carried on DeckPlan.Lt08).
-            Assert.AreEqual(2, DeckSampler.Excluded.Count, "exactly MD06, RND05 stay hard-excluded");
+            // Отрезки 1–7 (2026-08-08): MD06 «второй шанс» ушла из hard-exclude — механика реализована,
+            // а выпадение гейтится условием «если Отн потеряна» на слое Game. Остаётся ОДНА: RND05.
+            // CR00–CR08/CR10–CR12 (кризис) и CR09 (депрессия) не исключены — они на плане и играются
+            // секвенсными состояниями; LT08 не исключён с 2026-07-18 (несётся в DeckPlan.Lt08).
+            Assert.AreEqual(1, DeckSampler.Excluded.Count, "only RND05 stays hard-excluded");
+            Assert.IsFalse(DeckSampler.Excluded.Contains("MD06"), "MD06 второй шанс РЕАЛИЗОВАН, не исключён");
             Assert.IsFalse(DeckSampler.Excluded.Contains("CR09"), "CR09 (депрессия) is no longer hard-excluded");
             Assert.IsFalse(DeckSampler.Excluded.Contains("LT08"), "LT08 is no longer hard-excluded (canon 2026-07-18)");
             foreach (var cr in new[] { "CR00", "CR01", "CR05", "CR08" })
@@ -71,7 +73,8 @@ namespace ThanksNoThanks.Tests
         {
             // CR00–CR08 are un-excluded yet, like LT08, pulled out of sampling into DeckPlan.Crisis — Game
             // plays them as the 45–50 sequenced state, never as random draws. CR09 stays fully excluded.
-            var crisisIds = new[] { "CR00", "CR01", "CR02", "CR03", "CR04", "CR05", "CR06", "CR07", "CR08" };
+            var crisisIds = new[] { "CR00", "CR01", "CR02", "CR03", "CR04", "CR05",
+                                    "CR06", "CR07", "CR08", "CR10", "CR11", "CR12" };
             for (int seed = 0; seed < 40; seed++)
             {
                 var plan = DeckSampler.BuildPlan(AllCards(), new System.Random(seed));
@@ -81,7 +84,7 @@ namespace ThanksNoThanks.Tests
                     Assert.IsFalse(plan.Reserve.Any(c => c.Id == id), $"{id} never in the reserve (seed {seed})");
                 }
                 CollectionAssert.AreEquivalent(crisisIds, plan.Crisis.Select(c => c.Id).ToArray(),
-                    $"the plan carries the whole crisis block CR00–CR08 (seed {seed})");
+                    $"the plan carries the whole crisis block CR00–CR08 + CR10–CR12 (seed {seed})");
                 Assert.IsFalse(plan.Crisis.Any(c => c.Id == "CR09"), $"CR09 never in the crisis block (seed {seed})");
             }
         }

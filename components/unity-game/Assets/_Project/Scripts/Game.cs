@@ -90,8 +90,10 @@ namespace ThanksNoThanks
             { "FB04", 35 },   // музыкальный фестиваль
             { "FB06", 45 },   // первый отпуск за свои
             { "FB09", 45 },   // спустить зарплату за вечер
-            // кек-карточки 25+ (проза у них и так «−10₽»)
-            { "KEK01", 10 }, { "KEK02", 10 }, { "KEK03", 10 }, { "KEK05", 10 },
+            // кек-карточки 25+. Отрезок 4 §1 «кек перестаёт быть одинаковым»: пять карточек стоили по
+            // 10 ₽ и не делали НИЧЕГО, что при новом масштабе Δ вообще ноль. Теперь каждая бьёт по своей
+            // шкале, и цены разъехались (`KEK04` бьёт энергией и цены не имеет вовсе).
+            { "KEK01", 25 }, { "KEK02", 25 }, { "KEK03", 15 }, { "KEK05", 40 },
             // 25–29
             { "FC02", 25 },   // ранняя ипотека — ВЗНОС (банк без взноса не даёт), §3.5
             { "FC04", 45 },   // записаться к терапевту
@@ -116,6 +118,30 @@ namespace ThanksNoThanks
             // карточки, они приезжают вместе с отрезками 1–7, не здесь.
             { "CR07", 70 },   // купить мотоцикл и гнать 200
             { "CR08", 70 },   // побриться налысо и на Шри-Ланку
+
+            // ---- ОТРЕЗКИ 1–7 (2026-08-08) --------------------------------------------------------------
+            // Цена КАЖДОЙ новой платной карточки выведена механически из её собственной ДА-Δ в CSV: доки
+            // отрезков 1–7 пишут суммы уже в рублях («−30 ₽»), поэтому таблица и колонка не могут
+            // разойтись по невнимательности. Гард — `GameScoringTests.EveryBlockCostCard_HasAPrice` +
+            // `PriceTable_AgreesWithTheCsvMoneyDelta`.
+            // 18–19 — потолок юности 10–25 ₽ держится
+            { "FA03", 15 }, { "FA11", 20 }, { "FA20", 20 }, { "FA22", 12 }, { "FA25", 15 }, { "FA26", 15 },
+            { "FA28", 20 }, { "FA32", 15 }, { "FA34", 20 },
+            // 20–24
+            { "FB05", 20 }, { "FB13", 45 }, { "FB15", 25 }, { "FB21", 40 }, { "FB22", 15 }, { "FB23", 20 },
+            { "FB26", 25 }, { "FB27", 20 }, { "FB30", 45 },
+            // 25–29
+            { "FC24", 30 }, { "FC27", 30 }, { "FC29", 25 }, { "FC31", 30 }, { "FC32", 50 }, { "FC33", 40 },
+            { "MD08", 80 }, { "MD12", 25 },
+            // 30–39
+            { "FC38", 40 }, { "FC39", 50 }, { "FC43", 50 }, { "FC47", 40 }, { "FC48", 30 },
+            { "FC49", 100 }, { "FC52", 40 }, { "FC54", 30 }, { "FC55", 50 },
+            // 40–55
+            { "MD17", 30 }, { "MD18", 80 }, { "MD19", 25 }, { "MD21", 25 }, { "MD23", 50 },
+            { "MD30", 25 }, { "MD32", 80 }, { "MD35", 30 },
+            // 56+
+            { "LT11", 120 }, { "LT15", 40 }, { "LT20", 40 }, { "LT22", 40 }, { "LT24", 20 },
+            { "LT25", 25 }, { "LT29", 20 },
         };
 
         /// <summary>
@@ -198,12 +224,42 @@ namespace ThanksNoThanks
         /// в 25, а энергия декеем здоровья не управляется.
         /// </summary>
         public const double DefaultHealthDecayPerSec = 0.5;
+
+        /// <summary>
+        /// ⚠ #2 ТЮНИМОЕ ЧИСЛО БАЛАНСА (отрезки 1–7). Скорость, с которой здоровье восстанавливается, ПОКА
+        /// оно ещё не начало таять (до <see cref="HealthDecayFromAge"/>). Переменная, а не константа, — по
+        /// той же причине, что и декей: значение подбирается ИЗМЕРЕНИЕМ, матрицу печатает
+        /// <c>BalanceGuardTests.YouthRegenMatrix_IsReportedForTheFounder</c>. Тест восстанавливает значение
+        /// за собой.
+        /// </summary>
+        public static double HealthYouthRegenPerSec = DefaultHealthYouthRegenPerSec;
+
+        /// <summary>
+        /// Заводское значение <see cref="HealthYouthRegenPerSec"/>. ВЫБРАНО ПО ИЗМЕРЕНИЮ (матрица
+        /// `YouthRegenMatrix_IsReportedForTheFounder`, 12 сидов): обрыв лежит между 0.10 (лингеринг
+        /// худший 75) и 0.15 (77), а 0.00 роняет гард в 55/62. Выше 0.15 результат ПЛОСКИЙ — значит
+        /// связывает не скорость, а потолок <see cref="HealthYouthRegenCeiling"/>, и точное число рейта
+        /// малозначимо. Взято 0.25: ~2.5× запаса над обрывом (не на краю, в отличие от 0.15) и при этом
+        /// не мгновенно — семь потерянных пунктов возвращаются примерно за три карточки, так что выбор
+        /// в юности всё ещё чувствуется, а не стирается к следующему вопросу.
+        /// </summary>
+        public const double DefaultHealthYouthRegenPerSec = 0.25;
+
+        /// <summary>
+        /// Потолок восстановления в молодости. НИЖЕ ста намеренно: юность заживает, но не начисто —
+        /// иначе выборы 18–24 не значили бы вообще ничего, а они и есть содержание отрезков 2–3.
+        /// </summary>
+        public const int HealthYouthRegenCeiling = 85;
         public const double Lt01NeglectDecayMult = 2.0;   // LT01=НЕТ «забросил» → декей ×2
         public const double Lt01CareDecayMult = 0.5;      // LT01=ДА «занялся» → декей ×0.5
         public const int Kek04HealthBonus = 5;            // KEK04=ДА ЗОЖ-секта → разовый небольшой плюс
-        public const int Lt08TriggerAge = 30;             // LT08 «Пора подлечиться!» eligible age ≥30…
+        // LT08 «Пора подлечиться!» — ВЗВОД карточки (вставка в колоду). Условие показа у неё то же самое,
+        // но читается уже из CSV («когда здоровье < 40% (возраст ≥ 30)»); что эти два источника сходятся,
+        // стережёт валидатор колоды — иначе взвод и показ разъехались бы молча.
+        public const int Lt08TriggerAge = 30;             // LT08 eligible age ≥30…
         public const int Lt08TriggerHealthBelow = 40;     // …AND when health < 40%
-        public const int Lt02EligibleHealthBelow = 50;    // LT02 операция drawable only when health < 50%
+        // (`Lt02EligibleHealthBelow` удалён: порог операции живёт в CSV «55–70, если Здр<50%» и читается
+        //  парсером в Card.RequiresHealthBelow — хардкод по id был частным случаем находки ревю.)
 
         // ---- live energy (tunable; canon §Энергия) ----
         public const int EnergyOpenAge = 25;              // энергия открывается в 25 (YA05)
@@ -344,8 +400,15 @@ namespace ThanksNoThanks
         // ---- live money economy (float ₽; may go negative — «в минус», canon; no death from money) ----
         private struct ActiveMult { public double Value; public int FromAge; }
         private struct MoneyDrain { public double PerSec; public float StartAge; public float EndAge; }
+        /// <summary>
+        /// Разовая выплата, назначенная на возраст <see cref="AtAge"/> (грамматика <c>ONCE:Ny</c>, отрезки
+        /// 1–7). Взводится ответом, падает один раз, тогда снимается. Отрицательная — расплата (`FA27`
+        /// поручительство, `FB32` бумаги не читая), положительная — подушка безопасности (`FC32`).
+        /// </summary>
+        private struct MoneyOnce { public double Amount; public float AtAge; public bool IsCredit; }
         private readonly List<ActiveMult> _mults = new();
         private readonly List<MoneyDrain> _drains = new();
+        private readonly List<MoneyOnce> _onces = new();
 
         // ---- live health / energy (dt-injected integration, like money; the int scale in Scales stays
         //      authoritative for card Δ, this layer decays/drains it in real time via a fractional
@@ -460,7 +523,8 @@ namespace ThanksNoThanks
 
         // ---- midlife crisis (blitz + impulse) state ----
         private List<Card> _blitzThoughts;      // CR01..CR05 (from the plan); null when no crisis in this plan
-        private List<Card> _impulseCards;       // CR06..CR08 (from the plan); null when absent
+        private List<Card> _impulseCards;       // ПУЛ импульсов CR06–CR08 + CR10–CR12; null when absent
+        private List<Card> _impulseRound;       // подмножество пула, отобранное на ЭТОТ кризис (по карману)
         private bool _crisisDone;               // one-shot per life (set at trigger, so it can't re-fire)
         private CrisisPhase _phase = CrisisPhase.None;
         private int _blitzIndex;                // 0..4 current thought
@@ -741,10 +805,14 @@ namespace ThanksNoThanks
         {
             _blitzThoughts = null;
             _impulseCards = null;
+            _impulseRound = null;
             if (crisis == null || crisis.Count == 0) return;
             var blitz = crisis.Where(c => c.Id == "CR01" || c.Id == "CR02" || c.Id == "CR03"
                                           || c.Id == "CR04" || c.Id == "CR05").ToList();
-            var impulse = crisis.Where(c => c.Id == "CR06" || c.Id == "CR07" || c.Id == "CR08").ToList();
+            // Импульс-ПУЛ: CR06–CR08 (платные, кроме разрыва) + CR10–CR12 (бесплатные, отрезок 0 §4.3).
+            // Сам раунд по-прежнему короткий — какие именно карточки в него попадут, решает
+            // <see cref="EnterImpulse"/> уже зная, сколько у игрока денег.
+            var impulse = crisis.Where(c => c.IsInvert).ToList();
             if (blitz.Count > 0) _blitzThoughts = blitz;
             if (impulse.Count > 0) _impulseCards = impulse;
         }
@@ -1032,10 +1100,43 @@ namespace ThanksNoThanks
             => c.RequiresParentYes != null
                && !(_answers.TryGetValue(c.RequiresParentYes, out var yes) && yes);
 
-        // LT02 «Операция» carries its canonical condition «если Здр<50%»: drawable only when health is
-        // below the eligibility threshold at draw time; otherwise skipped/substituted like a chain gate.
+        /// <summary>
+        /// Условие «если Здр&lt;N%» из колонки «Когда» (`LT02` операция, `LT08` подлечиться): карточка
+        /// приходит только тому, у кого здоровье НИЖЕ порога в момент показа.
+        ///
+        /// ⚠ Раньше это условие было ЗАШИТО по id (`c.Id == "LT02"`), хотя стоит в CSV у двух карточек —
+        /// частный случай той же дыры, что и «если Отн открыта»: колонка пишет условие, а работает оно
+        /// только у той строки, которую кто-то вспомнил захардкодить. Читается из карточки.
+        /// </summary>
         private bool HealthGatedOff(Card c)
-            => c.Id == "LT02" && Scales.Health >= Lt02EligibleHealthBelow;
+            => !double.IsNaN(c.RequiresHealthBelow) && Scales.Health >= c.RequiresHealthBelow;
+
+        /// <summary>
+        /// Условие «если {шкала} открыта» (`MD01` свадьба, `FB31`, `YA04`, `RND05`) — гейт ПО ЖИВОМУ
+        /// СОСТОЯНИЮ на момент показа, ровно как здоровье у <see cref="HealthGatedOff"/>.
+        ///
+        /// ⚠ НАХОДКА РЕВЮ (MAJOR). Форма молча игнорировалась парсером, и «Сделать предложение?» приходила
+        /// игроку, который на `YA03` ответил НЕТ и шкалу отношений не открывал; следом `MD02` предлагала
+        /// ребёнка от несуществующего партнёра. Скобка «шкала закрыта» — это НЕ «шкала в нуле»: закрытая
+        /// шкала не показана на экране вовсе, и Δ по ней не применяется (то же правило, что у
+        /// <see cref="ScaleOpenForDelta"/>), поэтому карточка про неё бессмысленна.
+        /// </summary>
+        private bool ScaleGatedOff(Card c)
+            => c.RequiresScaleOpen != null && !ScaleIsOpenNow(c.RequiresScaleOpen);
+
+        // Токены те же, что в колонке Δ и во флагах `OPEN:*`. Незнакомого токена сюда не приходит:
+        // CardLoader.NormalizeScaleToken его не выдаёт, а нераспознанная форма краснит валидатор колоды.
+        private bool ScaleIsOpenNow(string token) => token switch
+        {
+            Card.OpenRelations => RelationshipsOpen,
+            Card.OpenMoney => MoneyOpen,
+            Card.OpenEnergy => EnergyOpen,
+            Card.OpenChild => ChildOpen,
+            _ => true,      // «Здр» — здоровье открыто с первого кадра
+        };
+
+        /// <summary>Условие «(возраст ≥ N)» (`LT08`) — нижняя граница показа по живому возрасту.</summary>
+        private bool AgeGatedOff(Card c) => c.RequiresMinAge >= 0 && Age < c.RequiresMinAge;
 
         /// <summary>
         /// Карточка принадлежит ветке `EXCL:*`, которая в этом забеге УЖЕ выбрана (ипотека взята → вторая
@@ -1045,6 +1146,24 @@ namespace ThanksNoThanks
         private bool ExcludedByBranch(Card c)
             => !string.IsNullOrEmpty(c.ExclusiveGroup) && _exclusiveTaken.Contains(c.ExclusiveGroup);
 
+        /// <summary>
+        /// Условие «на счету &lt; N ₽» из колонки «Когда» (`FA35` первый ноль, `FC16` вернуться к родителям).
+        /// Считается НА МОМЕНТ ПОКАЗА, как и <c>BLOCK$</c>: карточка приходит только тому, у кого сейчас
+        /// пусто. Тот, кто крутил, этой сцены не увидит — так и задумано (дизайн-док отрезка 2 §3).
+        /// Деньги закрыты → условие не выполнимо, карточка не приходит.
+        /// </summary>
+        private bool MoneyGatedOff(Card c)
+            => (!double.IsNaN(c.RequiresMoneyBelow) && (!MoneyOpen || Money >= c.RequiresMoneyBelow))
+               // …и зеркальное «на счету ≥ N ₽» (`MD03` машина, `MD04` поздняя ипотека). Тоже молча
+               // игнорировалось до находки ревю: «купить машину за 60 ₽» приходила пустому кошельку.
+               || (!double.IsNaN(c.RequiresMoneyAtLeast) && (!MoneyOpen || Money < c.RequiresMoneyAtLeast));
+
+        /// <summary>
+        /// Условие «если Отн потеряна» (`MD06` второй шанс). Пока партнёр есть, второго шанса не предлагают.
+        /// </summary>
+        private bool RelationshipsGatedOff(Card c)
+            => c.RequiresRelationshipsLost && !RelationshipsLost;
+
         private void Advance()
         {
             if (CheckScheduledFatal()) return;
@@ -1053,8 +1172,12 @@ namespace ThanksNoThanks
                 _index++;
                 if (_index >= _deck.Count) { EndOfDeck(); return; }
                 var c = _deck[_index];
-                if (GatedOff(c) || HealthGatedOff(c) || ExcludedByBranch(c)) // parent≠ДА / LT02 while healthy
-                {                                 // / ветка `EXCL:*` уже занята → skip…
+                if (GatedOff(c) || HealthGatedOff(c) || ExcludedByBranch(c)
+                    || MoneyGatedOff(c) || RelationshipsGatedOff(c)
+                    || ScaleGatedOff(c) || AgeGatedOff(c))            // parent≠ДА / здоровье выше порога
+                {                                 // / ветка `EXCL:*` уже занята / не тот счёт
+                                                  // / отношения ещё целы / шкала условия ЗАКРЫТА
+                                                  // / рано по возрасту → skip…
                     Substitute(c);                // …and top up from the reserve (drawn count 25–30)
                     continue;
                 }
@@ -1238,10 +1361,25 @@ namespace ThanksNoThanks
             // самого начала (<see cref="CheckScheduledBreak"/>), а немедленный — нет: карточка `BREAK:Отн`,
             // попавшая до двадцати или уже ПОСЛЕ разрыва, переворачивала RelationshipsLost, роняла шкалу в
             // <see cref="RelBreakupValue"/> и объявляла разрыв во второй раз — по партнёру, которого нет.
-            if (yes && card.BreaksRelationships)
+            // Сторона разрыва — обычно ДА, но `MD24` («Потерпеть ради ребёнка?») рвёт брак на НЕТ.
+            if (yes != card.BreakOnNoSide && card.BreaksRelationships)
             {
                 if (card.BreakDelayYears > 0) _scheduledBreakAge = card.Age + card.BreakDelayYears;
                 else if (RelationshipsOpen) BreakUp(byCard: true);
+            }
+
+            // ВТОРОЙ ШАНС (`MD06`, отрезок 6). Балансир отношений открывается ЗАНОВО после расставания.
+            // До отрезков 1–7 карточка была hard-excluded из колоды именно потому, что механики не было:
+            // <see cref="CheckRelationshipsOpen"/> проверяет <see cref="RelationshipsLost"/> и после разрыва
+            // не открывает шкалу уже никогда. Точка встройки — здесь: карточка с `OPEN:Отн`, отвеченная ДА
+            // по ПОТЕРЯННОЙ шкале, снимает этот флаг, и обычный возрастной путь открытия снова доступен.
+            // Шкала возвращается в стартовое значение — новые отношения начинаются с чистого листа, а не с
+            // «одиноко»-уровня прошлого разрыва; сама Δ карточки («Отн +12») ложится поверх уже открытой
+            // шкалы по правилу `HeldByItsOwnCard`, ровно как у `YA03`.
+            if (yes && RelationshipsLost && card.Opens(Card.OpenRelations))
+            {
+                RelationshipsLost = false;
+                Scales.Relationships = Scales.RelationshipsStart;
             }
 
             // Card-id specials on the live layer: LT01 sets the health-decay modifier (both answers),
@@ -1458,19 +1596,52 @@ namespace ThanksNoThanks
                 ResumeAfterCrisis();
         }
 
+        /// <summary>
+        /// Сколько импульсов показывает раунд. Было ровно три (весь пул `CR06`–`CR08`); с приездом
+        /// `CR10`–`CR12` пул вырос до шести, а раунд остался прежней длины — иначе кризис из вспышки
+        /// превратился бы в вторую колоду. Тюнимо.
+        /// </summary>
+        public const int ImpulseRoundSize = 3;
+
         private void EnterImpulse()
         {
             _phase = CrisisPhase.Impulse;
             _impulseIndex = 0;
+            _impulseRound = PickImpulseRound();
             StartImpulseCard();
             CrisisImpulseStarted?.Invoke();       // driver: S13 INVERT warning «молчание = ДА»
+        }
+
+        /// <summary>
+        /// Отобрать импульсы этого раунда из пула. ПО КАРМАНУ ВПЕРЁД: платный импульс, который игрок не
+        /// потянет, выпадает гашёным и пропускается без всякого выбора — до `CR10`–`CR12` это означало, что
+        /// у безденежного весь кризис сводился к одному «БРОСИТЬ ПАРТНЁРА». Поэтому сначала берутся те, что
+        /// он МОЖЕТ отыграть (бесплатные и оплатимые), и лишь потом остальные — деньги на входе в кризис
+        /// уже известны, гадать не нужно.
+        ///
+        /// Отбор СТАБИЛЬНЫЙ (порядок пула сохраняется внутри каждой группы), а не перемешанный: у платящего
+        /// игрока раунд остаётся каноническим `CR06`→`CR07`→`CR08`, у безденежного платные уезжают в хвост и
+        /// вместо них приходят `CR10`–`CR12`. Побочное следствие, которое надо знать основательнице:
+        /// СОСТОЯТЕЛЬНЫЙ игрок бесплатных импульсов не увидит вовсе — разнообразие импульс-раунда для него
+        /// осталось прежним. Лечится перемешиванием, но оно стоит детерминизма кризис-тестов; вынесено в
+        /// открытые вопросы, а не решено здесь.
+        /// </summary>
+        private List<Card> PickImpulseRound()
+        {
+            bool Affordable(Card c) => !c.IsBlockCost
+                                       || !BlockPrices.TryGetValue(c.Id, out var price)
+                                       || Money >= price;
+            var round = _impulseCards.Where(Affordable).ToList();
+            round.AddRange(_impulseCards.Where(c => !Affordable(c)));
+            if (round.Count > ImpulseRoundSize) round.RemoveRange(ImpulseRoundSize, round.Count - ImpulseRoundSize);
+            return round;
         }
 
         // Put up the current impulse card (CR06..CR08). Its «Когда» has no real age, so we stamp the
         // player's current age onto it so its necrolog line sorts around midlife rather than at 0/end.
         private void StartImpulseCard()
         {
-            var card = _impulseCards[_impulseIndex];
+            var card = _impulseRound[_impulseIndex];
             card.Age = Math.Max(CrisisTriggerAge, (int)Age);
             CurrentCard = card;
             // BLOCK$ И В ИМПУЛЬСЕ (отрезок 0). Основательница решила правило денег не ломать: мотоцикл и
@@ -1503,7 +1674,7 @@ namespace ThanksNoThanks
         private void AdvanceImpulse()
         {
             _impulseIndex++;
-            if (_impulseIndex >= _impulseCards.Count) { ResumeAfterCrisis(); return; }
+            if (_impulseIndex >= _impulseRound.Count) { ResumeAfterCrisis(); return; }
             StartImpulseCard();
         }
 
@@ -1679,6 +1850,7 @@ namespace ThanksNoThanks
             CurrentCardBlocked = false;
             _mults.Clear();
             _drains.Clear();
+            _onces.Clear();
         }
 
         /// <summary>MONEY_TICK: +1₽ × multiplier. No-op unless money is open and the run is live/unpaused.
@@ -1710,7 +1882,35 @@ namespace ThanksNoThanks
         // sub-1%/s rate decrements the int scale exactly on whole crossings (dt-injected — no wall clock).
         private void IntegrateHealth(float dt)
         {
-            if (!HealthDecaying || Scales.Health <= 0) return;
+            if (Scales.Health <= 0) return;
+
+            // МОЛОДОСТЬ ЗАЖИВАЕТ (отрезки 1–7). До тридцати здоровье не только не убывает — оно
+            // ВОССТАНАВЛИВАЕТСЯ, медленно и до потолка <see cref="HealthYouthRegenCeiling"/>.
+            //
+            // Зачем: канон говорит «до 30 здоровье не убывает», и с колодой из 85 карточек этого хватало —
+            // за юность прилетало два-три щелчка. Отрезки 2–3 добавили в 18–24 около сорока карточек, у
+            // которых здоровье — ЕДИНСТВЕННАЯ живая шкала («в детстве и юности считать нечего», дизайн-док
+            // отрезка 1 §0), и почти каждая снимает 7–15 п.п.: ночная смена, хамский клиент, четыре часа
+            // сна, диета из одного продукта, вписка до утра. Сэмплер берёт по десять карточек из каждого
+            // окна, умеренный игрок соглашается примерно на половину — и к двадцати пяти приходит с 30 %
+            // здоровья НАВСЕГДА, потому что до тридцати его нечем поднять, а после тридцати оно только
+            // тает. Замер: главный гард падал (умеренный худший 55, лингеринг 62), причём декей был НИ ПРИ
+            // ЧЁМ — матрица показала те же 61/62 даже на 0.30 %/с.
+            //
+            // Смысл правки не в том, чтобы простить игроку выборы, а в том, что бессонная ночь в
+            // девятнадцать не должна стоить семи процентов здоровья ВОСЕМЬДЕСЯТ ЛЕТ спустя. Потолок ниже
+            // ста намеренно: юность заживает, но не начисто — след от сорока плохих решений остаётся.
+            if (!HealthDecaying)
+            {
+                if (Scales.Health >= HealthYouthRegenCeiling) return;
+                _healthDecayFrac -= HealthYouthRegenPerSec * dt;
+                int heal = (int)(-_healthDecayFrac);
+                if (heal <= 0) return;
+                _healthDecayFrac += heal;
+                Scales.Health = Math.Min(HealthYouthRegenCeiling, Scales.Health + heal);
+                return;
+            }
+
             _healthDecayFrac += HealthDecayPerSec * _healthDecayMult * dt;
             int whole = (int)_healthDecayFrac;
             if (whole <= 0) return;
@@ -1927,6 +2127,15 @@ namespace ThanksNoThanks
             _scheduledBreakAge = float.NaN;   // отложенный разрыв уже неактуален — рвать больше нечего
             Scales.Relationships = RelBreakupValue;
 
+            // ⚠ ДЛИТЕЛЬНЫЕ ЭФФЕКТЫ ПО ОТНОШЕНИЯМ УМИРАЮТ ВМЕСТЕ С ОТНОШЕНИЯМИ (находка ревю, MAJOR).
+            // `DRIFT:Отн=xN` описывает КОНКРЕТНУЮ связь («отказались от свадьбы — тает вдвое быстрее»),
+            // а не характер игрока. Без этой чистки сценарий «НЕТ на MD01 (×2) → разрыв → MD06 ДА» отдавал
+            // новым отношениям УНАСЛЕДОВАННЫЙ ×2 от ветки, которой больше нет: второй шанс приходил уже
+            // отравленным. Симметрично правилу «DRIFT по ЗАКРЫТОЙ шкале не принимается»
+            // (<see cref="ApplyLongEffects"/>): раз закрытая шкала эффект не берёт, закрывшаяся — не хранит.
+            // Прочие шкалы не трогаем — их дрейф к партнёру отношения не имеет.
+            _drifts.RemoveAll(f => f.Scale == Scale.Relationships);
+
             if (divorce && !_prenup && MoneyOpen)
             {
                 double affordable = Money > 0 ? Money : 0;
@@ -2107,6 +2316,23 @@ namespace ThanksNoThanks
             foreach (var d in _drains)
                 if (Age >= d.StartAge && Age < d.EndAge)
                     Money += d.PerSec * dt;   // PerSec is signed (e.g. −0.3)
+
+            // РАЗОВЫЕ выплаты (`ONCE:Ny`) — созревшие падают одним ударом и снимаются со списка.
+            //
+            // ⚠ ЧЕРЕЗ ТОТ ЖЕ ЗАЖИМ, ЧТО И ЛЮБАЯ КАРТОЧНАЯ ТРАТА (находка ревю, MAJOR). Раньше здесь стояло
+            // голое `Money += …`, и `FA27` (−25 ₽ поручительство) с `FB32` (−60 ₽ бумаги не читая) уводили
+            // счёт В МИНУС мимо <see cref="AddCardMoney"/> — то есть НЕкредитная карточка нарушала главное
+            // правило отрезка 0 «в минус уводят только кредитные». Отложенность платежа его не отменяет:
+            // это по-прежнему расплата ПО КАРТОЧКЕ, просто выписанная задним числом, поэтому кредитность
+            // запоминается при взводе (<see cref="MoneyOnce.IsCredit"/>) и применяется при выплате.
+            // Пассивные механики (стоимость жизни, дренажи выше) — другое дело, они в минус уводят по канону.
+            for (int i = _onces.Count - 1; i >= 0; i--)
+            {
+                if (Age < _onces[i].AtAge) continue;
+                var due = _onces[i];
+                _onces.RemoveAt(i);
+                AddClampedMoney(due.IsCredit, due.Amount);
+            }
             // Пассивные механики (стоимость жизни, дренажи ипотеки/кредита) уводят в минус по канону —
             // это и есть «расплата за молодость». Но прозвучать долг обязан (§3.2).
             NoteMoneyChanged();
@@ -2158,6 +2384,19 @@ namespace ThanksNoThanks
                     {
                         _mults.Add(new ActiveMult { Value = e.MultValue, FromAge = e.FromAge });
                     }
+                }
+                else if (e.Kind == LongEffectKind.Once)
+                {
+                    // Разовая сумма через N игровых лет от ответа (`FA27` −25 ₽ через 3, `FB32` −60 ₽
+                    // через 5, `FC32` +100 ₽ через 10).
+                    // Кредитность запоминается ЗДЕСЬ: в момент выплаты карточки уже нет под рукой, а
+                    // правило «в минус уводят только кредитные» решает именно она.
+                    _onces.Add(new MoneyOnce
+                    {
+                        Amount = e.OnceAmount,
+                        AtAge = Age + e.OnceYears,
+                        IsCredit = IsCreditCard(card),
+                    });
                 }
                 else // Drain: starts NOW (on ДА), lasts DurYears game-years
                 {
@@ -2249,9 +2488,16 @@ namespace ThanksNoThanks
         /// Пассивные механики (стоимость жизни, дренажи ипотеки/кредита) сюда НЕ ходят — они по канону
         /// уводят в минус, это и есть «расплата за молодость».
         /// </summary>
-        private void AddCardMoney(Card card, double amount)
+        private void AddCardMoney(Card card, double amount) => AddClampedMoney(IsCreditCard(card), amount);
+
+        /// <summary>
+        /// Тот же зажим, но по УЖЕ ИЗВЕСТНОЙ кредитности — для платежей, у которых карточки под рукой нет:
+        /// разовые выплаты `ONCE:Ny` созревают спустя годы после ответа (<see cref="MoneyOnce"/>).
+        /// Единственная точка, где правило долга записано арифметикой; все карточные пути ведут сюда.
+        /// </summary>
+        private void AddClampedMoney(bool isCredit, double amount)
         {
-            if (amount < 0 && !IsCreditCard(card))
+            if (amount < 0 && !isCredit)
             {
                 double affordable = Money > 0 ? Money : 0;
                 if (-amount > affordable) amount = -affordable;

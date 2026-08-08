@@ -614,10 +614,33 @@ namespace ThanksNoThanks.Tests.PlayMode
             // звезды-выкуса), и текст, легший на выкус, читался бы «на звезде», а не на креме.
             AssertRefBoxInside(RectOf(driver.FinaleOutcomeText.rectTransform), GameDriver.FinaleTextBox,
                 "рект строки исхода — в безопасном боксе плашки");
-            AssertRefBoxInside(RectOf(driver.FinaleStoryText.rectTransform), GameDriver.FinaleTextBox,
-                "рект некролога — в безопасном боксе плашки");
+            // Некролог живёт в СВОЁМ боксе: он шире общего (1104 против 1058), потому что из трёх
+            // звёзд-выкусов в его полосу вгрызается только левая. Цепочка приёмки та же, что была,
+            // просто звеньев теперь два (дизайн-гейт 2026-08-08, MINOR).
+            AssertRefBoxInside(RectOf(driver.FinaleStoryText.rectTransform), GameDriver.FinaleStoryBox,
+                "рект некролога — в безопасном боксе своей полосы");
             AssertRefBoxInside(GameDriver.FinaleTextBox, BakedCreamField,
                 "безопасный бокс — внутри замеренного кремового поля end.png");
+            AssertRefBoxInside(GameDriver.FinaleStoryBox, BakedCreamField,
+                "…и бокс полосы некролога — тоже внутри кремового поля");
+
+            // …и расширяли его НЕ «до упора по крему», а ДО ЗВЕЗДЫ. Полоса некролога перекрывается с левой
+            // запечённой звездой (x ≤ 403 на y 474…556) на своих первых 49 px, поэтому потолок ширины
+            // ставит звезда, а не кромка крема. Проверяем ОБА выкуса явно и по факту перекрытия — иначе
+            // следующее расширение «там же ещё много крема» посадит первую строку прямо на звезду.
+            var storyBox = GameDriver.FinaleStoryBox;
+            float storyLeft = storyBox.x - storyBox.z / 2f, storyRight = storyBox.x + storyBox.z / 2f;
+            float storyTop = storyBox.y - storyBox.w / 2f, storyBottom = storyBox.y + storyBox.w / 2f;
+
+            if (storyTop < 556f && storyBottom > 474f)
+                Assert.GreaterOrEqual(storyLeft, 403f,
+                    $"левый край полосы некролога ({storyLeft:0.#}) не заходит на левую звезду-выкус (x ≤ 403)");
+            if (storyTop < 865f && storyBottom > 833f)
+                Assert.LessOrEqual(storyRight, 1411f,
+                    $"правый край полосы некролога ({storyRight:0.#}) не заходит на правые звёзды (x 1411…1439)");
+
+            // …и бокс симметричен оси плашки: текст в нём центрирован, перекос увёл бы блок с оси.
+            Assert.AreEqual(BakedCreamField.x, storyBox.x, 1f, "бокс некролога стоит на оси кремового поля");
 
             // (5) Перепись спрайтов: фон + кант CTA + сама CTA. Второй плашки НЕ рисуется (она запечена).
             var expected = new List<string> { "bar-track", "bar-track", "finale-bg-v2" };
@@ -708,10 +731,15 @@ namespace ThanksNoThanks.Tests.PlayMode
             // ⚠ ОДНОГО lineCount МАЛО. Генератор отвечает «переноса нет» и тогда, когда живой кадр строку
             // ВСЁ РАВНО переносит: рисуется подпись при другом масштабе канваса, шрифт растеризуется в
             // другой сетке (поймано глазами на `inc00-finalelong`, headless был зелёный). Поэтому проверяем
-            // ЗАПАС: каждая строка обязана лечь в поле с полем FinaleStoryFitMargin — ровно тот критерий,
-            // по которому подборщик и работает. Без запаса тест снова стал бы слепым к сироте.
+            // ЗАПАС: каждая строка обязана лечь в поле, оставив боковое поле — ровно тот критерий, по
+            // которому подборщик и работает. Без запаса тест снова стал бы слепым к сироте.
+            //
+            // ⚠ И МЕРИТЬ ЕГО НАДО В СЕТКЕ КАБИНЕТА (2026-08-08). Раньше здесь стояло деление на
+            // `pixelsPerUnit`, то есть замер в масштабе батч-окна — он занижает ширину примерно на 7 %,
+            // и «запас» 0.93 компенсировал именно эту ошибку, а не поле. Гард мерил ту же кривую линейку,
+            // что и подборщик, поэтому и не видел, что строки в кабинете переносятся.
             float boxW = t.rectTransform.rect.width;
-            float limit = boxW * GameDriver.FinaleStoryFitMargin;
+            float limit = GameDriver.FinaleStoryLineLimit(boxW);
             foreach (var row in t.text.Split('\n'))
             {
                 var plain = System.Text.RegularExpressions.Regex.Replace(row, "</?size(=\\d+)?>", "");
@@ -719,12 +747,7 @@ namespace ThanksNoThanks.Tests.PlayMode
                 var m = System.Text.RegularExpressions.Regex.Match(row, "<size=(\\d+)>");
                 if (m.Success) size = int.Parse(m.Groups[1].Value);
 
-                var ws = t.GetGenerationSettings(Vector2.zero);
-                ws.fontSize = size;
-                ws.resizeTextForBestFit = false;
-                ws.richText = true;
-                ws.horizontalOverflow = HorizontalWrapMode.Overflow;
-                float w = t.cachedTextGeneratorForLayout.GetPreferredWidth(plain, ws) / t.pixelsPerUnit;
+                float w = GameDriver.PreferredRowWidth(t, plain, size);
 
                 Assert.LessOrEqual(w, limit,
                     $"[{which}] строка «{plain.Substring(0, System.Math.Min(30, plain.Length))}…» ложится "

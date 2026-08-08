@@ -345,6 +345,18 @@ namespace ThanksNoThanks.Tests
                 int drawn = PlayCountingCards(g,
                     c => !c.YesIsFatal && c.DelayedFatalYears == 0);
                 Assert.AreEqual(GameState.Finale, g.State, $"all-ДА run ends (seed {seed})");
+
+                // ⚠ ЗАБЕГ, ОБОРВАННЫЙ СМЕРТЬЮ, КОРИДОР НЕ МЕРИТ. Тест проверяет СЭМПЛЕР («сколько карточек
+                // он раздаёт»), а не выживание: если шкала кончилась на середине колоды, короткий забег —
+                // это правильный ответ игры, а не просадка сэмплера. Ровно та же оговорка, что уже сделана
+                // выше для фаталов; с отрезками 1–7 она понадобилась и здесь, потому что «ДА на всё»
+                // означает в том числе ДА на «продолжать как раньше» и «не проверяться» (`LT19`, Здр −30).
+                bool diedOfScales = g.CardIndex < g.DeckCount - 1;
+                if (diedOfScales)
+                {
+                    Assert.Greater(drawn, 20, $"даже оборванный смертью забег не микроскопический (seed {seed})");
+                    continue;
+                }
                 Assert.That(drawn, Is.InRange(DeckSampler.MinDeck, DeckSampler.MaxDeck),
                     $"drawn count {drawn} within [{DeckSampler.MinDeck},{DeckSampler.MaxDeck}]"
                     + $" on all-ДА (seed {seed})");

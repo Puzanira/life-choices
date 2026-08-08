@@ -306,10 +306,10 @@ namespace ThanksNoThanks.Tests
             Assert.IsNull(i02.YesNecrolog, "intro excluded from necrolog");
 
             var ya01 = subset.First(c => c.Id == "YA01");
-            Assert.IsTrue(ya01.NoDeltas.Any(d => d.Scale == Scale.Money && d.Value == 1),
-                "YA01 НЕТ gives Дн +1");
-            Assert.IsTrue(ya01.NoDeltas.Any(d => d.Scale == Scale.Energy && d.Value == -1),
-                "YA01 НЕТ gives Эн −1");
+            Assert.IsTrue(ya01.NoDeltas.Any(d => d.Scale == Scale.Money && d.Value == 20),
+                "YA01 НЕТ даёт Дн +20 — отрезок 2 §1.2 переписал мёртвую «Эн −1» на живые деньги");
+            Assert.IsTrue(ya01.NoDeltas.Any(d => d.Scale == Scale.Health && d.Value == -7),
+                "…а «Эн −1» стала «Здр −7»: энергия в 18 ещё закрыта, Δ по ней была декорацией");
         }
     }
 }

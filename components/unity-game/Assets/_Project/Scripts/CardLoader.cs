@@ -41,6 +41,9 @@ namespace ThanksNoThanks
             { "RND03", "белый порошок" },
             { "RND06", "селфи на краю крыши" },
             { "RND01", "за вами пришли" },
+            // отрезки 1–7
+            { "CH11", "прыжок с гаража" },
+            { "FB33", "чужая фирма" },
         };
 
         // --- Column indices in scenes.csv ---
@@ -126,13 +129,23 @@ namespace ThanksNoThanks
                 card.IsInvert = flags.Contains("INVERT");   // импульс-карта (CR06–CR08): молчание=ДА
                 card.LongEffects = ParseLongEffects(Field(row, ColLong));
                 // --- метки отрезка 0 (2026-08-08) ---
-                card.BreaksRelationships = flags.Contains(BreakRelationsFlag);
+                // Сторона разрыва: «BREAK:Отн» (ДА, как было) либо «НЕТ:BREAK:Отн» (`MD24` — развод на НЕТ).
+                card.BreaksRelationships = flags.Contains(BreakRelationsFlag)
+                                           || flags.Contains(BreakRelationsOnNoFlag);
+                card.BreakOnNoSide = !flags.Contains(BreakRelationsFlag)
+                                     && flags.Contains(BreakRelationsOnNoFlag);
                 // BREAK вместе с DELAY(n) — отложенный разрыв (RND05 «через 2 года развод»). DELAY читается
                 // ровно тем же парсером, что и у FATAL, поэтому у карточек с DELAY БЕЗ BREAK/FATAL
                 // (YA01/MD01/MD04/YA04 — прозаические пометки) ничего не меняется.
                 card.BreakDelayYears = card.BreaksRelationships ? ParseDelayYears(flags) : 0;
                 card.ExclusiveGroup = ParseExclusiveGroup(flags);
                 card.IsPrenup = flags.Contains("PRENUP");
+                // --- условия из колонки «Когда» (отрезки 1–7) -----------------------------------------
+                // До отрезка 1 условия были прозой для человека, а гейты — хардкодом в DeckSampler
+                // (словарь ChainParent на пять строк). Сорок новых карточек носят условие «если MD02=ДА» /
+                // «если MD01=ДА», и держать их списком в коде значит гарантированно разойтись с CSV.
+                // Теперь условие ЧИТАЕТСЯ оттуда, где его пишет дизайнер.
+                ApplyWhenConditions(card);
                 // Probabilistic inclusion keys on RANDOM_TRIGGER; legacy "RANDOM" means the same
                 // (old snapshot). RANDOM_OUTCOME is a separate, mechanically-inert marker.
                 card.IsRandomTrigger = flags.Contains("RANDOM_TRIGGER") || flags.Contains("RANDOM");
@@ -247,6 +260,166 @@ namespace ThanksNoThanks
         /// одном языке сокращений.
         /// </summary>
         private const string BreakRelationsFlag = "BREAK:" + Card.OpenRelations;
+        /// <summary>`MD24` рвёт брак на НЕТ («Развод»). Тот же префикс стороны, что в «Длительном эффекте».</summary>
+        private const string BreakRelationsOnNoFlag = "НЕТ:" + BreakRelationsFlag;
+
+        // ---- условия колонки «Когда» (отрезки 1–7) -----------------------------------------------------
+        // Дизайнер пишет их прозой в той же ячейке, что и возраст: «30–39, если MD02=ДА», «28–32, до MD01»,
+        // «свадьба +2», «18–19, если на счету < 5 ₽», «~40, если Отн потеряна». Возрастную часть читает
+        // DeckSampler.AgeWindow; здесь читается всё остальное.
+        //
+        // ⚠ РАЗБОР ПОКЛАУЗНЫЙ, А НЕ ПОИСКОМ ПО ВСЕЙ ЯЧЕЙКЕ (находка ревю, MAJOR). Раньше каждая форма
+        // искалась регуляркой по всей строке, и то, чего ни одна регулярка не знала, ПРОСТО НЕ
+        // СУЩЕСТВОВАЛО: «если Отн открыта» на `MD01` не читалось никем, и свадьба приходила игроку без
+        // отношений. Теперь ячейка режется на клаузы и КАЖДАЯ обязана быть узнана — что не узнано,
+        // ложится в <see cref="Card.UnparsedWhen"/> и краснит валидатор колоды. Класс «молча
+        // проигнорировано» на этом закрыт: новую форму нельзя завести в CSV, не заведя её здесь.
+        private static readonly Regex WhenParentYesRx =
+            new(@"^\s*(?:если\s+)?([A-Z]+\d+)\s*=\s*ДА\s*$", RegexOptions.Compiled);
+        private static readonly Regex WhenBeforeRx =
+            new(@"^\s*(?:вместо/)?до\s+([A-Z]+\d+)\s*$", RegexOptions.Compiled);
+        private static readonly Regex WhenMarriageRx =
+            new(@"^\s*свадьба\s*\+\s*(\d+)\s*$", RegexOptions.Compiled);
+        private static readonly Regex WhenMoneyBelowRx =
+            new(@"^\s*(?:если\s+)?на\s+счету\s*<\s*(\d+)\s*₽?\s*$", RegexOptions.Compiled);
+        private static readonly Regex WhenMoneyAtLeastRx =
+            new(@"^\s*(?:если\s+)?на\s+счету\s*(?:≥|>=)\s*(\d+)\s*₽?\s*$", RegexOptions.Compiled);
+        private static readonly Regex WhenMoneyMinusRx =
+            new(@"^\s*(?:если\s+)?на\s+счету\s+минус\s*$", RegexOptions.Compiled);
+        // «если Отн открыта» / «если шкала отношений открыта» / «если Дн открыта».
+        private static readonly Regex WhenScaleOpenRx =
+            new(@"^\s*(?:если\s+)?(?:шкала\s+)?([А-Яа-яЁё]+)\s+открыта\s*$", RegexOptions.Compiled);
+        private static readonly Regex WhenScaleLostRx =
+            new(@"^\s*(?:если\s+)?(?:шкала\s+)?([А-Яа-яЁё]+)\s+потеряна\s*$", RegexOptions.Compiled);
+        // «если Здр<50%» (LT02) / «когда здоровье < 40%» (LT08).
+        private static readonly Regex WhenHealthBelowRx =
+            new(@"^\s*(?:если|когда)?\s*(?:Здр|здоровье)\s*<\s*(\d+)\s*%?\s*$", RegexOptions.Compiled);
+        // «(возраст ≥ 30)» — вторая половина условия LT08.
+        private static readonly Regex WhenMinAgeRx =
+            new(@"^\s*возраст\s*(?:≥|>=)\s*(\d+)\s*$", RegexOptions.Compiled);
+        // Возрастное окно: «18–19», «20+», «18», «~40». Его читает DeckSampler.AgeWindow, здесь — только
+        // признание формы, чтобы клауза не считалась нераспознанной.
+        private static readonly Regex WhenAgeWindowRx =
+            new(@"^\s*~?\s*\d+\s*(?:[–—\-−]\s*\d+|\+)?\s*$", RegexOptions.Compiled);
+        // «после I02» — порядок внутри интро; держится возрастными окнами (I02 0–3, I03 1–4) и
+        // проверяется валидатором (названная карточка существует и стоит не позже).
+        private static readonly Regex WhenAfterRx =
+            new(@"^\s*после\s+([A-Z]+\d+)\s*$", RegexOptions.Compiled);
+
+        /// <summary>
+        /// ПРОЗА БЕЗ МЕХАНИКИ — клаузы, которые условием НЕ являются: они называют место карточки в
+        /// сценарии, а её выдачу держит отдельная система (интро, кризис-блок, импульс-раунд), не колонка
+        /// «Когда». Список ЗАКРЫТЫЙ и покрыт валидатором с двух сторон: незнакомая проза = ошибка, а
+        /// запись, которой в CSV больше нет, = мёртвая строка и тоже ошибка (иначе список сгниёт).
+        /// </summary>
+        public static readonly string[] WhenProseNoCondition =
+        {
+            "старт игры",              // I02 — первая карточка забега, ставит её опенер
+            "любой",                   // RND06 — окно во всю взрослую жизнь (AgeWindow)
+            "блиц",                    // CR01…CR05 — блиц-блок кризиса, собирается DeckSampler.Crisis
+            "импульс-раунд",           // CR06…CR08, CR10…CR12 — раунд импульсов кризиса
+            "если ≥2 промаха",         // …его условие входа; считает Game по промахам блица
+            "после кризиса",           // CR09 — депрессия, ставится после кризис-блока
+            "рандом",                  // …и не гарантированно (Game решает броском)
+        };
+
+        /// <summary>Токен шкалы из прозы «Когда» → канонический токен колонки Δ (<see cref="Card.OpenRelations"/>
+        /// и соседи). Дизайнер пишет и «Отн», и «шкала отношений» — движку нужен один язык.</summary>
+        public static string NormalizeScaleToken(string word)
+        {
+            var w = (word ?? string.Empty).Trim().ToLowerInvariant().Replace('ё', 'е');
+            if (w.StartsWith("отн")) return Card.OpenRelations;
+            if (w.StartsWith("дн") || w.StartsWith("деньг")) return Card.OpenMoney;
+            if (w.StartsWith("эн")) return Card.OpenEnergy;
+            if (w.StartsWith("реб")) return Card.OpenChild;
+            if (w.StartsWith("здр") || w.StartsWith("здоров")) return "Здр";
+            return null;
+        }
+
+        // Ячейка режется по запятым и скобкам («когда здоровье < 40% (возраст ≥ 30)» — ДВА условия), а
+        // затем по союзу «и» («если FA11 = ДА и на счету минус» — тоже два).
+        private static readonly Regex ClauseSplitRx = new(@"[,()]", RegexOptions.Compiled);
+        private static readonly Regex AndSplitRx = new(@"\s+и\s+", RegexOptions.Compiled);
+
+        public static IEnumerable<string> SplitWhenClauses(string when)
+        {
+            foreach (var part in ClauseSplitRx.Split(when ?? string.Empty))
+                foreach (var clause in AndSplitRx.Split(part))
+                {
+                    var t = clause.Trim();
+                    if (t.Length > 0) yield return t;
+                }
+        }
+
+        /// <summary>
+        /// Прочитать условия из «Когда» в поля карточки. Каждая клауза обязана быть узнана; нераспознанные
+        /// складываются в <see cref="Card.UnparsedWhen"/> — загрузка не падает (колонка человеческая), но
+        /// валидатор колоды на них краснеет.
+        /// </summary>
+        public static void ApplyWhenConditions(Card card)
+        {
+            var when = card.When ?? string.Empty;
+            if (when.Length == 0) return;
+
+            foreach (var clause in SplitWhenClauses(when))
+            {
+                if (WhenAgeWindowRx.IsMatch(clause)) continue;   // возраст — забота AgeWindow
+
+                var marriage = WhenMarriageRx.Match(clause);
+                if (marriage.Success && int.TryParse(marriage.Groups[1].Value, out var off))
+                {
+                    card.MarriageOffsetYears = off;
+                    card.RequiresParentYes = MarriageCardId;   // без свадьбы годовщины не бывает
+                    continue;
+                }
+
+                var parent = WhenParentYesRx.Match(clause);
+                if (parent.Success) { card.RequiresParentYes = parent.Groups[1].Value; continue; }
+
+                var before = WhenBeforeRx.Match(clause);
+                if (before.Success) { card.BeforeCardId = before.Groups[1].Value; continue; }
+
+                var below = WhenMoneyBelowRx.Match(clause);
+                if (below.Success && int.TryParse(below.Groups[1].Value, out var lo))
+                { card.RequiresMoneyBelow = lo; continue; }
+
+                var atLeast = WhenMoneyAtLeastRx.Match(clause);
+                if (atLeast.Success && int.TryParse(atLeast.Groups[1].Value, out var hi))
+                { card.RequiresMoneyAtLeast = hi; continue; }
+
+                if (WhenMoneyMinusRx.IsMatch(clause)) { card.RequiresMoneyBelow = 0; continue; }
+
+                var health = WhenHealthBelowRx.Match(clause);
+                if (health.Success && int.TryParse(health.Groups[1].Value, out var hp))
+                { card.RequiresHealthBelow = hp; continue; }
+
+                var minAge = WhenMinAgeRx.Match(clause);
+                if (minAge.Success && int.TryParse(minAge.Groups[1].Value, out var age))
+                { card.RequiresMinAge = age; continue; }
+
+                var lost = WhenScaleLostRx.Match(clause);
+                if (lost.Success && NormalizeScaleToken(lost.Groups[1].Value) == Card.OpenRelations)
+                { card.RequiresRelationshipsLost = true; continue; }
+
+                var open = WhenScaleOpenRx.Match(clause);
+                if (open.Success)
+                {
+                    var token = NormalizeScaleToken(open.Groups[1].Value);
+                    if (token != null) { card.RequiresScaleOpen = token; continue; }
+                }
+
+                if (WhenAfterRx.IsMatch(clause)) continue;   // порядок интро — держат возрастные окна
+
+                if (System.Array.Exists(WhenProseNoCondition,
+                        p => string.Equals(p, clause, System.StringComparison.OrdinalIgnoreCase)))
+                    continue;
+
+                card.UnparsedWhen.Add(clause);
+            }
+        }
+
+        /// <summary>Веха свадьбы — якорь для окон «свадьба +N».</summary>
+        public const string MarriageCardId = "MD01";
 
         // «EXCL:ипотека» / «EXCL:реб» → ключ группы («ипотека» / «реб»). Ключ произвольный: движку важно
         // только совпадение строк, поэтому новые ветки заводятся дизайнером без правки кода.
@@ -276,6 +449,11 @@ namespace ThanksNoThanks
             RegexOptions.Compiled);
         private static readonly Regex DrainRx = new(
             @"DRAIN:\s*(Здр|Эн|Дн|Отн|Реб)\s*=\s*(-?[0-9]+(?:\.[0-9]+)?)\s*/s\s+DUR:\s*(\d+)\s*y",
+            RegexOptions.Compiled);
+        // РАЗОВАЯ выплата через N лет: «DRAIN:Дн=-25 ONCE:3y» / «DRAIN:Дн=+100 ONCE:10y». Отличается от
+        // дренажа отсутствием «/s» — сумма, а не скорость.
+        private static readonly Regex OnceRx = new(
+            @"DRAIN:\s*(Здр|Эн|Дн|Отн|Реб)\s*=\s*([+-]?[0-9]+(?:\.[0-9]+)?)\s+ONCE:\s*(\d+)\s*y",
             RegexOptions.Compiled);
         private static readonly Regex DriftRx = new(
             @"DRIFT:\s*(Здр|Эн|Дн|Отн|Реб)\s*=\s*x\s*([0-9]+(?:\.[0-9]+)?)\s*(?:DUR:\s*(\d+)\s*y)?",
@@ -321,6 +499,24 @@ namespace ThanksNoThanks
                         MultValue = val,
                         RandomZero = m.Groups[3].Success,
                         FromAge = from,
+                        OnNoSide = onNo,
+                    });
+                    continue;
+                }
+
+                // ONCE проверяется ДО дренажа: обе записи начинаются с «DRAIN:», и различает их только
+                // «/s» против « ONCE:». Порядок здесь и есть различение.
+                var o = OnceRx.Match(part);
+                if (o.Success && Abbrevs.TryGetValue(o.Groups[1].Value, out var oscale))
+                {
+                    double.TryParse(o.Groups[2].Value, System.Globalization.NumberStyles.Float, Inv, out var amount);
+                    int.TryParse(o.Groups[3].Value, out var years);
+                    result.Add(new LongEffect
+                    {
+                        Kind = LongEffectKind.Once,
+                        Scale = oscale,
+                        OnceAmount = amount,
+                        OnceYears = years,
                         OnNoSide = onNo,
                     });
                     continue;

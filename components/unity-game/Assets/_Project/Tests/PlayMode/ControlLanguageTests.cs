@@ -340,6 +340,13 @@ namespace ThanksNoThanks.Tests.PlayMode
                 // Первые открытия (18/20/25) ведут §D-модалку — она НЕ снимается зелёной и проходится
                 // своим контролом; блокирующий экран, который снимает ЗЕЛЁНАЯ, — это здоровье (30).
                 if (driver.NewScaleShowing) { NewScaleTut.Clear(driver, fake); continue; }
+                // ⚠ ДЫШАТЬ ОБЯЗАТЕЛЬНО (отрезки 1–7). Этот цикл доводит забег до тридцати, чтобы поднялся
+                // блокирующий экран ЗДОРОВЬЯ, и отвечает всё-НЕТ. С приездом пака «Усталость» (`FC17`–`FC21`,
+                // 25–29) сторона НЕТ несёт настоящие «Эн −18», и не дышащий игрок ВЫГОРАЕТ около двадцати
+                // семи — цикл выходил по `State != Playing`, экран не поднимался, тест краснел ПЛАВАЮЩЕ
+                // (зависит от того, сколько тиков успело пройти на карточку). Выгорание тут правильное
+                // поведение игры, но тест про ЗЕЛЁНУЮ КНОПКУ, а не про выживание: держим датчик высоты.
+                if (driver.Game.EnergyOpen && driver.Game.Scales.Energy < 60) fake.Fire(GameInput.EnergyHold);
                 driver.Game.Tick(0.25f);
                 if (!driver.SpecialModeShowing && !driver.NewScaleShowing && driver.Game.CurrentCard != null
                     && driver.Game.CardTimer < 3.5f) fake.No();

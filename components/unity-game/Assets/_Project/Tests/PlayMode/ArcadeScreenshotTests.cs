@@ -152,6 +152,15 @@ namespace ThanksNoThanks.Tests.PlayMode
                     break;
                 default: driver.DebugPreviewArcadeShot(); break;
             }
+            // Optional CARD TEXT override (отрезки 1–7): колода выросла втрое, и дизайн-гейту нужно уметь
+            // посмотреть НА КОНКРЕТНУЮ новую карточку, а не только на дежурный вопрос обычной позы.
+            var cardText = Environment.GetEnvironmentVariable("LIFECHOICES_SHOT_CARD");
+            if (!string.IsNullOrEmpty(cardText) && driver.CardRect != null)
+            {
+                var t = driver.CardRect.Find("CardText");
+                if (t != null) t.GetComponent<UnityEngine.UI.Text>().text = cardText;
+            }
+
             // Optional energy override, so the design gate can look at the lightning layer against a cream,
             // a half and a full cavity (founder canon §12-3 asks for 10/50/90).
             var energy = Environment.GetEnvironmentVariable("LIFECHOICES_SHOT_ENERGY");

@@ -98,9 +98,13 @@ namespace ThanksNoThanks
         // all of them parse and load, but — like LT08 — are pulled out of the sampling pool onto the plan
         // (DeckPlan.Crisis / DeckPlan.Depression) and played by Game as special sequenced states, never as
         // random draws. So only the still-unimplemented cards stay hard-excluded here.
+        // `MD06` («Второй шанс на любовь?») ушла отсюда с отрезком 6: механика второго шанса РЕАЛИЗОВАНА
+        // (карточка с `OPEN:Отн`, отвеченная ДА по потерянной шкале, снимает `RelationshipsLost`), а само
+        // выпадение гейтится условием «если Отн потеряна» на слое <see cref="Game"/> — как `LT02` гейтится
+        // здоровьем. `RND05` остаётся: её отложенный разрыв живёт, но карточка ещё без носителя в потоке.
         public static readonly HashSet<string> Excluded = new()
         {
-            "MD06", "RND05",
+            "RND05",
         };
 
         // System card extracted from the pool before sampling (never a random draw); see DeckPlan.Lt08.
@@ -114,22 +118,18 @@ namespace ThanksNoThanks
         // Crisis block extracted from the pool before sampling (never random draws); see DeckPlan.Crisis.
         // CR00 (баннер-триггер) + CR01–CR05 (блиц) + CR06–CR08 (импульс). CR09 is NOT here — it stays
         // hard-excluded above. Order is the id order Game relies on (blitz = CR01..05, impulse = CR06..08).
+        // CR10–CR12 (отрезок 0 §4.3, посажены отрезками 1–7) — БЕСПЛАТНЫЕ импульсы. До них весь импульс-пул
+        // кроме `CR06` был платным (`BLOCK$` у мотоцикла и Шри-Ланки — решение основательницы «правило денег
+        // не ломаем»), и у безденежного игрока кризис сводился к одному «БРОСИТЬ ПАРТНЁРА».
         private static readonly string[] CrisisCardIds =
-            { "CR00", "CR01", "CR02", "CR03", "CR04", "CR05", "CR06", "CR07", "CR08" };
+        {
+            "CR00", "CR01", "CR02", "CR03", "CR04", "CR05",
+            "CR06", "CR07", "CR08", "CR10", "CR11", "CR12",
+        };
 
         // Milestones always present at their canonical age (I02 intro is pinned first).
         private static readonly string[] UnconditionalMilestones =
             { "I02", "I03", "YA01", "YA03", "YA05", "MD01" };
-
-        // CHAIN children → the parent whose ДА unlocks them (child id → parent id).
-        private static readonly Dictionary<string, string> ChainParent = new()
-        {
-            { "LT07", "CH07" },   // мемуары ← дневник
-            { "MD07", "CH08" },   // блог    ← кружок
-            { "YA02", "YA01" },   // стартап ← универ (also RANDOM/probabilistic)
-            { "MD02", "MD01" },   // ребёнок ← свадьба (milestone; age = MD01 + 2)
-            { "LT04", "MD02" },   // дети выросли ← ребёнок (milestone)
-        };
 
         // Conditional milestones — always placed in the plan, gated at runtime.
         private static readonly string[] ConditionalMilestones = { "MD02", "LT04" };
@@ -195,25 +195,47 @@ namespace ThanksNoThanks
                     handled.Add(id);
                 }
 
-            // 2) Conditional milestone MD02 (ребёнок): age = свадьба + 2, gated on MD01=ДА.
+            // 2) Свадебные спутники — «свадьба +N» (`MD02` ребёнок, `MD11` фамилия, `MD12` годовщина,
+            //    `MD13` детей не будет). Возраст у них НЕ окно, а смещение от вехи, поэтому окно-парсер
+            //    отдаёт (0,0) — оставь их в общем пуле, и они уедут в детство. Ставим явно и в план.
+            //    Гейт на `MD01`=ДА уже проставлен загрузчиком (без свадьбы годовщины не бывает).
             int md01Age = byId.TryGetValue("MD01", out var md01) ? md01.Age : 30;
-            if (byId.TryGetValue("MD02", out var md02))
+            foreach (var c in byId.Values.Where(c => c.MarriageOffsetYears >= 0)
+                                          .OrderBy(c => c.Order).ToList())
             {
-                md02.Age = md01Age + 2;
-                md02.RequiresParentYes = "MD01";
-                deck.Add(md02);
-                handled.Add("MD02");
+                if (handled.Contains(c.Id)) continue;
+                c.Age = md01Age + c.MarriageOffsetYears;
+                deck.Add(c);
+                handled.Add(c.Id);
             }
 
             // 3) Remaining conditional milestone (LT04) + chained normals (LT07, MD07): plan + gate.
+            //    Гейт РОДИТЕЛЯ больше не хардкодится — его читает <see cref="CardLoader"/> из колонки
+            //    «Когда» («55–65, если MD02=ДА»), там же, где его пишет дизайнер. Список ниже отвечает
+            //    только за то, что эти сюжетные карточки ВСЕГДА в плане, а не за то, чем они гейтятся.
             foreach (var id in ConditionalMilestones.Concat(ChainedNormals))
             {
-                if (id == "MD02" || handled.Contains(id)) continue;
+                if (handled.Contains(id)) continue;
                 if (!byId.TryGetValue(id, out var c)) continue;
                 c.Age = AssignAge(c, rng);
-                c.RequiresParentYes = ChainParent[id];
                 deck.Add(c);
                 handled.Add(id);
+            }
+
+            // 3b) «до <веха>» (`MD08` свадьба на все деньги, `MD09` брачный договор — оба «28–32, до MD01»).
+            //     Окно у них ТО ЖЕ, что у свадьбы, поэтому случайный возраст поставил бы «подписать
+            //     брачный договор?» после самой свадьбы в половине забегов. Ставим на год раньше цели —
+            //     единственное значение, которое гарантирует порядок при любом возрасте вехи.
+            //     Возраст ПЕРЕНАЗНАЧАЕТСЯ даже уже размещённым: `MD13` («детей не будет») — одновременно
+            //     свадебная (+2) и «вместо/до MD02», и без этого обе вставали бы в один год, а порядок
+            //     решала бы строка в CSV.
+            foreach (var c in byId.Values.Where(c => !string.IsNullOrEmpty(c.BeforeCardId))
+                                          .OrderBy(c => c.Order).ToList())
+            {
+                if (!byId.TryGetValue(c.BeforeCardId, out var target)) continue;
+                c.Age = target.Age - 1;
+                if (!deck.Contains(c)) deck.Add(c);
+                handled.Add(c.Id);
             }
 
             // 4) Probabilistic inclusion — cards flagged RANDOM_TRIGGER (canon) or legacy RANDOM,
@@ -226,7 +248,6 @@ namespace ThanksNoThanks
                 if (handled.Contains(c.Id)) continue;
                 if (rng.NextDouble() >= RandomInclusionChance) { handled.Add(c.Id); continue; }
                 c.Age = AssignAge(c, rng);
-                if (ChainParent.TryGetValue(c.Id, out var parent)) c.RequiresParentYes = parent;
                 deck.Add(c);
                 handled.Add(c.Id);
             }
@@ -310,12 +331,29 @@ namespace ThanksNoThanks
             // 8) Reserve: every ungated normal that didn't make the deck (incl. clamp-trimmed ones),
             //    age-assigned inside its window and age-sorted. Game.Substitute draws from it when a
             //    chain-gated card is skipped, so the drawn count stays 25–30 for any answer path.
-            var reserve = pool.Where(c => !deck.Contains(c)).ToList();
+            //    ⚠ Только БЕЗУСЛОВНЫЕ карточки: подменять пропущенный чейн другим гейтом значит подменять
+            //    пропуск пропуском. С отрезками 1–7 условных карточек стало под сорок (весь пак «Ребёнок
+            //    растёт», «Брак на износе», «Внуки»), и без этого фильтра длина забега поехала бы вниз.
+            var reserve = pool.Where(c => !deck.Contains(c) && !IsRuntimeGated(c)).ToList();
             foreach (var c in reserve) c.Age = AssignAge(c, rng);
             reserve.Sort((a, b) => a.Age != b.Age ? a.Age.CompareTo(b.Age) : a.Order.CompareTo(b.Order));
 
             return new DeckPlan { Deck = deck, Reserve = reserve, Lt08 = lt08, Crisis = crisis, Depression = depression };
         }
+
+        /// <summary>
+        /// Карточка несёт УСЛОВИЕ, которое <see cref="Game"/> проверяет в момент выдачи (родитель≠ДА,
+        /// пусто на счету, отношения ещё целы). Такие не годятся в резерв подмены и не считаются
+        /// «обычным филлером» при разметке фаз.
+        /// </summary>
+        public static bool IsRuntimeGated(Card c)
+            => c.RequiresParentYes != null
+               || !double.IsNaN(c.RequiresMoneyBelow)
+               || !double.IsNaN(c.RequiresMoneyAtLeast)
+               || !double.IsNaN(c.RequiresHealthBelow)
+               || c.RequiresScaleOpen != null
+               || c.RequiresMinAge >= 0
+               || c.RequiresRelationshipsLost;
 
         private static void ClampSize(List<Card> deck, List<Card> normals, List<Card> leftover,
                                       List<Card> protectedNormals, Random rng)

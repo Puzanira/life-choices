@@ -167,6 +167,7 @@ namespace ThanksNoThanks.Tests
             return (ages[0], ages[ages.Count / 2]);
         }
 
+
         // ================================================================ гард
 
         [TestCase("умеренный")]
@@ -233,6 +234,49 @@ namespace ThanksNoThanks.Tests
                 Game.HealthDecayPerSec = saved;
             }
             Assert.AreEqual(saved, Game.HealthDecayPerSec, "тюнимая константа восстановлена после матрицы");
+        }
+
+        [Test]
+        public void YouthRegenMatrix_IsReportedForTheFounder()
+        {
+            // Матрица «восстановление в молодости × профиль → возраст смерти» (отрезки 1–7). Понадобилась,
+            // когда полная колода уронила главный гард, а матрица ДЕКЕЯ показала, что декей ни при чём:
+            // умеренный умирал в 55 одинаково и на 0.50, и на 0.30 %/с. Значит убивал не износ старости, а
+            // сорок новых карточек юности, каждая по −7…−15 п.п., которые до тридцати нечем отыграть.
+            double saved = Game.HealthYouthRegenPerSec;
+            try
+            {
+                var sb = new StringBuilder(
+                    "[youth-matrix] реген %/с | пассивный | умеренный | лингеринг | активный   (медиана (худший), 12 сидов)\n");
+                foreach (var regen in new[] { 0.00, 0.05, 0.10, 0.15, 0.25, 0.35, 0.50 })
+                {
+                    Game.HealthYouthRegenPerSec = regen;
+                    var pas = AgesAcrossSeeds(Passive, 6);
+                    var mod = AgesAcrossSeeds(Moderate, 12);
+                    var lin = AgesAcrossSeeds(Lingering, 12);
+                    var act = AgesAcrossSeeds(Active, 6);
+                    sb.AppendLine($"  {regen:0.00} | {pas.Median} ({pas.Min}) | {mod.Median} ({mod.Min}) "
+                                  + $"| {lin.Median} ({lin.Min}) | {act.Median} ({act.Min})");
+                }
+                Debug.Log(sb.ToString());
+            }
+            finally
+            {
+                Game.HealthYouthRegenPerSec = saved;
+            }
+            Assert.AreEqual(saved, Game.HealthYouthRegenPerSec, "тюнимая константа восстановлена после матрицы");
+        }
+
+        [Test]
+        public void YouthRegen_NeverRescuesThePassivePlayer()
+        {
+            // ИНВАРИАНТ «живая шкала требует ввода» (memory 2026-07). Восстановление молодости лечит
+            // ЗДОРОВЬЕ, а пассивный игрок гибнет от ЭНЕРГИИ — полное выгорание в 25, потому что датчик
+            // высоты он не поднимает. Если эта проверка когда-нибудь позеленеет «не тем» способом
+            // (пассивный дожил), значит реген подкрутили до размеров индульгенции.
+            var (min, median) = AgesAcrossSeeds(Passive, 12);
+            Assert.Less(median, 40, $"пассивный по-прежнему умирает рано (медиана {median})");
+            Assert.Less(min, 40, $"…на каждом сиде (худший {min})");
         }
     }
 }

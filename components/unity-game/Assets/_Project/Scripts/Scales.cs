@@ -16,6 +16,13 @@ namespace ThanksNoThanks
         public int Relationships;
         public int Child;
 
+        /// <summary>
+        /// Стартовое значение балансира отношений (GAME_SPEC). Названо константой с отрезка 6: «второй
+        /// шанс» (`MD06`) открывает шкалу ЗАНОВО после расставания и обязан вернуть её ровно сюда —
+        /// новые отношения начинаются с того же, с чего начинались первые.
+        /// </summary>
+        public const int RelationshipsStart = 55;
+
         public Scales() => Reset();
 
         public void Reset()
@@ -23,7 +30,7 @@ namespace ThanksNoThanks
             Health = 100;        // starts at 100 (GAME_SPEC)
             Energy = 100;
             Money = 0;
-            Relationships = 55;  // GAME_SPEC start for the relationship scale
+            Relationships = RelationshipsStart;
             Child = 0;
         }
 

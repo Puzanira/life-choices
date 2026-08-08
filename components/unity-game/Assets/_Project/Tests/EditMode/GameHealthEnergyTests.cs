@@ -256,15 +256,24 @@ namespace ThanksNoThanks.Tests
 
         // ================================================================ LT02 eligibility (<50%)
 
+        // ⚠ Условие показа берётся ИЗ ТОЙ ЖЕ СТРОКИ «Когда», что стоит в CSV, и разбирается тем же
+        // парсером (`CardLoader.ApplyWhenConditions`). Раньше здесь его не было вовсе: гейт был зашит в
+        // `Game` по id карточки (`c.Id == "LT02"`), поэтому тест зеленел на карточке БЕЗ условия и не
+        // замечал бы, пропади это условие из колонки. Теперь тест проверяет весь путь CSV → парсер → гейт.
+        private const string Lt02When = "55–70, если Здр<50%";
+
         private static Card MakeLt02(int age)
         {
             var c = new Card
             {
-                Id = "LT02", Question = "LT02?", Age = age, Order = 200,
+                Id = "LT02", Question = "LT02?", Age = age, Order = 200, When = Lt02When,
                 Flags = new List<string> { "BLOCK$" }, IsBlockCost = true,
                 YesDeltas = new[] { new ScaleDelta(Scale.Health, DeltaKind.Add, 2) },
                 NoDeltas = Array.Empty<ScaleDelta>(),
             };
+            CardLoader.ApplyWhenConditions(c);
+            Assert.AreEqual(50d, c.RequiresHealthBelow,
+                "«если Здр<50%» из колонки «Когда» прочитано в карточку, а не зашито по id в Game");
             return c;
         }
 

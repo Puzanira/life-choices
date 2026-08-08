@@ -44,6 +44,34 @@ namespace ThanksNoThanks.Tests
                && !c.IsTimeline && !c.IsForced && !c.IsBlitz && !c.IsInvert
                && c.Id != "LT08";
 
+        /// <summary>
+        /// ДЕРЖАТЬ ИГРОКА ЖИВЫМ. Этот тест меряет ПОРЯДОК карточек, а не выживание: ему нужно, чтобы забег
+        /// дошёл до тридцати и здоровье успело открыться четвёртым. С отрезками 1–7 всё-НЕТ перестало
+        /// доводить до тридцати — пак «Усталость» (`FC17`–`FC21`, 25–29) кладёт на сторону НЕТ настоящие
+        /// «Эн −18», и не дышащий игрок выгорает к двадцати семи. Это ПРАВИЛЬНОЕ поведение (инвариант
+        /// «живая шкала требует ввода», за него отвечает <see cref="BalanceGuardTests"/>), но как
+        /// измерительный прибор такой профиль сломан: он мерит смерть, а не пейсинг. Поэтому здесь
+        /// поддерживаются живые шкалы — ответы по-прежнему все НЕТ, меняется только то, что игрок дышит.
+        /// </summary>
+        private static void KeepAlive(Game g)
+        {
+            // Восстановление ДЫХАНИЕМ требует времени, а этот цикл время сжимает: он тикает ровно
+            // столько, чтобы догнать возраст карточки. Поэтому просевшую энергию добираем отдельным
+            // ограниченным «вдохом» — на порядок карточек он не влияет (колода age-sorted), влияет
+            // только на то, доживёт ли прибор до тридцати.
+            for (int i = 0; i < 400 && g.Scales.Energy < 70 && g.State == GameState.Playing; i++)
+            {
+                g.HandleInput(GameInput.EnergyHold);
+                g.Tick(0.05f);
+            }
+            if (g.Scales.Energy < 60) g.HandleInput(GameInput.EnergyHold);
+            if (g.RelationshipsOpen)
+            {
+                if (g.Scales.Relationships < 50) g.HandleInput(GameInput.RelationUp);
+                else if (g.Scales.Relationships > Game.RelZoneMax) g.HandleInput(GameInput.RelationDown);
+            }
+        }
+
         // Records the four young-mechanic opens (in first-open order) with the ordinary-card count so far.
         private sealed class Pacing
         {
@@ -90,6 +118,7 @@ namespace ThanksNoThanks.Tests
                 float prevAge = g.Age;
                 while (g.State == GameState.Playing && ReferenceEquals(g.CurrentCard, card) && safety++ < 400)
                 {
+                    KeepAlive(g);
                     g.Tick(0.1f);
                     CheckOpens();
                     if (g.Age >= card.Age) break;               // возраст догнан — карточка отработана
