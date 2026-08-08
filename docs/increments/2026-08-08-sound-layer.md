@@ -277,5 +277,5 @@
 
 ## 6. Playtest verdict
 
-`Playtest ok:` —
-`Landed:` —
+`Playtest ok:` — (ушной гейт основательницы)
+`Landed:` 8d12ab078c984cfb2a2fdbd2f65f76e7e8d5f625 (2026-08-08)
