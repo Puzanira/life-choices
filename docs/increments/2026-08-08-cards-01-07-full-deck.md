@@ -432,5 +432,5 @@
 
 ## 6. Playtest verdict
 
-`Playtest ok:` —
-`Landed:` —
+`Playtest ok:` — (ждёт утренний батч основательницы)
+`Landed:` c295b12340959086850f20f56e55a3ec90ffe8b0 (2026-08-08)
