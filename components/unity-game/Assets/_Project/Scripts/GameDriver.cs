@@ -1757,6 +1757,9 @@ namespace ThanksNoThanks
             if (_game == null) return;
             PumpPendingScreens();   // тот же ПОРЯДОК, что в Update: отложенный экран — до живого тика
             _game.Tick(dt);
+            TickAudioLatches(dt);   // …и те же ЛАТЧИ звука (купол/пульс/выгорание/провал блица):
+                                    // без них события «без события в коде» были бы проверяемы только
+                                    // настоящими кадрами по 1/60 с — то есть на практике никак.
             TickNewScale(dt);   // §D-модалка живёт тем же тактом, что и в Update
             if (_game.State != GameState.Playing) return;
             if (_game.InCrisis) ReflectDome(Mathf.Max(0f, _game.CrisisTimer), _game.CrisisTimerMax);
@@ -1764,6 +1767,7 @@ namespace ThanksNoThanks
             UpdateHudValues();      // живые шкалы на HUD — тот же путь, что у Update
             ReflectChildPhone(dt);  // …и §5b-трубка: выезд/уезд/качание на ТОМ ЖЕ dt, без Time.deltaTime
             ReflectAlarms(dt);      // …и §4/§6 поверх них
+            SyncPhoneRingLoop();    // …и рингтон сводится с видимостью трубки, как в конце Update
         }
 
         /// <summary>Layer-2 seam: продвинуть §4-тревоги и §6-салют на dt для замороженного драйвера
@@ -1971,8 +1975,21 @@ namespace ThanksNoThanks
                 _bodyBold = _body;
             }
             _voice = new HostVoice(new System.Random().NextDouble);   // named-line priority + seeded pool
+            BuildAudio();
             BuildHud();
             LoadGame();
+        }
+
+        /// <summary>
+        /// Звуковой слой живёт на СОБСТВЕННОМ дочернем объекте: пул источников и луп-каналы строятся
+        /// кодом (как и весь остальной проект), а драйвер держит одну ссылку и дёргает её из тех же
+        /// мест, что рисуют картинку. Своих источников звука драйвер не держит — см. <see cref="AudioLayer"/>.
+        /// </summary>
+        private void BuildAudio()
+        {
+            var go = new GameObject("Audio");
+            go.transform.SetParent(transform, false);
+            Audio = go.AddComponent<AudioLayer>();
         }
 
         private void Start()
@@ -1980,6 +1997,9 @@ namespace ThanksNoThanks
             Input ??= gameObject.AddComponent<ArcadeInputSource>();
             Input.Received += OnInput;
             SubscribeGame();
+            // Тема-шарманка заводится на опенере и живёт всю сессию одним лупом (манифест §1: «опенер
+            // и/или геймплей»). Фильтр депрессии накрывает и её — на то она и на фильтруемом канале.
+            if (Audio != null) Audio.PlayLoop(SoundEvent.MusicTheme);
             Refresh();
         }
 
@@ -2011,6 +2031,11 @@ namespace ThanksNoThanks
             _game.CrisisImpulseStarted += OnCrisisImpulseStarted;
             _game.DepressionStarted += OnDepressionStarted;
             _game.DepressionProgressed += OnDepressionProgressed;
+            // ЗВУК: три семантических события существовали в Game, но драйверу до сих пор были не нужны —
+            // картинке хватало покадрового чтения флагов. Звуку нужен ФРОНТ, поэтому подписываемся.
+            _game.DepressionEnded += OnDepressionEnded;
+            _game.CrisisEnded += OnCrisisEnded;
+            _game.ChildBadParent += OnChildBadParent;
         }
 
         private void UnsubscribeGame()
@@ -2032,6 +2057,9 @@ namespace ThanksNoThanks
             _game.CrisisImpulseStarted -= OnCrisisImpulseStarted;
             _game.DepressionStarted -= OnDepressionStarted;
             _game.DepressionProgressed -= OnDepressionProgressed;
+            _game.DepressionEnded -= OnDepressionEnded;
+            _game.CrisisEnded -= OnCrisisEnded;
+            _game.ChildBadParent -= OnChildBadParent;
         }
 
         /// <summary>
@@ -2120,7 +2148,21 @@ namespace ThanksNoThanks
                 // §6-окно — ровно по ПРИНЯТОМУ тику: кэп дохода пропустил И Game.Crank его засчитал
                 // (деньги открыты, не «глухая» пауза, не кризис/депрессия — там крутилка глушится).
                 if (_game.HandleInput(GameInput.MoneyTick)) // Game sees only the semantic crank event
+                {
                     NoteScaleInput(AlarmScale.Money);
+                    // ЗВУК: щелчок динамо на ПРИНЯТЫЙ тик. До 5/с — поэтому тихий и с гулянием питча
+                    // ±6 % (манифест), иначе очередь одинаковых щелчков превращается в дребезг.
+                    if (Audio != null) Audio.Play(SoundEvent.CrankTick);
+                    // ⚠ МОНЕТА — ТОЖЕ ТОЛЬКО НА ПРИНЯТЫЙ ТИК (находка Codex 2026-08-08, MAJOR). Она
+                    // жила ниже, на одном лишь `MoneyOpen`, и потому звенела на ОТВЕРГНУТУЮ крутилку:
+                    // в депрессии и в кризисе Game.HandleInput возвращает false (шкалы стоят, ввод
+                    // глушится), а банка всё равно набирала ~5 монет в секунду — ложный доход на слух
+                    // плюс забитый SFX-пул под самой тихой сценой игры. Та же accepted-семантика, что
+                    // у панча плашек (r3) и у §6-окна: звучит РОВНО то, что механика засчитала.
+                    if (Audio != null) Audio.Play(SoundEvent.CoinJar);
+                }
+                // ВИЗУАЛ монеты остаётся на прежнем условии (не звук — не эта находка): падающая монета
+                // существует с r2 и её поведение под спецрежимами — отдельный вопрос к дизайну.
                 if (_game.MoneyOpen && isActiveAndEnabled)  // coin drops into the jar on each PAYING tick
                 {
                     if (_moneyPulse != null) StopCoroutine(_moneyPulse);
@@ -2140,7 +2182,10 @@ namespace ThanksNoThanks
                 // Кризис/депрессия глушат датчик (шкалы там на паузе) — «держал во время депрессии» работой
                 // по шкале не является, иначе рост энергии карточкой сразу после дал бы ложный салют.
                 if (_game.HandleInput(GameInput.EnergyHold))
+                {
                     NoteScaleInput(AlarmScale.Energy);      // игрок работает шкалой ПРЯМО СЕЙЧАС
+                    NoteEnergyGesture();
+                }
                 return;
             }
 
@@ -2153,7 +2198,13 @@ namespace ThanksNoThanks
                 // ПОДНЯТЫЙ звонок, а окно звонка под депрессией стоит).
                 if (_game.State == GameState.Playing && _game.InDepression)
                 {
+                    int grayBefore = _game.DepressionGray;
                     _game.HandleInput(GameInput.ChildPress);
+                    // ПОПАДАНИЕ звучит не клипом, а САМИМ ФИЛЬТРОМ: ступень ваты снимается в
+                    // OnDepressionProgressed. У ПРОМАХА/ЗАМКА свой ватный «пшик». Отличаем по серости:
+                    // чистая ловля её уменьшает, промах и долбёж по локауту — нет.
+                    if (Audio != null && _game.DepressionGray >= grayBefore)
+                        Audio.Play(SoundEvent.DepressionMiss);
                     return;
                 }
                 PressChildPhone();
@@ -2192,7 +2243,24 @@ namespace ThanksNoThanks
             // неподъёмной, пока игрок думал (перепроверка платёжеспособности на ДА). Один источник истины
             // с Game.Answer — иначе поздний пропуск панчил бы плашку за покупку, которая не состоялась.
             bool blockedSkip = answer && _game.AnswerWouldSkipAsBlocked(input == GameInput.AnswerYes);
-            if (_game.HandleInput(input))
+            // ЗВУК: в БЛИЦЕ рычаг значит не «да/нет», а «попал/не попал», и голос ему нужен по
+            // РЕЗУЛЬТАТУ. Считаем ДО хода — HandleInput тут же уводит блиц на следующую мысль.
+            bool inBlitz = answer && _game.InCrisis && _game.BlitzThoughtNumber > 0;
+            bool blitzHit = inBlitz && (input == GameInput.AnswerYes) == _game.BlitzNormalOnYes;
+            bool accepted = _game.HandleInput(input);
+            // ⚠ БЛИЦ НЕ ВОЗВРАЩАЕТ «ПРИНЯТО» (найдено при разборе находок Codex 2026-08-08). Game
+            // разбирает рычаг в собственной ветке кризиса (`BlitzPress`) и падает в общий `return
+            // false` — то есть accepted-блок ниже в блице НЕ ВЫПОЛНЯЕТСЯ НИКОГДА, и голос попадания,
+            // написанный внутри него, был мёртвым кодом: провал звучал (латч `Game.BlitzFails`), а
+            // попадание молчало — ровно наоборот замыслу. Голос блица живёт СНАРУЖИ accepted-блока,
+            // потому что «принято» здесь означает ход обычной карточки, а не удачное нажатие в блице.
+            // §6-окно и панч плашки остаются внутри: это по-прежнему НЕ работа по шкале и НЕ ответ.
+            if (inBlitz)
+            {
+                if (blitzHit && Audio != null) Audio.Play(SoundEvent.AnswerYes);
+                return;
+            }
+            if (accepted)
             {
                 // ⚠ BLOCK$-ПРОПУСК — НЕ РАБОТА ПО ШКАЛЕ (находка ревью r3, MAJOR). Game.HandleInput
                 // возвращает true и на ЗАБЛОКИРОВАННОЙ карточке — ход состоялся, карточка пропущена, — но
@@ -2204,6 +2272,13 @@ namespace ThanksNoThanks
                 if (blockedSkip) return;
                 NoteScaleInput(input);
                 if (answer) PunchAnswerPlate(input);
+                if (Audio != null && answer)
+                {
+                    // Калимба — ГОЛОС ИГРЫ: ДА = две ноты вверх, НЕТ = те же вниз. «НЕТ» не наказывает
+                    // (правило отбора №1: отказ — полноценный выбор, баззеров тут не будет никогда).
+                    // Блиц сюда не доходит (см. ранний возврат выше): там свой голос — попадание.
+                    Audio.Play(input == GameInput.AnswerYes ? SoundEvent.AnswerYes : SoundEvent.AnswerNo);
+                }
             }
         }
 
@@ -2267,6 +2342,7 @@ namespace ThanksNoThanks
             _crankCap.Advance(Time.deltaTime);   // deterministic clock for the income cap
             PumpPendingScreens();                // ⚠ ДО тика — см. комментарий у самого метода
             _game.Tick(Time.deltaTime);
+            TickAudioLatches(Time.deltaTime);    // звук: фронты, которых нет событиями (купол/пульс/выгорание)
             TickNewScale(Time.deltaTime);        // §D: условие выхода модалки → фейд → салют → снятие паузы
             if (_game.State == GameState.Playing && _game.InCrisis)
             {
@@ -2324,6 +2400,8 @@ namespace ThanksNoThanks
             ReflectAlarms(Time.deltaTime);
             UpdateBrightness();
             ReflectDepression();   // B&W wash + grain + pulse while Game.InDepression (above the show veil)
+            // ПОСЛЕДНИМ — когда видимость трубки этим кадром уже решена любой из веток выше.
+            SyncPhoneRingLoop();
         }
 
         // Midlife-crisis render (S6 blitz / S13 impulse). Reuses the card marquee (thought/impulse text),
@@ -2633,6 +2711,11 @@ namespace ThanksNoThanks
         // зелёной, и голос Ведущего останется на первой мысли.
         private void OnCrisisStarted()
         {
+            if (Audio != null)
+            {
+                Audio.Play(SoundEvent.BlitzStart);   // драматическая перебивка «КРИЗИС! БЛИЦ!»
+                _audioBlitzFails = 0;                // счётчик провалов начинается заново
+            }
             _bubbleTimer.Show(HostContent.CrisisAnnounce);
             ShowSpecialMode(SpecialMode.Blitz);
         }
@@ -2644,12 +2727,20 @@ namespace ThanksNoThanks
         // (2026-08-05). Объявление громче и играет ту же роль подгонялки, поэтому нагоняй №1 пропускаем.
         private void OnCrisisBlitzAdvanced()
         {
+            // ЗВУК — ДО раннего возврата: «вжик» новой мысли положен КАЖДОЙ из пяти, включая первую.
+            // Молчит здесь только НАГОНЯЙ Ведущего (на первой мысли ещё висит объявление кризиса).
+            if (Audio != null) Audio.Play(SoundEvent.BlitzThought);
             if (_game.BlitzThoughtNumber <= 1) return;
             _bubbleTimer.Show(HostContent.BlitzNagFor(_game.BlitzThoughtNumber));
         }
 
-        // Impulse round opened: the S13 warning plate reveals via RenderCrisis; nothing else needed here.
-        private void OnCrisisImpulseStarted() { }
+        // Impulse round opened: the S13 warning plate reveals via RenderCrisis. ЗВУК: струнная
+        // «сирена-предупреждение» заводится ЛУПОМ на весь раунд и снимается в OnCrisisEnded —
+        // тикающая бомба обязана звучать, пока бомба тикает, а не 3 секунды из неизвестно скольких.
+        private void OnCrisisImpulseStarted()
+        {
+            if (Audio != null) Audio.PlayLoop(SoundEvent.Impulse);
+        }
 
         // Поза трубки по «выезду» p ∈ 0…1 (0 = покой за краем, 1 = звонок): лерпятся И бокс, И наклон —
         // на эталонах звонящая трубка не просто сдвинута, она крупнее и повёрнута сильнее (см. геоблок).
@@ -2682,7 +2773,11 @@ namespace ThanksNoThanks
             // показывает КОРОТКУЮ плашку у батареи, накрывать трубку нечем, и Game.ChildCallFrozen
             // соответственно тоже перестал смотреть на Burnout. Кризис по-прежнему убирает трубку сам
             // (RenderCrisis), а входной экран спецрежима ставит обычную паузу — там трубка честно замирает.
-            bool visible = open;
+            // ⚠ КРИЗИС ПРЯЧЕТ ТРУБКУ, И ЗДЕСЬ ЭТО СКАЗАНО ЯВНО. В живом кадре ветка кризиса сюда не
+            // заходит вовсе (её обслуживает RenderCrisis, он же гасит `_childGroup`), но seam DebugTick
+            // зовёт нас НАПРЯМУЮ — и без этого условия трубка в тесте была бы видна там, где на экране
+            // её нет. Одно условие видимости на оба пути — иначе звук синхронизируется с фикцией.
+            bool visible = open && !_game.InCrisis;
             if (_childGroup.activeSelf != visible) _childGroup.SetActive(visible);
             if (!open)
             {
@@ -2690,6 +2785,9 @@ namespace ThanksNoThanks
                 _phoneMissed = false;
                 return;
             }
+            // Спрятана кризисом, но шкала жива: позу и часы качания НЕ трогаем — звонок вернётся на
+            // экран тем же кадром, каким кончится кризис (состояние звонка держит Game, не мы).
+            if (!visible) return;
 
             bool ringing = _game.ChildFlashing;
             if (ringing && !_phoneRinging)
@@ -2727,7 +2825,15 @@ namespace ThanksNoThanks
         {
             bool wasRinging = _game.ChildFlashing;
             _game.HandleInput(GameInput.ChildPress);
-            if (wasRinging && !_game.ChildFlashing) { _phoneMissed = false; StarBurst(); }
+            SyncPhoneRingLoop();   // трубку сняли — рингтон замолкает ТУТ ЖЕ, а не следующим кадром
+            if (wasRinging && !_game.ChildFlashing)
+            {
+                _phoneMissed = false;
+                // «Алло» калимбой ИДЁТ ПОД САЛЮТОМ (манифест: держать тише салюта) — за это отвечает
+                // VolPhonePickup < VolReward в каталоге, тест инвариант стережёт.
+                if (Audio != null) Audio.Play(SoundEvent.PhonePickup);
+                StarBurst();
+            }
         }
 
         /// <summary>
@@ -2739,6 +2845,8 @@ namespace ThanksNoThanks
         private void OnChildCallMissed()
         {
             _phoneMissed = true;
+            // Оборванный гудок. Рингтон снимет SyncPhoneRingLoop тем же кадром (окно закрылось).
+            if (Audio != null) Audio.Play(SoundEvent.PhoneMissed);
             _bubbleTimer.Show(ChildMissedLine);
         }
 
@@ -3830,7 +3938,21 @@ namespace ThanksNoThanks
                 else
                 {
                     bool on = AlarmRaised(scale, _alarmOn[i]);
-                    if (on && !_alarmOn[i]) _alarmClock[i] = 0f;      // вход в тревогу — фаза с пика
+                    if (on && !_alarmOn[i])
+                    {
+                        _alarmClock[i] = 0f;      // вход в тревогу — фаза с пика
+                        // ЗВУК — НА ФРОНТЕ, один раз на заход: пульс 0.7 с озвучивать нельзя, это
+                        // прямое нарушение правила отбора №2 («ничего резкого — человек слушает это
+                        // всё время»). Деньги/энергия/здоровье = ОДИН файл на трёх высотах. Отношения
+                        // в семейство тревог не входят: у них свои блипы зоны (манифест §5).
+                        if (Audio != null && !frozen)
+                            Audio.Play(scale == AlarmScale.Relations
+                                ? SoundEvent.ZoneOut
+                                : AudioCatalog.ForAlarm(scale));
+                    }
+                    // …и симметрично: маркер отношений ВЕРНУЛСЯ в зелёную зону — мягкий позитивный блип.
+                    if (!on && _alarmOn[i] && scale == AlarmScale.Relations && Audio != null && !frozen)
+                        Audio.Play(SoundEvent.ZoneIn);
                     // §6: салют — только за КАЛИБРОВКУ. Свежий ввод по шкале + выход из тревоги, И (для
                     // денег) причина выхода не «пришла другая карточка».
                     bool byCardSwap = scale == AlarmScale.Money && cardChanged;
@@ -3986,6 +4108,9 @@ namespace ThanksNoThanks
         /// </summary>
         public void StarBurst()
         {
+            // Праздничный свисто-хлопок конфетти — ЗДЕСЬ, в единственной точке салюта, поэтому все три
+            // его повода (поднятый звонок / починенная шкала / выполненный туториал) звучат одинаково.
+            if (Audio != null) Audio.Play(SoundEvent.StarBurst);
             if (_fxLayer == null || _starSprite == null) return;
             var rnd = new System.Random(StarBurstSeedBase + _burstCount);
             _burstCount++;
@@ -4489,6 +4614,14 @@ namespace ThanksNoThanks
         // rubric band it used to ride on was removed 2026-08-05) + reset the mutter cycle.
         private void OnDepressionStarted()
         {
+            if (Audio != null)
+            {
+                // ★ ГЛАВНЫЙ ПРИЁМ. Обратная тарелка играет вход, и ЭТИМ ЖЕ мгновением весь микс
+                // (включая музыку) разом уходит в вату — 500 Гц / −9 дБ, ступень 0.
+                Audio.Play(SoundEvent.DepressionEnter);
+                Audio.EnterDepression();
+                _audioDepPulsing = false;
+            }
             _depMutterCount = 0;
             _bubbleTimer.Show(HostContent.DepressionAnnounce);
             ShowSpecialMode(SpecialMode.Depression);   // r3: правила ловли — ДО того, как начнёт капать серость
@@ -4497,6 +4630,10 @@ namespace ThanksNoThanks
         // Each successful catch: a muted host mutter as a step of colour returns.
         private void OnDepressionProgressed()
         {
+            // У ПОПАДАНИЯ нет своего клипа — и не должно быть: его звук в том, что мир возвращается
+            // на ступень. Game считает ОСТАВШУЮСЯ серость, спека — НАБРАННЫЕ попадания; переводит
+            // DepressionMix.HitsFromGray, чтобы направление не путалось.
+            if (Audio != null) Audio.SetDepressionHits(DepressionMix.HitsFromGray(_game.DepressionGray));
             _depMutterCount++;
             _bubbleTimer.Show(HostContent.DepressionMutterFor(_depMutterCount));
         }
@@ -4538,22 +4675,50 @@ namespace ThanksNoThanks
         // Четыре OPEN-открытия ведут МОДАЛЬНЫЙ экран §D (не S5-подсказку): он закрывается только
         // выполнением условия по реальному контролу. Здоровье (30) осталось на S5.
         private void OnMoneyOpened()  => ShowNewScale(NewScale.Money);
-        private void OnRelationshipsOpened() => ShowNewScale(NewScale.Relations);
+        /// <summary>
+        /// Открытие отношений приходит ДВАЖДЫ за жизнь, если сыгран ВТОРОЙ ШАНС (MD06): Game снимает
+        /// RelationshipsLost и заново зовёт CheckRelationshipsOpen. Первый раз — туториал (его «туш»
+        /// поднимает ShowNewScale), второй — «шкала открылась заново», и это ровно строка манифеста
+        /// «Второй шанс»: четыре ноты калимбы вверх. Различаем по уже взведённому `_nsSeen`.
+        /// </summary>
+        private void OnRelationshipsOpened()
+        {
+            if (Audio != null && _nsSeen[(int)NewScale.Relations]) Audio.Play(SoundEvent.SecondChance);
+            ShowNewScale(NewScale.Relations);
+        }
         private void OnEnergyOpened() => ShowNewScale(NewScale.Energy);
         // ЗДОРОВЬЕ (30) и ВЫГОРАНИЕ переехали со старой жёлтой S5-подсказки на ВХОДНОЙ ЭКРАН спецрежима
         // (r3, живой плейтест 2026-08-07): «жёлтая плашка с ПОНЯТНО выпадает из арт-пака». Одноразовость
         // за жизнь сохранена — только флаг теперь свой (_smHealthSeen / _smBurnoutSeen).
-        private void OnHealthOpened() { if (!_smHealthSeen) { _smHealthSeen = true; ShowSpecialMode(SpecialMode.Health); } }
+        private void OnHealthOpened()
+        {
+            // «Здоровье тает» — глухой колокол, один раз за жизнь. Общего «туша» спецрежимам не даём:
+            // у каждого входа свой голос из манифеста, иначе четыре разных экрана звучали бы одинаково.
+            if (Audio != null) Audio.Play(SoundEvent.HealthOpen);
+            if (!_smHealthSeen) { _smHealthSeen = true; ShowSpecialMode(SpecialMode.Health); }
+        }
         // ВЫГОРАНИЕ: первый раз за жизнь — входной экран с ПАУЗОЙ дренажа (умереть, читая правила, нельзя);
         // повторные — короткая плашка `_burnoutPlate` без блокировки, она живёт off Game.Burnout в Update.
-        private void OnBurnoutEntered(){ if (!_smBurnoutSeen) { _smBurnoutSeen = true; ShowSpecialMode(SpecialMode.Burnout); } }
+        private void OnBurnoutEntered()
+        {
+            // Резкий провал/глушение — на КАЖДОЕ выгорание, а не только на первое: экран одноразовый,
+            // а состояние возвращается, и игрок обязан слышать, что оно вернулось.
+            if (Audio != null) Audio.Play(SoundEvent.BurnoutIn);
+            if (!_smBurnoutSeen) { _smBurnoutSeen = true; ShowSpecialMode(SpecialMode.Burnout); }
+        }
         // MD02=ДА opened the child scale: the «ПОПОЛНЕНИЕ!» rubric banner already fired when MD02 was drawn;
         // this sequences the §D modal after the answer (one-shot per life, pauses like every other open).
         private void OnChildOpened()  => ShowNewScale(NewScale.Child);
 
         // Breakup: flash the transient «РАССТАЛИСЬ» plate (auto-hides on its own ~2s clock, reflected in
         // Update). The balancer HUD hides itself off Game.RelationshipsLost on the next ApplyAgeGates.
-        private void OnRelationshipBrokeUp() => _breakupTimer.Show("РАССТАЛИСЬ");
+        private void OnRelationshipBrokeUp()
+        {
+            // Битое стекло + калимба вниз. «Ооох» зала тут НЕТ и не будет: зал снят целиком, а в CC0
+            // такого звука всё равно не нашлось ни на одном источнике (манифест, «Известная дыра»).
+            if (Audio != null) Audio.Play(SoundEvent.Breakup);
+            _breakupTimer.Show("РАССТАЛИСЬ");
+        }
 
         // Счёт ушёл в минус (отрезок 0, §3.2): Ведущий это КОММЕНТИРУЕТ, а не только пилюля краснеет.
         // Реплики идут по кругу пула, а не случайно, — за жизнь их слышно один-два раза, и повтор подряд
@@ -4563,6 +4728,10 @@ namespace ThanksNoThanks
         {
             _debtLineCount++;
             _bubbleTimer.Show(HostContent.DebtLineFor(_debtLineCount));
+            // Долг — тоже реплика Ведущего, значит и он звучит пиццикато. Своего файла у пула `debt`
+            // нет: манифест назвал шесть стингеров по шести тонам, а `debt` появился позже — берёт
+            // голос «осторожность» (см. AudioCatalog.ForHostTone).
+            if (Audio != null) Audio.Play(AudioCatalog.ForHostTone(HostTone.Debt));
         }
 
         // Shared S5 hint: pauses the game (freezes age, drains, cost-of-living, decay and the card timer)
@@ -4644,6 +4813,9 @@ namespace ThanksNoThanks
 
             _nsSeen[(int)which] = true;
             _nsPending = NewScale.None;
+            // ТУТОРИАЛ: «внимание, новая рубрика!» — туш на ОТКРЫТИИ экрана. Тот же туш звучит и на
+            // ВЫПОЛНЕНИИ условия (CloseNewScale) — манифест даёт им одну строку и один файл.
+            if (Audio != null) Audio.Play(SoundEvent.Tutorial);
 
             _nsWhich = which;
             _nsShowing = true;
@@ -4783,6 +4955,9 @@ namespace ThanksNoThanks
             ReturnBigWidget();
             _nsOverlay.SetActive(false);
             _nsFade.alpha = 1f;
+            // «Условие выполнено» — тот же туш-фанфара, теперь как разрешение. Только на ШТАТНОМ
+            // выходе: аварийное закрытие (рестарт/выход из игры) обязано быть тихим, как и салют.
+            if (reward && Audio != null) Audio.Play(SoundEvent.Tutorial);
             if (reward) StarBurst();      // §6-салют «всё сделано верно» — ПОСЛЕ фейда, ДО снятия паузы
             SyncPause();
             ReflectDomeUnderModal();      // …и купол возвращается тем же кадром, что снялась модалка
@@ -4816,7 +4991,14 @@ namespace ThanksNoThanks
                     if (_nsWhich != NewScale.Money) return;           // чужой экран — крутилка мертва
                     if (_game.State != GameState.Playing) return;
                     if (!_crankCap.TryAccept()) return;               // тот же кэп дохода ~5/с
-                    _game.HandleInput(GameInput.MoneyTick);
+                    // Та же accepted-семантика, что в игровой ветке OnInput: звучит только ЗАСЧИТАННЫЙ
+                    // тик. Под §D-модалкой пауза «живая» (PausedInputsLive), поэтому Crank её принимает —
+                    // но условие спрашивается у механики, а не подразумевается.
+                    if (_game.HandleInput(GameInput.MoneyTick) && Audio != null)
+                    {
+                        Audio.Play(SoundEvent.CrankTick);   // тот же щелчок, что и в игре
+                        Audio.Play(SoundEvent.CoinJar);     // …и та же монета
+                    }
                     if (_game.MoneyOpen && isActiveAndEnabled)
                     {
                         if (_moneyPulse != null) StopCoroutine(_moneyPulse);
@@ -4830,6 +5012,7 @@ namespace ThanksNoThanks
                     if (_nsWhich != NewScale.Energy) return;          // чужой экран — датчик мёртв
                     if (_game.State != GameState.Playing) return;
                     _game.HandleInput(GameInput.EnergyHold);          // латчится, TickModalBreath наполнит
+                    NoteEnergyGesture();                              // …и та же сцена зарядки, что в игре
                     _nsArmed = true;
                     return;
 
@@ -4846,7 +5029,12 @@ namespace ThanksNoThanks
                     if (_nsWhich != NewScale.Child) return;           // на остальных экранах CONFIRM инертен
                     bool wasRinging = _game.ChildFlashing;
                     _game.HandleInput(GameInput.ChildPress);
-                    if (wasRinging && !_game.ChildFlashing) _nsArmed = true;
+                    SyncPhoneRingLoop();   // тот же съём рингтона, что и в PressChildPhone
+                    if (wasRinging && !_game.ChildFlashing)
+                    {
+                        if (Audio != null) Audio.Play(SoundEvent.PhonePickup);   // то же «алло» калимбой
+                        _nsArmed = true;
+                    }
                     return;
             }
         }
@@ -5080,6 +5268,151 @@ namespace ThanksNoThanks
             _nsBorrowedParent = null;
         }
 
+        // ================================================================ звук (манифест дизайн-сессии)
+
+        /// <summary>
+        /// Звуковой слой. Публичный — тесты слушают <see cref="AudioLayer.DebugPlayed"/>, а
+        /// проигрывание идёт ТОЛЬКО через него (см. класс: единая точка + фильтр депрессии).
+        /// </summary>
+        public AudioLayer Audio { get; private set; }
+
+        // --- Латчи: события, которых в коде НЕТ, приходится ловить фронтом самим ------------------
+        private GameState _audioPrevState = GameState.Opener;
+        private bool _audioDomeAlarmed;      // купол уже пропищал последнюю секунду ЭТОЙ карточки
+        private bool _audioBurnout;          // прошлый кадр: выгорание (выхода из него события нет)
+        private bool _audioDepPulsing;       // прошлый кадр: окно пульса депрессии открыто
+        private int _audioBlitzFails;        // прошлый счётчик провалов блица (провал события не имеет)
+        private float _audioSinceEnergyHold; // с последнего принятого удержания датчика
+
+        /// <summary>Пауза дольше этой — следующее удержание датчика считается НОВЫМ жестом зарядки.</summary>
+        private const float EnergyGestureGap = 0.25f;
+
+        /// <summary>
+        /// ЕДИНСТВЕННОЕ УСЛОВИЕ РИНГТОНА (находка Codex 2026-08-08, MAJOR). Луп звонка обязан жить
+        /// РОВНО столько, сколько трубка ВИДНА игроку и звонок активен. Раньше он включался и
+        /// выключался внутри <see cref="ReflectChildPhone"/> — а её под кризисом никто не зовёт
+        /// (Game.Tick входит в кризис ДО интеграции ребёнка, звонок остаётся ChildFlashing,
+        /// <see cref="RenderCrisis"/> прячет трубку и уходит), и рингтон продолжал звенеть из-под
+        /// блица над спрятанной трубкой. Латать это вторым StopLoop в RenderCrisis значило бы
+        /// заводить третью, четвёртую ветку на каждый новый способ спрятать виджет.
+        ///
+        /// Поэтому спрашиваем не «какой ветке рендера сейчас ход», а ФАКТ: объект трубки жив в
+        /// иерархии (кризис, финал, рестарт, выход из игры — все гасят именно его) И окно звонка
+        /// открыто И оно РЕАЛЬНО КРУТИТСЯ (глухая пауза его стопорит — <see cref="Game.ChildCallFrozen"/>;
+        /// «живая» пауза §D-модалки ребёнка не стопорит, там звонок и есть содержание экрана).
+        /// </summary>
+        private bool PhoneRingAudible
+            => _game != null
+               && _game.State == GameState.Playing
+               && _game.ChildFlashing
+               && !_game.ChildCallFrozen
+               && _childGroup != null && _childGroup.activeInHierarchy;
+
+        /// <summary>
+        /// Свести луп рингтона с <see cref="PhoneRingAudible"/>. Идемпотентно: <c>PlayLoop</c> на уже
+        /// играющем канале фразу не рвёт, <c>StopLoop</c> на молчащем — no-op, поэтому вызывать можно
+        /// хоть каждый кадр. Зовётся из конца кадра (Update / seam DebugTick) и сразу после поднятия
+        /// трубки — чтобы «алло» не ложилось поверх ещё звенящего рингтона.
+        /// </summary>
+        private void SyncPhoneRingLoop()
+        {
+            if (Audio == null) return;
+            if (PhoneRingAudible) Audio.PlayLoop(SoundEvent.PhoneRing);
+            else Audio.StopLoop(LoopChannel.PhoneRing);
+        }
+
+        /// <summary>
+        /// Покадровые ЛАТЧИ звука. Здесь живут ровно те строки манифеста, под которые в коде нет
+        /// события: выход из выгорания, последняя секунда купола, пульс депрессии и провал блица.
+        ///
+        /// ⚠ НА ПАУЗЕ ЛАТЧИ СТОЯТ. Очереди у слоя нет по устройству (<see cref="AudioLayer"/>), но
+        /// если бы латчи крутились под туториалом, снятие паузы дало бы пачку фронтов разом —
+        /// done contract §4 «пауза туториалов не копит очередь звуков» держится именно этим ранним
+        /// возвратом, а не фильтрацией на стороне слоя.
+        /// </summary>
+        private void TickAudioLatches(float dt)
+        {
+            if (_game == null || Audio == null) return;
+            _audioSinceEnergyHold = Mathf.Min(_audioSinceEnergyHold + dt, 999f);
+            if (_game.Paused && !_game.PausedInputsLive) return;
+            if (_game.State != GameState.Playing) return;
+
+            // ВЫГОРАНИЕ: вход озвучен событием BurnoutEntered, а выход Game гасит МОЛЧА (флаг
+            // Game.Burnout просто становится false на энергии >40 %). Ловим спад сами.
+            bool burn = _game.Burnout;
+            if (!burn && _audioBurnout) Audio.Play(SoundEvent.BurnoutOut);
+            _audioBurnout = burn;
+
+            // ПУЛЬС ДЕПРЕССИИ: одинокий удар сердца на КАЖДОЕ открытие окна. Идёт ВНЕ фильтра
+            // (SoundBus.Unfiltered) — «остаётся наверху нетронутым», пока весь микс в вате.
+            bool pulsing = _game.DepressionPulsing;
+            if (pulsing && !_audioDepPulsing) Audio.Play(SoundEvent.DepressionPulse);
+            _audioDepPulsing = pulsing;
+
+            // ПРОВАЛ БЛИЦА: и промах рычагом, и истёкшее окно поднимают ОДИН счётчик Game.BlitzFails
+            // и оба обязаны звучать «ответом НЕТ» (манифест: в блице игрок отвечает тем же голосом).
+            // Один латч на счётчике покрывает оба, поэтому в OnInput провал намеренно не озвучивается.
+            int fails = _game.BlitzFails;
+            if (fails > _audioBlitzFails) Audio.Play(SoundEvent.AnswerNo);
+            _audioBlitzFails = fails;
+
+            // КУПОЛ, ПОСЛЕДНЯЯ СЕКУНДА: состояние, а не фронт (ReflectDome красит его каждый кадр) —
+            // латчим сами и звучим ровно один раз на карточку. В кризисе/депрессии купол чужой.
+            if (_game.InCrisis || _game.InDepression) return;
+            bool last = _game.CardTimer > 0f && _game.CardTimer <= DomeAlarmSeconds;
+            if (last && !_audioDomeAlarmed) { Audio.Play(SoundEvent.DomeLastSecond); _audioDomeAlarmed = true; }
+            else if (!last && _game.CardTimer > DomeAlarmSeconds) _audioDomeAlarmed = false;
+        }
+
+        /// <summary>
+        /// ЗАРЯДКА — ЦЕЛЫЙ ЖЕСТ, А НЕ ТРИ СОБЫТИЯ. Основательница отвергла разбиение «начало / луп /
+        /// отпустил»: «по кусочкам оно не читалось». Файл содержит всю сцену наливания вместе с
+        /// сигналом «полная», поэтому мы его просто ЗАПУСКАЕМ — и больше не трогаем. Датчик
+        /// переиздаёт EnergyHold каждый кадр, значит «начало жеста» = первое удержание после паузы
+        /// длиннее <see cref="EnergyGestureGap"/>.
+        /// </summary>
+        private void NoteEnergyGesture()
+        {
+            if (Audio == null) return;
+            if (_audioSinceEnergyHold > EnergyGestureGap) Audio.Play(SoundEvent.EnergyCharge);
+            _audioSinceEnergyHold = 0f;
+        }
+
+        /// <summary>Депрессия закончилась: «мир снова включили» — риза и полное снятие фильтра.</summary>
+        private void OnDepressionEnded()
+        {
+            if (Audio == null) return;
+            Audio.Play(SoundEvent.DepressionExit);
+            Audio.ExitDepression();
+        }
+
+        /// <summary>Кризис закончился — снять струнную «сирену» импульса, если она крутилась.</summary>
+        private void OnCrisisEnded()
+        {
+            if (Audio != null) Audio.StopLoop(LoopChannel.Impulse);
+        }
+
+        /// <summary>Второй пропуск подряд: редкий низкий акцент «плохой родитель».</summary>
+        private void OnChildBadParent()
+        {
+            if (Audio != null) Audio.Play(SoundEvent.BadParent);
+        }
+
+        /// <summary>
+        /// «Лечение выбором» отдельного события в игре не имеет — лечит обычная Δ карточки. Читаем
+        /// выбранную сторону: есть ли в ней ПЛЮС к здоровью. Системный бонус KEK04 (Game.HealHealth)
+        /// сюда не попадает — он не выбор игрока.
+        /// </summary>
+        private static bool HealsHealth(Card card, AnswerSide side)
+        {
+            if (card == null || side == AnswerSide.Timeout) return false;
+            var deltas = side == AnswerSide.Yes ? card.YesDeltas : card.NoDeltas;
+            if (deltas == null) return false;
+            foreach (var d in deltas)
+                if (d.Scale == Scale.Health && d.Kind == DeltaKind.Add && d.Value > 0) return true;
+            return false;
+        }
+
         // ================================================================ refresh / events
 
         private void Refresh()
@@ -5132,6 +5465,15 @@ namespace ThanksNoThanks
                 // (ResetAlarms не стреляет салютом) — иначе рестарт из тревожного состояния давал бы салют.
                 ResetAlarms();
                 ClearStars();
+                // ЗВУК: свежая жизнь начинается в ЧИСТОМ миксе. Без этого смерть В ДЕПРЕССИИ оставляла
+                // бы следующую жизнь играть под лоу-пассом — «застрявшая вата» (done contract §4), —
+                // а рингтон/сирена прошлой жизни продолжали бы крутиться поверх новой.
+                if (Audio != null) { Audio.ResetAll(); Audio.PlayLoop(SoundEvent.MusicTheme); }
+                _audioDomeAlarmed = false;
+                _audioBurnout = false;
+                _audioDepPulsing = false;
+                _audioBlitzFails = 0;
+                _audioSinceEnergyHold = 999f;   // первое удержание новой жизни — заведомо НОВЫЙ жест
             }
             // Опенер/финал: тревог там нет по спеку, и подсветка не должна пережить уход из игры.
             if (!playing) { ResetAlarms(); ClearStars(); }
@@ -5140,6 +5482,35 @@ namespace ThanksNoThanks
             if (!playing && _smShowing) { CloseSpecialMode(); _smPending = SpecialMode.None; }
             if (!playing) { _bubbleTimer.Hide(); _hostBubble.SetActive(false); SyncPause(); }
             _wasPlaying = playing;
+
+            // ЗВУК РАМКИ ЖИЗНИ — три перехода состояния, три строки манифеста. Идёт ПОСЛЕ блока
+            // «свежая жизнь» нарочно: тот сбрасывает слой, и фанфару опенера нельзя играть до сброса.
+            // ВЕХИ ВОЗРАСТА здесь намеренно НЕ звучат — решение основательницы («будет какофония»).
+            if (Audio != null && _game.State != _audioPrevState)
+            {
+                var from = _audioPrevState;
+                _audioPrevState = _game.State;
+                if (finale)
+                {
+                    // Умереть можно ПРЯМО В ДЕПРЕССИИ — финал обязан звучать в чистом миксе, и ни
+                    // рингтон, ни сирена импульса не имеют права пережить конец жизни.
+                    Audio.ResetAll();
+                    Audio.PlayLoop(SoundEvent.MusicTheme);
+                    Audio.Play(FinaleSound.EventFor(_game.Cause));   // старость / выгорание / FATAL
+                }
+                else if (opener)
+                {
+                    // Уход в опенер — это либо «НАЧАТЬ ЗАНОВО» с финала, либо чистый выход по
+                    // MenuButton. Слой чистим в обоих случаях; плёнку-перемотку играем только рестарту.
+                    Audio.ResetAll();
+                    Audio.PlayLoop(SoundEvent.MusicTheme);
+                    if (from == GameState.Finale) Audio.Play(SoundEvent.Restart);
+                }
+                else if (playing && from == GameState.Opener)
+                {
+                    Audio.Play(SoundEvent.Opener);   // фанфара «НАЧАТЬ ЖИЗНЬ» — БЕЗ аплодисментов: зал снят
+                }
+            }
 
             if (playing)
             {
@@ -5170,6 +5541,15 @@ namespace ThanksNoThanks
             SyncPause();
             UpdateHudValues();
             ApplyAgeGates(_game.Age);
+            // ЗВУК: раздача карточки — на КАЖДУЮ новую, включая заблокированную (она тоже въезжает).
+            // BLOCK$ добавляет сверху свой «вомп-вомп»: карточка пришла И она недоступна — два разных
+            // сообщения. Купольная тревога взводится заново — она одна на карточку.
+            if (Audio != null && c != null)
+            {
+                _audioDomeAlarmed = false;
+                Audio.Play(SoundEvent.CardDeal);
+                if (blocked) Audio.Play(SoundEvent.BlockMoney);
+            }
             if (c != null && isActiveAndEnabled)
             {
                 if (_cardAnim != null) StopCoroutine(_cardAnim);
@@ -5185,6 +5565,20 @@ namespace ThanksNoThanks
             var line = _voice.Pick(card, side);
             if (!string.IsNullOrEmpty(line)) _bubbleTimer.Show(line);
             else _bubbleTimer.Hide();
+
+            if (Audio == null) return;
+            // ТАЙМАУТ («молчание»): ответ дала монетка — музыкальный провал, БЕЗ смешка зала (зал снят
+            // целиком, sound-direction §3). Сама калимба ДА/НЕТ звучит в OnInput на ПРИНЯТОМ рычаге —
+            // здесь её нет намеренно: таймаут рычага не касался.
+            if (side == AnswerSide.Timeout) Audio.Play(SoundEvent.Timeout);
+            // ЛЕЧЕНИЕ ВЫБОРОМ: карточка с плюсом к здоровью применена — тёплая калимба через октаву.
+            else if (HealsHealth(card, side)) Audio.Play(SoundEvent.Heal);
+            // ВЕДУЩИЙ: стингер — это ГОЛОС ОБЛАЧКА, а не звук ответа: звучит ТОЛЬКО когда реплика
+            // реально показана (~30–40% выборов). Безусловный Play клал пиццикато поверх калимбы на
+            // каждой карточке без всякого облачка (плейтест 2026-08-08, sound-direction «Дефект
+            // внедрения»). Тон — у того же HostVoice, что выбрал текст.
+            if (!string.IsNullOrEmpty(line))
+                Audio.Play(AudioCatalog.ForHostTone(_voice.Classify(card, side)));
         }
 
         // Advance the host speech-bubble clock (real-time) and mirror its visibility onto the widget.

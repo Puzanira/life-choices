@@ -760,6 +760,14 @@ namespace ThanksNoThanks
         /// </summary>
         public event Action DebtEntered;
 
+        /// <summary>
+        /// «ПЛОХОЙ РОДИТЕЛЬ»: пропущен второй звонок ПОДРЯД — штраф уже применён (отношения −10,
+        /// шкала ребёнка вниз). Отдельно от <see cref="ChildCallMissed"/>, который звучит на КАЖДЫЙ
+        /// пропуск: этот — редкий и страшный, и у него свой низкий акцент в звуковом манифесте.
+        /// Как и остальные события здесь — чисто семантика, никакой подачи.
+        /// </summary>
+        public event Action ChildBadParent;
+
         public Game(IEnumerable<Card> deck, Func<bool> coin = null, IEnumerable<Card> reserve = null)
         {
             _deck = deck?.ToList() ?? new List<Card>();
@@ -2288,6 +2296,7 @@ namespace ThanksNoThanks
             _childConsecutiveMiss = 0;
             Scales.Relationships = Math.Max(0, Scales.Relationships - ChildBadParentRelPenalty);
             Scales.Child = Math.Max(0, Scales.Child - ChildBadParentScaleDrop);
+            ChildBadParent?.Invoke();
         }
 
         // «Пора подлечиться!» (LT08): a condition-triggered system card, single-shot per life. Eligible

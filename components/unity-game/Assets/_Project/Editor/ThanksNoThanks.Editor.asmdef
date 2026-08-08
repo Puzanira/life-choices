@@ -1,0 +1,18 @@
+{
+    "name": "ThanksNoThanks.Editor",
+    "rootNamespace": "ThanksNoThanks.EditorTools",
+    "references": [
+        "ThanksNoThanks.Runtime"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}
