@@ -130,13 +130,12 @@ namespace ThanksNoThanks.Tests
                 var deck = Sample(seed);
                 var byId = deck.ToDictionary(c => c.Id);
 
-                foreach (var id in new[] { "I02", "I03", "YA01", "YA03", "YA05", "MD01" })
+                foreach (var id in new[] { "I02", "I03", "YA01", "YA05", "MD01" })
                     Assert.IsTrue(byId.ContainsKey(id), $"milestone {id} always in the deck (seed {seed})");
 
                 Assert.AreEqual(0, byId["I02"].Age, "I02 pinned to age 0 (intro first)");
                 Assert.AreEqual(1, byId["I03"].Age, "I03 at age 1");
                 Assert.AreEqual(18, byId["YA01"].Age);
-                Assert.AreEqual(20, byId["YA03"].Age);
                 Assert.AreEqual(25, byId["YA05"].Age);
                 Assert.That(byId["MD01"].Age, Is.InRange(28, 32), "MD01 sampled inside its 28–32 window");
 

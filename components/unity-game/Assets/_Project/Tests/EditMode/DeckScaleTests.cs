@@ -119,7 +119,7 @@ namespace ThanksNoThanks.Tests
         public void Milestones_SurviveTheBiggerPool()
         {
             // «Вехи обязательны»: сколько бы филлеров ни дописали, канон-карточки жизни в забеге есть.
-            string[] must = { "I02", "I03", "YA01", "YA03", "YA05", "MD01" };
+            string[] must = { "I02", "I03", "YA01", "YA05", "MD01" };
             for (int seed = 0; seed < 10; seed++)
             {
                 var ids = DeckSampler.BuildPlan(HeadroomPool(), new System.Random(seed))

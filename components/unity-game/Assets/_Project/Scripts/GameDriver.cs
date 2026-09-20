@@ -601,6 +601,12 @@ namespace ThanksNoThanks
         private RectTransform _noRect;
         private Text _yesPlateText;   // crisis-only overlay («ДА»/«СПАСИБО, НЕ НАДО» are BAKED in the art)
         private Text _noPlateText;
+        // ЖЁСТКАЯ ТЕНЬ ПОДПИСИ — ОТДЕЛЬНЫЙ МЕШ (копия текста цветом Ink со сдвигом). Компонентом Shadow
+        // её не сделать: Outline+Shadow на одном меше дают «призрак» (r3 §4(s)), а полупрозрачная тень
+        // (альфа 0.32) — это ровно та «размытая», которую завернул дизайн-гейт. См. ApplyBlitzLabel.
+        private Text _yesPlateShade, _noPlateShade;
+        private Outline _yesLabelKant, _noLabelKant;   // кант буквы (жёсткий, Ink в блице)
+        private Shadow _yesLabelSoft, _noLabelSoft;    // мягкая тень DisplayFx — живёт только в импульсе
         // The two answer-plate sprite sets. Ordinary play draws the ART-PACK plates with the lettering BAKED
         // IN (`btn-yes` / `btn-no`, Simple — the art is not a 9-slice); the crisis (blitz + impulse) keeps the
         // old blank code-plates + a dynamic Text, because it relabels them per thought («ВСЁ НОРМАЛЬНО» /
@@ -1337,6 +1343,9 @@ namespace ThanksNoThanks
         public GameObject ImpulseWarning => _impulseWarning;
         public Text YesPlateText => _yesPlateText;
         public Text NoPlateText => _noPlateText;
+        /// <summary>Теневые КОПИИ подписей плашек (жёсткая тень блица — отдельный меш, см. ApplyBlitzLabel).</summary>
+        public Text YesPlateShade => _yesPlateShade;
+        public Text NoPlateShade => _noPlateShade;
         public bool HostBubbleVisible => _bubbleTimer.Visible;
         public GameObject DepressionOverlay => _depressionGroup;
         public Image DepressionVeil => _depressionVeil;
@@ -1422,7 +1431,7 @@ namespace ThanksNoThanks
             ReflectHealthMarker(100f);
             ReflectRelationsMarker(55f, redZone: false);
             _yesPlate.color = Color.white; _noPlate.color = Color.white;
-            _yesPlateText.text = "ДА"; _noPlateText.text = "СПАСИБО,\nНЕ НАДО";
+            SetYesLabel("ДА"); SetNoLabel("СПАСИБО,\nНЕ НАДО");
             ReflectDome(6f, 6f);
             if (which == NewScale.Child)
             {
@@ -1667,7 +1676,7 @@ namespace ThanksNoThanks
             ReflectHealthMarker(72f);
             ReflectRelationsMarker(58f, redZone: false);
             _yesPlate.color = Color.white; _noPlate.color = Color.white;
-            _yesPlateText.text = "ДА"; _noPlateText.text = "СПАСИБО,\nНЕ НАДО";
+            SetYesLabel("ДА"); SetNoLabel("СПАСИБО,\nНЕ НАДО");
             // Купол в спокойной позе: СВЕЖАЯ карточка, таймер ПОЛНЫЙ (t=0, дизайн-гейт просил именно
             // этот кадр), канонный YELLOW. Через ReflectDome, а не присвоением, — поза идёт тем же путём,
             // что и живой Update, и стрелка-кромка встаёт на своё место.
@@ -1736,6 +1745,41 @@ namespace ThanksNoThanks
         /// (<see cref="StarPreviewSeconds"/>) — все 4–5 звёзд ещё в воздухе, видно калибры и разлёт.
         /// Разлёт детерминирован сидом, поэтому кадр воспроизводим.
         /// </summary>
+        /// <summary>
+        /// Кадр §D-окна ДЕНЕГ в РОВНО той ситуации, на которую пожаловалась основательница (r4 п.1а):
+        /// счёт 0 ₽, тревога банки насильно зажжена — и §4 отрабатывает поверх. Если подавление на
+        /// месте, кадр выходит БЕЗ единого красного пикселя; если его убрать, банка загорится и это
+        /// будет видно на снимке. То есть поза не «показывает результат», а ПРОВЕРЯЕТ его глазом.
+        /// </summary>
+        public void DebugPreviewMoneyTutorialQuiet()
+        {
+            DebugPreviewNewScale(NewScale.Money);
+            _moneyText.text = FormatMoneyJar(0);
+            DebugPaintAlarm(AlarmScale.Money);   // зажечь насильно…
+            ReflectAlarms(0.1f);                 // …и дать §4 решить: своё обучение её гасит
+        }
+
+        /// <summary>
+        /// Кадр БЛИЦА с плашками, переодетыми в арт-пак (r4 п.4). <paramref name="punch"/> — то же
+        /// состояние «нажатие засчитано», что играет корутина PunchPlate: плашка просажена в нижней
+        /// точке дуги (та же формула, что в <see cref="PunchPlate"/>, взятая на пике k = 0.5).
+        /// </summary>
+        public void DebugPreviewBlitzPlates(bool punch)
+        {
+            DebugPreviewArcadeShot();
+            _crisisUiActive = true;
+            ApplyAgeGates(45f);
+            _ageText.text = "45";
+            _cardText.text = "А я вообще туда иду?";
+            SetYesLabel("ВСЁ\nНОРМАЛЬНО");
+            SetNoLabel("О НЕТ");
+            UseCrisisBlitzPlates();
+            _crisisInfoText.text = "МЫСЛЬ 3/5\n<color=#e8686a>ПРОВАЛОВ: 1</color>";
+            if (!_crisisInfo.activeSelf) _crisisInfo.SetActive(true);
+            if (_impulseWarning.activeSelf) _impulseWarning.SetActive(false);
+            if (punch) _yesRect.localScale = PunchScaleAt(0.5f);   // нижняя точка дуги (sin(π/2) = 1)
+        }
+
         public void DebugPreviewStarBurst()
         {
             DebugPreviewArcadeShot();
@@ -2010,6 +2054,34 @@ namespace ThanksNoThanks
                 Input.Received -= OnInput;
             }
             if (_game != null) UnsubscribeGame();
+            DestroyBlitzPlateSprites();
+        }
+
+        /// <summary>
+        /// Убрать за собой СГЕНЕРИРОВАННЫЕ плашки блица (находка код-скептика r4).
+        /// <see cref="BuildBlitzPlateSprite"/> создаёт на драйвер ДВА <c>Texture2D</c> и ДВА <c>Sprite</c>
+        /// — это нативные объекты, и сборщик мусора C# их не забирает: без явного Destroy они живут до
+        /// выгрузки домена. В PlayMode-прогоне драйвер поднимается и рушится десятки раз за сессию, и
+        /// каждый оставлял бы по паре текстур 615×280 RGBA32 (≈0.7 МБ на драйвер).
+        ///
+        /// Спрайт и его текстура уничтожаются ОТДЕЛЬНО: <c>Sprite.Create</c> текстуру не присваивает
+        /// себе, уничтожение спрайта её не тронет. Текстуру берём ДО уничтожения спрайта — после него
+        /// поле <c>sprite.texture</c> уже не спросить.
+        ///
+        /// ⚠ Пересоздания в рантайме НЕТ и быть не должно: обе плашки строятся ОДИН раз в Build, а панч
+        /// (squash) двигает только <c>localScale</c> — растр он не перерисовывает. Иначе каждый кадр
+        /// панча плодил бы по текстуре, и утечка была бы не «пара на драйвер», а «пара на кадр».
+        /// </summary>
+        private void DestroyBlitzPlateSprites()
+        {
+            foreach (var sp in new[] { _blitzYesSprite, _blitzNoSprite })
+            {
+                if (sp == null) continue;
+                var tex = sp.texture;
+                Destroy(sp);
+                if (tex != null) Destroy(tex);
+            }
+            _blitzYesSprite = _blitzNoSprite = null;
         }
 
         private void SubscribeGame()
@@ -2257,6 +2329,15 @@ namespace ThanksNoThanks
             // §6-окно и панч плашки остаются внутри: это по-прежнему НЕ работа по шкале и НЕ ответ.
             if (inBlitz)
             {
+                // ПАНЧ В БЛИЦЕ (r4 п.4): «кнопки блица не анимированы» — им нужен тот же отклик
+                // «нажатие засчитано», что у ДА/СПАСИБО НЕ НАДО. Семантика r3 не ломается: панч
+                // по-прежнему играет ТОЛЬКО на ПРИНЯТЫЙ ввод — просто «принято» в блице означает не
+                // «ответ на карточку», а «рычаг засчитан как нажатие по мысли». `inBlitz` посчитан ДО
+                // хода и уже требует живой мысли (BlitzThoughtNumber > 0), а BlitzPress принимает ОБА
+                // рычага всегда — значит здесь принятие гарантировано.
+                // Панчим ПРЕССОВАННУЮ плашку, а не «правильную»: отклик — про палец игрока, не про
+                // попадание (попадание озвучивает голос строкой ниже, промах остаётся тихим).
+                PunchAnswerPlate(input);
                 if (blitzHit && Audio != null) Audio.Play(SoundEvent.AnswerYes);
                 return;
             }
@@ -2438,8 +2519,8 @@ namespace ThanksNoThanks
                 // the RIGHT since §9, so painting the label here is what ties the lever to a screen side).
                 // Colour-to-meaning is unaffected: both blitz plates render plain white.
                 bool normalOnYes = _game.BlitzNormalOnYes;
-                _yesPlateText.text = normalOnYes ? "ВСЁ\nНОРМАЛЬНО" : "О НЕТ";
-                _noPlateText.text = normalOnYes ? "О НЕТ" : "ВСЁ\nНОРМАЛЬНО";
+                SetYesLabel(normalOnYes ? "ВСЁ\nНОРМАЛЬНО" : "О НЕТ");
+                SetNoLabel(normalOnYes ? "О НЕТ" : "ВСЁ\nНОРМАЛЬНО");
                 _yesPlate.color = Color.white;
                 _noPlate.color = Color.white;
                 // S6: both blitz plates are LARGE and EQUAL so the 2-line «ВСЁ НОРМАЛЬНО» sits fully inside
@@ -2458,8 +2539,8 @@ namespace ThanksNoThanks
                 // Impulse keeps the code-plates at the normal S13 sizes (per the accepted 03 shot) — the
                 // baked art can't be relabelled «поддаться/отказ» and must not show through here.
                 UseImpulsePlates();
-                _yesPlateText.text = "ДА";
-                _noPlateText.text = "СПАСИБО,\nНЕ НАДО";
+                SetYesLabel("ДА");
+                SetNoLabel("СПАСИБО,\nНЕ НАДО");
                 _yesPlateText.resizeTextMaxSize = 60;   // single-line «ДА» reads big
                 _noPlateText.resizeTextMaxSize = 40;
                 _yesPlate.color = Color.white;
@@ -2479,8 +2560,8 @@ namespace ThanksNoThanks
         {
             _crisisUiActive = false;
             UseBakedPlates();    // back to the baked art (and the crisis label overlay goes away with it)
-            _yesPlateText.text = "ДА";
-            _noPlateText.text = "СПАСИБО,\nНЕ НАДО";
+            SetYesLabel("ДА");
+            SetNoLabel("СПАСИБО,\nНЕ НАДО");
             _yesPlate.color = Color.white;
             _noPlate.color = Color.white;
             if (_crisisInfo != null) _crisisInfo.SetActive(false);
@@ -2509,6 +2590,36 @@ namespace ThanksNoThanks
         private static readonly Vector2 ImpulseNoPlateSize = new Vector2(615f, 275f);
         private static readonly Vector2 CrisisBlitzPlateSize = new Vector2(615f, 280f);
 
+        // ---- БЛИЦ В СТИЛЕ АРТ-ПАКА (r4 п.4) --------------------------------------------------------
+        // Жалоба основательницы: «кнопки блица — в старом стиле и не анимированы». Обычная игра рисует
+        // плашки АРТ-ПАКА (`btn-yes`/`btn-no`), а блиц переключался на плоские код-плашки
+        // (`plate-yes`/`plate-no`) — тёмно-синий кант и ровная заливка, ни канта-кеглей, ни жёлтой
+        // полосы. Рядом с арт-паком это читается как экран из другой игры.
+        // ПЕРЕИСПОЛЬЗОВАТЬ `btn-yes`/`btn-no` НЕЛЬЗЯ: в них ВПИСАНЫ слова «ДА» и «СПАСИБО НЕ НАДО»
+        // (буквы — часть битмапа), а блицу нужны свои «ВСЁ НОРМАЛЬНО» / «О НЕТ». Чистой заготовки в паке
+        // нет — единственные «пустые» плашки и есть те самые старые `plate-yes`/`plate-no`.
+        //
+        // ⚠ ПЕРВАЯ РЕДАКЦИЯ (стопка 9-slice `bar-track`) ЗАВЁРНУТА ДИЗАЙН-ГЕЙТОМ 2026-08-08, и по делу:
+        // 9-slice несёт радиус УГЛОВ ИСХОДНОГО СПРАЙТА в ИСХОДНЫХ ПИКСЕЛЯХ. У `bar-track` (360×56) это
+        // ~16 px — на плашке высотой 280 получается радиус 5.7 % H против канонных 16–19 % у `btn-yes`,
+        // то есть почти прямоугольник. По той же причине кант и жёлтая полоса выходили вдвое тяжелее
+        // канона: их толщина задавалась в пикселях, а не долей высоты.
+        // ЛЕЧИТСЯ НЕ ПОДБОРОМ ОТСТУПОВ, А ИСТОЧНИКОМ ФОРМЫ: плашка блица рисуется ОДНИМ спрайтом,
+        // СГЕНЕРИРОВАННЫМ ПОД ЕЁ СОБСТВЕННЫЙ РАЗМЕР (<see cref="BuildBlitzPlateSprite"/>), где ВСЯ
+        // геометрия — доли высоты. Тогда любой размер плашки даёт канон-пропорции сам собой, а не
+        // «повезло с числом». Доли сняты с `btn-yes.png` (внутр. 875×577):
+        //   • радиус угла      ≈ 0.17·H  (замер канона 16–19 % H);
+        //   • чёрный кант      ≈ 0.024·H (замер 14 px / 577);
+        //   • жёлтая полоса    от 0.059·H (замер: центр полосы на 7.2 % H от края) толщиной 0.025·H —
+        //     ровно вдвое легче прежних 9-slice-бордюров, как и потребовал гейт (MINOR-3).
+        // Тёмный ОДИН на всю плашку — <see cref="Ink"/>, им же красится кант букв (MINOR-4): раньше
+        // контур подписи был #141A3D, а кант плашки #0B0F1A, и рядом это читалось как два разных чёрных.
+        public const float BlitzPlateRadiusFrac = 0.17f;    // радиус угла / высота плашки
+        public const float BlitzPlateKeylineFrac = 0.024f;  // толщина чёрного канта / высота
+        public const float BlitzPlateStripeOutFrac = 0.059f;// внешний край жёлтой полосы / высота
+        public const float BlitzPlateStripeFrac = 0.025f;   // толщина жёлтой полосы / высота
+        private Sprite _blitzYesSprite, _blitzNoSprite;
+
         // Ordinary play: baked art, NO dynamic label (the words are part of the picture — a live Text on top
         // would double them). Idempotent; called on build, on every restart and when a crisis ends.
         private void UseBakedPlates()
@@ -2521,6 +2632,89 @@ namespace ThanksNoThanks
             _noRect.sizeDelta = BakedNoPlateSize;
             if (_yesPlateText.gameObject.activeSelf) _yesPlateText.gameObject.SetActive(false);
             if (_noPlateText.gameObject.activeSelf) _noPlateText.gameObject.SetActive(false);
+            SetLabelShades(false);
+        }
+
+        /// <summary>Тень подписи — ОТДЕЛЬНЫЙ меш (см. <see cref="ApplyBlitzLabel"/>), поэтому её
+        /// видимостью управляем вместе с самой подписью, а не через компонент-эффект.</summary>
+        private void SetLabelShades(bool on)
+        {
+            if (_yesPlateShade != null && _yesPlateShade.gameObject.activeSelf != on)
+                _yesPlateShade.gameObject.SetActive(on);
+            if (_noPlateShade != null && _noPlateShade.gameObject.activeSelf != on)
+                _noPlateShade.gameObject.SetActive(on);
+        }
+
+        /// <summary>Теневая копия подписи: тот же текст, тот же кант, цвет Ink — но ОТДЕЛЬНЫЙ меш,
+        /// сдвинутый в <see cref="ApplyBlitzLabel"/>. Строится выключенной и НИЖЕ подписи по иерархии.</summary>
+        private Text NewPlateShade(string name, Image plate, string content)
+        {
+            var t = NewText(name, plate.transform, content, 96, TextAnchor.MiddleCenter, Ink, _display);
+            PlateTextRect(t.rectTransform);
+            t.resizeTextForBestFit = true; t.resizeTextMinSize = 40; t.resizeTextMaxSize = 180;
+            var kant = t.gameObject.AddComponent<Outline>();   // тот же силуэт, что у канта подписи
+            kant.effectColor = Ink;
+            kant.effectDistance = new Vector2(BlitzLabelKantPx, -BlitzLabelKantPx);
+            t.gameObject.SetActive(false);
+            return t;
+        }
+
+        // Подпись плашки и её теневая копия ОБЯЗАНЫ нести один текст — иначе тень отстанет на строку.
+        private void SetYesLabel(string s) { _yesPlateText.text = s; if (_yesPlateShade != null) _yesPlateShade.text = s; }
+        private void SetNoLabel(string s) { _noPlateText.text = s; if (_noPlateShade != null) _noPlateShade.text = s; }
+
+        /// <summary>
+        /// Нарисовать плашку блица ЦЕЛИКОМ в текстуру ровно того размера, которым она выйдет на экран:
+        /// кант → цветное поле → жёлтая полоса → цветное поле, углы скруглены по канону (см. доли
+        /// <see cref="BlitzPlateRadiusFrac"/> и соседей). Спрайт рисуется Simple и 1:1 по пикселям
+        /// (pixelsPerUnit 100 = referencePixelsPerUnit холста), поэтому доли высоты доезжают до кадра
+        /// НЕИСКАЖЁННЫМИ — в отличие от 9-slice, который тащит радиус исходника в исходных пикселях.
+        /// Края сглажены: и внешний контур, и швы колец размываются ровно на один пиксель, так что
+        /// диагональ угла не лесенкой (тот же приём, что у купола-таймера).
+        /// </summary>
+        private static UnityEngine.Sprite BuildBlitzPlateSprite(string name, int w, int h, Color body)
+        {
+            float r = BlitzPlateRadiusFrac * h;
+            float kant = BlitzPlateKeylineFrac * h;
+            float stripeOut = BlitzPlateStripeOutFrac * h;
+            float stripeIn = stripeOut + BlitzPlateStripeFrac * h;
+
+            var tex = new Texture2D(w, h, TextureFormat.RGBA32, false)
+            {
+                name = name + "Tex",
+                filterMode = FilterMode.Bilinear,
+                wrapMode = TextureWrapMode.Clamp,
+            };
+            var px = new Color[w * h];
+            float hw = w * 0.5f, hh = h * 0.5f;
+            for (int y = 0; y < h; y++)
+            {
+                for (int x = 0; x < w; x++)
+                {
+                    // Signed distance до скруглённого прямоугольника: внутри отрицательна, значит
+                    // `depth` = «на сколько пикселей точка ЗАШЛА внутрь от внешнего контура».
+                    float qx = Mathf.Abs(x + 0.5f - hw) - (hw - r);
+                    float qy = Mathf.Abs(y + 0.5f - hh) - (hh - r);
+                    float outside = Mathf.Sqrt(Mathf.Max(qx, 0f) * Mathf.Max(qx, 0f)
+                                             + Mathf.Max(qy, 0f) * Mathf.Max(qy, 0f));
+                    float depth = r - (Mathf.Min(Mathf.Max(qx, qy), 0f) + outside);
+
+                    // Кольца: последовательные лерпы с окном в один пиксель — кант, поле, полоса, поле.
+                    var c = Ink;
+                    c = Color.Lerp(c, body, Mathf.Clamp01(depth - kant + 0.5f));
+                    c = Color.Lerp(c, DomeYellow, Mathf.Clamp01(depth - stripeOut + 0.5f));
+                    c = Color.Lerp(c, body, Mathf.Clamp01(depth - stripeIn + 0.5f));
+                    c.a = Mathf.Clamp01(depth + 0.5f);
+                    px[y * w + x] = c;
+                }
+            }
+            tex.SetPixels(px);
+            tex.Apply(false, false);
+            // ⚠ ПОЛНОЕ ИМЯ ТИПА: у драйвера есть СВОЙ метод Sprite(string) (загрузка из Resources), и
+            // короткое `Sprite.Create` разрешается в него — компилятор берёт метод, а не тип.
+            var sprite = UnityEngine.Sprite.Create(tex, new Rect(0, 0, w, h), new Vector2(0.5f, 0.5f), 100f);
+            sprite.name = name;
+            return sprite;
         }
 
         // Crisis: blank code-plates + the dynamic label back on (the caller sets the text/colours).
@@ -2528,6 +2722,8 @@ namespace ThanksNoThanks
         {
             if (_yesPlate.sprite != _codeYesSprite) _yesPlate.sprite = _codeYesSprite;
             if (_noPlate.sprite != _codeNoSprite) _noPlate.sprite = _codeNoSprite;
+            _yesPlate.color = Color.white;
+            _noPlate.color = Color.white;
             _yesPlate.type = Image.Type.Sliced;
             _noPlate.type = Image.Type.Sliced;
             _yesRect.sizeDelta = yesSize;
@@ -2537,23 +2733,183 @@ namespace ThanksNoThanks
         }
 
         // Enlarge both blitz plates equally (S6) and push the text rect inside the (now taller) colored pill.
+        // Плашка блица — ОДИН сгенерированный спрайт в канон-пропорциях (см. BuildBlitzPlateSprite).
+        // Размер прямоугольника прежний (615×280), поэтому композиция S6 и гард ширины плашек не трогаются.
         private void UseCrisisBlitzPlates()
         {
             UseCodePlates(CrisisBlitzPlateSize, CrisisBlitzPlateSize);
-            CrisisPlateTextRect(_yesPlateText.rectTransform);
-            CrisisPlateTextRect(_noPlateText.rectTransform);
-            _yesPlateText.resizeTextMinSize = 28; _yesPlateText.resizeTextMaxSize = 48;
-            _noPlateText.resizeTextMinSize = 28; _noPlateText.resizeTextMaxSize = 48;
+            _yesPlate.sprite = _blitzYesSprite;
+            _noPlate.sprite = _blitzNoSprite;
+            _yesPlate.type = Image.Type.Simple;   // спрайт нарисован ПОД этот размер — растягивать нечего
+            _noPlate.type = Image.Type.Simple;
+            _yesPlate.color = Color.white;        // цвет уже в текстуре; тинт только исказил бы токены
+            _noPlate.color = Color.white;
+            ApplyBlitzLabel(_yesPlateText, _yesPlateShade, _yesLabelKant, _yesLabelSoft);
+            ApplyBlitzLabel(_noPlateText, _noPlateShade, _noLabelKant, _noLabelSoft);
+            SetLabelShades(true);
         }
 
         // S13 impulse plates: the code-plates at the sizes/insets the accepted 03 shot uses.
+        // ⚠ ИМПУЛЬС НАМЕРЕННО НЕ ПЕРЕОДЕВАЕТСЯ: его вид зафиксирован принятым кадром «03», поэтому здесь
+        // восстанавливается ИСХОДНАЯ типографика плашки (Arimo Bold, мягкая тень DisplayFx, кегль 1:1) —
+        // всё, что блиц у себя поменял, откатывается явно, иначе режимы утекали бы друг в друга.
         private void UseImpulsePlates()
         {
             UseCodePlates(ImpulseYesPlateSize, ImpulseNoPlateSize);
+            RestoreDisplayLabel(_yesPlateText, _yesPlateShade, _yesLabelKant, _yesLabelSoft);
+            RestoreDisplayLabel(_noPlateText, _noPlateShade, _noLabelKant, _noLabelSoft);
             PlateTextRect(_yesPlateText.rectTransform);
             PlateTextRect(_noPlateText.rectTransform);
             _yesPlateText.resizeTextMinSize = 40; _yesPlateText.resizeTextMaxSize = 120;
             _noPlateText.resizeTextMinSize = 24; _noPlateText.resizeTextMaxSize = 60;
+            SetLabelShades(false);
+        }
+
+        // ---- ТИПОГРАФИКА ПОДПИСИ БЛИЦА (r4 п.4, переделка по дизайн-гейту MAJOR-2) ------------------
+        // Замер гейта: кэп-хайт подписи был 18 % высоты плашки против 63 % у канонного «ДА», лицо —
+        // тонкий гротеск, тень — полупрозрачная (альфа 0.32), то есть РАЗМЫТАЯ рядом с жёсткой тенью пака.
+        // Три отдельные причины, три отдельные правки:
+        //
+        // (1) РАЗМЕР. Прежний best-fit был зажат в 28…48 pt внутри прямоугольника, отодвинутого на 74 px
+        //     от края (он обходил фиксированный 9-slice-угол код-плашки). Угла больше нет — видимое поле
+        //     начинается сразу за кантом, — поэтому прямоугольник подписи отодвинут всего на 0.107·H,
+        //     а потолок best-fit поднят до 180 pt.
+        // (2) ШИРИНА ЛИЦА. Канон — УЗКИЕ дудл-капсы: у `btn-no` самая длинная строка занимает 1145 px при
+        //     кэп-хайте 197, то есть ≈0.73 ширины на знак-кэп; у Arimo Bold и Rubik-Bold это ≈1.03.
+        //     Без сжатия «НОРМАЛЬНО» упирается в ширину плашки на кэп-хайте ≈60 px и выше не растёт —
+        //     ограничение не высотой, а ШИРИНОЙ. Поэтому прямоугольник подписи делается шире плашки и
+        //     сжимается по X до <see cref="BlitzLabelCondense"/>: ровно та же узость, что у канона, а
+        //     best-fit получает право взять кегль вдвое крупнее.
+        // (3) ЛИЦО И ТЕНЬ. Rubik-Bold вместо Arimo Bold: замер по растру — толщина штриха 0.257 кэп-хайта
+        //     против 0.207 у Arimo Bold (+24 %), заливка знака 0.545 против 0.465. Это самое жирное лицо
+        //     из четырёх в проекте, у которого есть кириллица (RussoOne 0.250 — легче и он служебный
+        //     фолбэк). Тень — ЖЁСТКАЯ: отдельная КОПИЯ текста цветом Ink со сдвигом, а не полупрозрачный
+        //     компонент Shadow. Отдельным мешом — потому что Outline+Shadow на ОДНОМ меше дают «призрак»
+        //     (r3 §4(s)); здесь на каждом меше висит только Outline, и оба канта одного тёмного (Ink).
+        // ⚠ ПУНКТ (2) ВЫШЕ ЗАВЁРНУТ ВТОРЫМ ДИЗАЙН-ГЕЙТОМ — см. блок ниже. Он оставлен как есть, потому
+        // что объясняет, ОТКУДА взялось сжатие: рассуждение про узость канона верное, ошибочен способ.
+        // ---- ПЕРЕДЕЛКА ПО ВТОРОМУ ДИЗАЙН-ГЕЙТУ (2026-09-20): КОНДЕНС СНЯТ, ВОЗДУХ ВЕРНУЛИ ---------
+        // Гейт завернул РЕДАКЦИЮ ВЫШЕ двумя замерами, и оба — следствие одной ошибки: кегль гнали вверх
+        // за счёт всего остального.
+        //   BLOCKER: «НОРМАЛЬНО» въезжала в жёлтый кант — минимум ink→рант 2.0 px (0.72 % H) при
+        //            канонном поле 6.8–9.2 % H. Отступ 0.10·H давал рамку 28 px, а внутренняя кромка
+        //            ранта стоит на (0.059+0.025)·H = 23.5 px: «воздуха» оставалось 4.5 px, и его
+        //            дочиста съедали кант буквы (5 px) и сдвиг тени (4, −9).
+        //   MAJOR:   сжатие 0.66 делало ГЛИФЫ ЧУЖИМИ — w/h 0.56 против канонных 0.82–0.89, и штрих
+        //            утончался (17.2 % против 18.3–26.5 %): сжатие по X режет ВЕРТИКАЛЬНЫЕ штоки, то
+        //            есть ровно ту толщину, ради которой брался Rubik-Bold. Дудл-капсы пака узкие ПО
+        //            РИСУНКУ, а не по масштабу, и подделать это аффинным сжатием нельзя.
+        //
+        // ЧТО ВЫБРАНО И ЧЕМ ЗАПЛАЧЕНО (развилка честная, поэтому записана целиком):
+        //   • `BlitzLabelCondense` 0.66 → 1.0 — глифы своей формы, w/h возвращается к ≈0.85 (0.56/0.66),
+        //     то есть в канонный коридор 0.82–0.89, штрих снова 0.257 кэп-хайта.
+        //   • отступ считается НЕ «долей от края», а ОТ ВНУТРЕННЕЙ КРОМКИ ЖЁЛТОЙ + канонный воздух +
+        //     ВЫЛЕТ ЭФФЕКТОВ. Последнее слагаемое и было пропущено: прямоугольник best-fit ограничивает
+        //     АДВАНСЫ глифов, а на экран выходит ink = адвансы + кант с каждой стороны + сдвиг тени.
+        //     Отсюда 0.084·H (рант) + 0.075·H (воздух) + 9 px (кант 5 + тень 4) = 53.5 px = 0.191·H.
+        //   • ПЛАТА — КЭГЛЬ: «НОРМАЛЬНО» это ДЕВЯТЬ знаков широкого лица (6.565 кегля), и при канонном
+        //     воздухе ширина плашки оставляет им кегль ≈78 ⇒ кэп-хайт ≈20 % H вместо прежних 31 %.
+        //     Прежние 31 % были ЗАНЯТЫ у ранта и у формы глифа — то есть их не было. Белое ядро штриха
+        //     при этом остаётся ниже канонных 9.7–11.6 % H (≈5 % H), и это ЧЕСТНЫЙ ПРЕДЕЛ ГЕОМЕТРИИ:
+        //     канонные числа сняты с восьми знаков УЗКОГО рисованного лица, наше слово длиннее и шире.
+        //     Уйти от него можно только сменой слова или рисованным лицом — не моя развилка.
+        //   • ВЕРТИКАЛЬНЫЙ отступ меньше горизонтального и считается от КАНТА: связывать подпись обязана
+        //     ШИРИНА (иначе «О НЕТ» в одну строку упёрлась бы в высоту и разъехалась с зелёной по
+        //     заполнению — это и был MINOR «плашки оптически несогласованы»).
+        //
+        // АРИФМЕТИКА (метрики Rubik-Bold сняты с растра: кэп-хайт 0.720 кегля, «НОРМАЛЬНО» 6.565 кегля,
+        // «О НЕТ» 3.24 кегля, lineHeight 1.24; плашка 615×280, рант изнутри на 23.5 px):
+        //   отступ X = 23.5 + 0.075·280 + 9 = 53.5 px ⇒ прямоугольник 508 px ⇒ ink = 508 + 2·5 + 4 = 522;
+        //   воздух ink→рант = (568 − 522)/2 ≈ 21–25 px = 7.5–8.9 % H — В КАНОНЕ (6.8–9.2 %);
+        //   заполнение интерьера (внутри чёрного канта, 601.6 px) = 522/601.6 ≈ 87 % — в коридоре 78–90 %,
+        //     и ОДНО НА ОБЕ ПЛАШКИ, потому что обе связаны одной и той же шириной прямоугольника;
+        //   зелёная: кегль 508/6.565 ≈ 77 ⇒ кэп-хайт ≈ 56 px ≈ 20 % H, две строки занимают
+        //     2·77·1.24·0.76 ≈ 145 px ≤ 225 (высота прямоугольника) — высота НЕ связывает;
+        //   красная: кегль 508/3.24 ≈ 157 ⇒ кэп-хайт ≈ 113 px ≈ 40 % H, строка 157·1.24 ≈ 195 ≤ 225 —
+        //     тоже связана ШИРИНОЙ, поэтому и садится в то же заполнение. Красная крупнее зелёной по
+        //     кэп-хайту (слово короче), но оптически они согласованы: одинаково заполняют интерьер.
+        private const float BlitzLabelCondense = 1.0f;    // 1.0 = глиф своей формы; 0.66 давало w/h 0.56
+        private const float BlitzLabelAirFrac = 0.075f;   // воздух ink→рант / высота (канон 6.8–9.2 %)
+        private const float BlitzLabelLineSpacing = 0.76f;// канон `btn-no`: шаг строк 0.39·H при кэпе 0.30·H
+        private const float BlitzLabelKantPx = 5f;        // жёсткий кант буквы
+        private static readonly Vector2 BlitzLabelShadeOffset = new Vector2(4f, -9f);
+
+        /// <summary>Вылет ЭФФЕКТОВ за прямоугольник best-fit: кант буквы наружу плюс сдвиг теневой копии.
+        /// Прямоугольник держит адвансы глифов, а рант видит ink — разницу обязан оплатить отступ.</summary>
+        private static float BlitzLabelInkBleed => BlitzLabelKantPx + Mathf.Abs(BlitzLabelShadeOffset.x);
+
+        /// <summary>Горизонтальный отступ подписи: внутренняя кромка жёлтой полосы + канонный воздух +
+        /// вылет эффектов. Именно он СВЯЗЫВАЕТ best-fit — и потому задаёт обеим плашкам одно заполнение.</summary>
+        private static float BlitzLabelInsetX =>
+            (BlitzPlateStripeOutFrac + BlitzPlateStripeFrac + BlitzLabelAirFrac) * CrisisBlitzPlateSize.y
+            + BlitzLabelInkBleed;
+
+        /// <summary>Вертикальный отступ: кант + тот же канонный воздух + вылет эффектов по вертикали
+        /// (кант буквы вверх, кант + сдвиг тени вниз). МЕНЬШЕ горизонтального намеренно: высота обязана
+        /// оставлять место обеим подписям, но НЕ давать третьей строке — см. <see cref="ApplyBlitzLabel"/>.</summary>
+        private static float BlitzLabelInsetY =>
+            (BlitzPlateKeylineFrac + BlitzLabelAirFrac) * CrisisBlitzPlateSize.y
+            + BlitzLabelKantPx + Mathf.Abs(BlitzLabelShadeOffset.y);
+
+        /// <summary>
+        /// ⚠ ГЛАВНАЯ НАХОДКА ВТОРОГО ГЕЙТА, БЕЗ КОТОРОЙ ЧИСЛА НЕ СХОДИЛИСЬ: <c>best-fit</c> у uGUI
+        /// подбирает кегль ТОЛЬКО ПО ШИРИНЕ, пока <c>verticalOverflow == Overflow</c> — переполнение по
+        /// высоте разрешено, значит «влезает» истинно всегда, и подбор упирается в потолок кегля.
+        ///
+        /// Это и есть корень MINOR «плашки оптически несогласованы». «ВСЁ НОРМАЛЬНО» — длинное слово,
+        /// его связывала ширина (кегль 129, заполнение 95 %); «О НЕТ» — короткое, ширина его не связывала
+        /// НИКОГДА, и он просто брал максимум 180 pt (заполнение 62 %). Две подписи жили по РАЗНЫМ
+        /// законам, поэтому и выглядели из разных наборов.
+        ///
+        /// Со снятым сжатием прямоугольник стал уже, и та же дыра дала уже не косметику, а поломку:
+        /// «О НЕТ» ПЕРЕНОСИЛСЯ по пробелу на две строки и на 180 pt вылезал за плашку (замер пробой:
+        /// кегль 180, строк 2, чернила 349×292 при прямоугольнике 508×225).
+        ///
+        /// Поэтому в блице <c>verticalOverflow = Truncate</c>: подбор обязан считаться и с высотой.
+        /// Тогда обе подписи связаны ОДНИМ ограничением — прямоугольником — и садятся в одно заполнение.
+        /// Высота прямоугольника подобрана так, чтобы у длинного слова не появилась ТРЕТЬЯ строка:
+        /// 2 строки кегля 77 занимают ≈145 px, три строки кегля 78 — уже ≈220 px, и 197 px их не пускает.
+        /// </summary>
+        private void ApplyBlitzLabel(Text t, Text shade, Outline kant, Shadow soft)
+        {
+            var size = new Vector2((CrisisBlitzPlateSize.x - 2f * BlitzLabelInsetX) / BlitzLabelCondense,
+                                    CrisisBlitzPlateSize.y - 2f * BlitzLabelInsetY);
+            foreach (var g in new[] { shade, t })
+            {
+                var rt = g.rectTransform;
+                rt.anchorMin = rt.anchorMax = rt.pivot = new Vector2(0.5f, 0.5f);
+                rt.sizeDelta = size;
+                rt.localScale = new Vector3(BlitzLabelCondense, 1f, 1f);
+                rt.anchoredPosition = g == shade ? BlitzLabelShadeOffset : Vector2.zero;
+                g.font = _bodyBold;
+                g.lineSpacing = BlitzLabelLineSpacing;
+                g.resizeTextForBestFit = true;
+                g.resizeTextMinSize = 40;
+                g.resizeTextMaxSize = 180;
+                g.verticalOverflow = VerticalWrapMode.Truncate;   // …иначе подбор идёт ТОЛЬКО по ширине
+            }
+            t.color = Color.white;
+            shade.color = Ink;
+            kant.effectColor = Ink;                        // MINOR-4: кант буквы и кант плашки — ОДИН тёмный
+            kant.effectDistance = new Vector2(BlitzLabelKantPx, -BlitzLabelKantPx);
+            soft.enabled = false;                          // мягкой полупрозрачной тени в блице нет
+        }
+
+        private void RestoreDisplayLabel(Text t, Text shade, Outline kant, Shadow soft)
+        {
+            var rt = t.rectTransform;
+            rt.localScale = Vector3.one;
+            t.font = _display;
+            t.lineSpacing = 1f;
+            t.color = Color.white;
+            kant.effectColor = DisplayKantInk;
+            kant.effectDistance = new Vector2(3f, -3f);
+            soft.enabled = true;
+            shade.rectTransform.localScale = Vector3.one;
+            // …и режим подбора тоже откатывается: блиц ставит Truncate (см. ApplyBlitzLabel), а импульс
+            // живёт на принятом кадре «03», где подпись подбиралась по ширине. Режимы не должны утекать.
+            t.verticalOverflow = VerticalWrapMode.Overflow;
+            shade.verticalOverflow = VerticalWrapMode.Overflow;
         }
 
         // The game is paused while a tutorial overlay OR the §D modal is up. Both share the single
@@ -3194,12 +3550,21 @@ namespace ThanksNoThanks
             _yesRect = _yesPlate.rectTransform;
             AnchorPx(_yesRect, 1547f, 871f, BakedYesPlateSize.x, BakedYesPlateSize.y);
             _yesRect.localRotation = Quaternion.Euler(0, 0, YesTilt);
+            // Плашка блица — один сгенерированный спрайт в канон-пропорциях (BuildBlitzPlateSprite).
+            // Строится ЗДЕСЬ, чтобы размер текстуры совпал с экранным размером плашки пиксель-в-пиксель.
+            _blitzYesSprite = BuildBlitzPlateSprite("BlitzPlateYes",
+                Mathf.RoundToInt(CrisisBlitzPlateSize.x), Mathf.RoundToInt(CrisisBlitzPlateSize.y), GoGreen);
+            _blitzNoSprite = BuildBlitzPlateSprite("BlitzPlateNo",
+                Mathf.RoundToInt(CrisisBlitzPlateSize.x), Mathf.RoundToInt(CrisisBlitzPlateSize.y), TimerRed);
+
             // Crisis-only overlay label — «ДА» is baked into the art, so this stays HIDDEN in ordinary play.
             // (White with the ink kant, matching the baked lettering, for the «ВСЁ НОРМАЛЬНО»/«О НЕТ» relabel.)
+            // ТЕНЬ идёт ПЕРВОЙ (ниже по иерархии = под буквами), сама подпись — последней.
+            _yesPlateShade = NewPlateShade("YesTextShade", _yesPlate, "ДА");
             var yesText = NewText("YesText", _yesPlate.transform, "ДА", 96, TextAnchor.MiddleCenter, Color.white, _display);
             PlateTextRect(yesText.rectTransform);   // inset onto the visible plate (clears the baked shadow)
             yesText.resizeTextForBestFit = true; yesText.resizeTextMinSize = 40; yesText.resizeTextMaxSize = 120;
-            DisplayFx(yesText);
+            DisplayFx(yesText, out _yesLabelKant, out _yesLabelSoft);
             _yesPlateText = yesText;
 
             _noPlate = NewSprite("NoPlate", _gamePanel.transform, _bakedNoSprite);
@@ -3210,10 +3575,11 @@ namespace ThanksNoThanks
             // «explainer-PNG = пиксель-истина, табличные боксы — ориентир». The green plate is box-centred.
             AnchorPx(_noRect, 432f, 872f, BakedNoPlateSize.x, BakedNoPlateSize.y);
             _noRect.localRotation = Quaternion.Euler(0, 0, NoTilt);
+            _noPlateShade = NewPlateShade("NoTextShade", _noPlate, "СПАСИБО,\nНЕ НАДО");
             var noText = NewText("NoText", _noPlate.transform, "СПАСИБО,\nНЕ НАДО", 56, TextAnchor.MiddleCenter, Color.white, _display);
             PlateTextRect(noText.rectTransform);   // inset onto the visible plate (clears the baked shadow)
             noText.resizeTextForBestFit = true; noText.resizeTextMinSize = 24; noText.resizeTextMaxSize = 60;
-            DisplayFx(noText);
+            DisplayFx(noText, out _noLabelKant, out _noLabelSoft);
             _noPlateText = noText;
             UseBakedPlates();   // hides both overlay labels — ordinary play shows the baked art alone
 
@@ -3878,6 +4244,17 @@ namespace ThanksNoThanks
         private bool AlarmLive(AlarmScale s)
         {
             if (_game == null || _game.State != GameState.Playing || _game.InCrisis) return false;
+            // ⚠ ШКАЛА НЕ ТРЕВОЖИТ, ПОКА ИДЁТ ЕЁ СОБСТВЕННОЕ ОБУЧЕНИЕ (r4 п.1а, живой плейтест:
+            // «во время туториала деньги были красными — смотрелось очень плохо»).
+            // Деньги открываются с 0 ₽, а стоимость жизни уводит счёт в минус сразу же, поэтому первая
+            // же BLOCK$-карточка поднимает тревогу банки — и §D-модалка показывает игроку КРАСНЫЙ
+            // виджет ровно в тот момент, когда учит им пользоваться. Виджет при этом физически тот же:
+            // BorrowBigWidget переносит `_moneyGroup` в слот модалки и оставляет активным, так что
+            // проверка `activeInHierarchy` ниже его не отсекает — гасить надо явно.
+            // Гасим ТОЛЬКО объясняемую шкалу: чужие тревоги под модалкой — законная информация HUD.
+            // Выключение проходит по ветке «не живая» в ReflectAlarms, то есть тихо и БЕЗ салюта звёзд:
+            // обучение не должно выглядеть как заслуженная починка.
+            if (_nsShowing && AlarmScaleOf(_nsWhich) == s) return false;
             var group = s switch
             {
                 AlarmScale.Energy => _energyGroup,
@@ -3887,6 +4264,16 @@ namespace ThanksNoThanks
             };
             return group != null && group.activeInHierarchy;
         }
+
+        /// <summary>Какой тревоге соответствует §D-окно новой шкалы. `Child` своей тревоги не имеет
+        /// (звонок ребёнка — не тревога шкалы), поэтому отображается в «никакую».</summary>
+        private static AlarmScale? AlarmScaleOf(NewScale ns) => ns switch
+        {
+            NewScale.Money => AlarmScale.Money,
+            NewScale.Relations => AlarmScale.Relations,
+            NewScale.Energy => AlarmScale.Energy,
+            _ => null,
+        };
 
         /// <summary>Порог тревоги с гистерезисом: <paramref name="on"/> — состояние ПРЕДЫДУЩЕГО кадра.</summary>
         private bool AlarmRaised(AlarmScale s, bool on)
@@ -4951,6 +5338,11 @@ namespace ThanksNoThanks
             _nsArmed = false;
             _nsHold = 0f;
             _nsTicks = 0;
+            // ⚠ ЛЬГОТА «СЛЕДУЮЩАЯ КАРТОЧКА — ПО КАРМАНУ» (r4 п.1б): взводится ровно здесь, на закрытии
+            // окна ДЕНЕГ, потому что жалоба основательницы дословно про «сразу ПОСЛЕ ТУРИАЛА». Взводим
+            // и на аварийном закрытии тоже: обучение показали — обещание игре уже дано.
+            // Снимается флаг сам, на первой же выданной карточке (Game.Advance).
+            bool armGrace = _nsWhich == NewScale.Money;
             _nsWhich = NewScale.None;
             ReturnBigWidget();
             _nsOverlay.SetActive(false);
@@ -4961,6 +5353,11 @@ namespace ThanksNoThanks
             if (reward) StarBurst();      // §6-салют «всё сделано верно» — ПОСЛЕ фейда, ДО снятия паузы
             SyncPause();
             ReflectDomeUnderModal();      // …и купол возвращается тем же кадром, что снялась модалка
+            // ⚠ ЛЬГОТА ЗОВЁТСЯ ЗДЕСЬ, А НЕ В НАЧАЛЕ МЕТОДА: она может ПЕРЕОФОРМИТЬ уже стоящую на экране
+            // заблокированную карточку (Game.ReplaceBlockedCurrentCard), а значит поднять CardChanged —
+            // и обработчик обязан увидеть мир БЕЗ модалки: окно снято, пауза уже пересчитана, купол на
+            // месте. Иначе новая карточка въехала бы под ещё живую §D-модалку.
+            if (armGrace) _game?.ArmAffordableNextCard();
             // Та же причина, что у DismissTutorial: открытие происходит СЕРЕДИНОЙ карточки, поэтому
             // возрастные гейты и значения HUD пересчитываются прямо здесь — виджет живой сразу.
             if (_game != null && _game.State == GameState.Playing)
@@ -5710,6 +6107,21 @@ namespace ThanksNoThanks
             _cardAnim = null;
         }
 
+        // ПАНЧ = SQUASH, А НЕ РАВНОМЕРНАЯ ПРОСАДКА (дизайн-гейт r4, «по желанию»): дудл-канон пака жмёт
+        // нажатую плашку по ВЫСОТЕ и распирает по ШИРИНЕ — резина, а не удаление от камеры. Амплитуда
+        // прежняя по объёму (пик 1.06 W / 0.88 H против прежних 0.86/0.86), длительность не тронута,
+        // accepted-семантика r3 не тронута — меняется ТОЛЬКО форма дуги.
+        private const float PunchSquashW = 0.06f;   // +6 % по ширине в нижней точке
+        private const float PunchSquashH = 0.12f;   // −12 % по высоте в нижней точке
+
+        /// <summary>Форма панча в момент <paramref name="k"/> ∈ [0,1] — одна формула на корутину и на
+        /// отладочную позу, чтобы кадр дизайн-гейта не разъезжался с тем, что видит игрок.</summary>
+        private static Vector3 PunchScaleAt(float k)
+        {
+            float s = Mathf.Sin(k * Mathf.PI);      // 0 → 1 → 0
+            return new Vector3(1f + PunchSquashW * s, 1f - PunchSquashH * s, 1f);
+        }
+
         private static IEnumerator PunchPlate(RectTransform rt, float tilt)
         {
             const float dur = 0.16f;
@@ -5717,9 +6129,7 @@ namespace ThanksNoThanks
             while (t < dur)
             {
                 t += Time.deltaTime;
-                float k = Mathf.Clamp01(t / dur);
-                float scale = 1f - 0.14f * Mathf.Sin(k * Mathf.PI); // dip and return
-                rt.localScale = new Vector3(scale, scale, 1f);
+                rt.localScale = PunchScaleAt(Mathf.Clamp01(t / dur));
                 yield return null;
             }
             rt.localScale = Vector3.one;
@@ -5800,14 +6210,22 @@ namespace ThanksNoThanks
         }
 
         /// <summary>Mockup letter treatment: thick ink outline + downward drop shadow.</summary>
-        private static void DisplayFx(Graphic g)
+        private static void DisplayFx(Graphic g) => DisplayFx(g, out _, out _);
+
+        private static readonly Color DisplayKantInk = new(0.078f, 0.102f, 0.239f, 1f);
+
+        /// <summary>…и то же самое, но с отдачей обоих эффектов вызывающему: плашкам ответа нужно
+        /// ПЕРЕКЛЮЧАТЬ их между режимами (блиц — жёсткий кант Ink без мягкой тени, импульс — как было),
+        /// а <c>GetComponent&lt;Shadow&gt;()</c> для этого не годится: <see cref="Outline"/> НАСЛЕДУЕТ
+        /// <see cref="Shadow"/> и вернулся бы вместо неё.</summary>
+        private static void DisplayFx(Graphic g, out Outline kant, out Shadow soft)
         {
-            var o = g.gameObject.AddComponent<Outline>();
-            o.effectColor = new Color(0.078f, 0.102f, 0.239f, 1f);
-            o.effectDistance = new Vector2(3f, -3f);
-            var sh = g.gameObject.AddComponent<Shadow>();
-            sh.effectColor = new Color(0f, 0f, 0f, 0.32f);
-            sh.effectDistance = new Vector2(0f, -6f);
+            kant = g.gameObject.AddComponent<Outline>();
+            kant.effectColor = DisplayKantInk;
+            kant.effectDistance = new Vector2(3f, -3f);
+            soft = g.gameObject.AddComponent<Shadow>();
+            soft.effectColor = new Color(0f, 0f, 0f, 0.32f);
+            soft.effectDistance = new Vector2(0f, -6f);
         }
 
         // Burnout title (S7): yellow letters with a RED kant (outline) + a soft drop shadow (mockup).

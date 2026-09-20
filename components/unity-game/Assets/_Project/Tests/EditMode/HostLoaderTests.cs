@@ -65,7 +65,7 @@ namespace ThanksNoThanks.Tests
             var asset = Resources.Load<TextAsset>("scenes");
             var all = CardLoader.ParseAll(asset.text);
 
-            foreach (var id in new[] { "I03", "YA01", "YA03", "YA05", "MD01" })
+            foreach (var id in new[] { "I03", "YA01", "YA05", "MD01" })
                 Assert.IsTrue(all.First(c => c.Id == id).IsTimeline, id + " is a milestone");
 
             foreach (var id in new[] { "I02", "CH01", "CH02", "YA06" })

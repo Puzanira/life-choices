@@ -206,24 +206,30 @@ namespace ThanksNoThanks
         /// <summary>
         /// Заводское значение <see cref="HealthDecayPerSec"/>.
         ///
-        /// ⚠ 0.7 → 0.5 (отрезок 0, 2026-08-08). Ровно тот риск, который дизайн-док вынес в §8: новый
-        /// масштаб Δ по здоровью (−15 п.п. за заметный выбор вместо −2) сложился со старым декеем и начал
-        /// убивать МЕДЛЕННОГО игрока раньше семидесяти. Матрица «декей × профиль → возраст смерти»
-        /// (BalanceGuardTests, 12 сидов, худший прогон в скобках):
+        /// ⚠ 0.7 → 0.5 (отрезок 0, 2026-08-08) → 0.45 (r4, 2026-08-08, решение основательницы «подкрутить
+        /// декей»). Причина второй правки — НЕ код: из колоды по её слову убрана карточка `YA03`, выборка
+        /// сэмплера пересыпалась, и на сиде #1 ЛИНГЕРИНГ (медленный игрок — худший случай, декей идёт по
+        /// реальному времени) стал умирать в 64 «здоровье не выдержало». Матрица «декей × профиль →
+        /// возраст смерти», текущая колода 253 карточки, 12 сидов, ХУДШИЙ прогон (медиана в скобках):
         ///
         ///   декей | пассивный | умеренный | лингеринг | активный
-        ///    0.30 |  25 (25)  |  81 (76)  |  83 (76)  |  84 (76)
-        ///    0.50 |  25 (25)  |  81 (76)  |  83 (76)  |  84 (76)   ← выбрано
-        ///    0.70 |  25 (25)  |  81 (76)  |  81 (65)  |  84 (76)   ← было; лингеринг проваливает порог
-        ///    1.00 |  25 (25)  |  81 (70)  |  80 (64)  |  84 (76)
-        ///    1.50 |  25 (25)  |  81 (62)  |  69 (44)  |  84 (76)
+        ///    0.50 |  25 (26)  |  77 (88)  |  64 (88)  |  77 (88)   ← было; лингеринг проваливает порог
+        ///    0.45 |  25 (26)  |  77 (88)  |  77 (88)  |  77 (88)   ← выбрано
+        ///    0.40 |  25 (26)  |  77 (88)  |  77 (88)  |  77 (88)
+        ///    0.35 |  25 (26)  |  77 (88)  |  78 (88)  |  77 (88)
+        ///    0.30 |  25 (26)  |  77 (88)  |  77 (88)  |  77 (88)
         ///
-        /// Выбрано 0.5, а не 0.3: при 0.3/0.4/0.5 результат одинаков (смерть от здоровья исчезает вовсе),
-        /// поэтому берётся САМОЕ БОЛЬШОЕ из проходящих — максимум напряжения, который ещё оставляет
-        /// умеренному игроку его семьдесят лет. Пассивного это не спасает: он гибнет от ПОЛНОГО ВЫГОРАНИЯ
-        /// в 25, а энергия декеем здоровья не управляется.
+        /// Ниже 0.45 таблица ПЛОСКАЯ: смерть от здоровья исчезает вовсе, и 77 — это уже естественный конец
+        /// колоды, а не износ. Поэтому берётся САМОЕ БОЛЬШОЕ из проходящих — максимум напряжения, который
+        /// ещё оставляет медленному игроку его семьдесят. Обрыв РЕЗКИЙ и лежит между 0.49 и 0.50 (на 0.49
+        /// сид #1 уже доживает до 86), но 0.49 проходит лишь формально: там сид #9 всё равно выходит в
+        /// НОЛЬ здоровья, просто в 88 лет. Замер запаса — минимум здоровья за жизнь, худший сид из 12:
+        /// 0.50 → 0, 0.49 → 0, 0.45 → 5, 0.40 → 9, 0.35 → 13. То есть 0.45 — первое значение, на котором
+        /// НИ ОДИН прогон не упирается в ноль.
+        /// Пассивного смягчение не спасает: он гибнет от ПОЛНОГО ВЫГОРАНИЯ в 25, а энергия декеем здоровья
+        /// не управляется (строка «пассивный» неподвижна во всей матрице).
         /// </summary>
-        public const double DefaultHealthDecayPerSec = 0.5;
+        public const double DefaultHealthDecayPerSec = 0.45;
 
         /// <summary>
         /// ⚠ #2 ТЮНИМОЕ ЧИСЛО БАЛАНСА (отрезки 1–7). Скорость, с которой здоровье восстанавливается, ПОКА
@@ -295,8 +301,9 @@ namespace ThanksNoThanks
 
         // ---- live relationships balancer (tunable; canon §Отношения) ----
         // The fourth live scale: a balancer to hold inside a zone while cranking/holding the sensor/answering.
-        // Opens at 20 (YA03 «первая любовь»), starts at 55% (Scales.Reset), target zone 40–75%.
-        public const int RelationshipsOpenAge = 20;        // балансир открывается в 20 (YA03, OPEN:Отн)
+        // Opens at 20 ПО ВОЗРАСТУ (карточки-открывашки у Отн больше нет — r4 п.2), starts at 55%
+        // (Scales.Reset), target zone 40–75%.
+        public const int RelationshipsOpenAge = 20;        // балансир открывается в 20 — чисто по возрасту
         public const int RelZoneMin = 40;                  // ниже зелёной зоны (жёлтый) — начинает дрейфовать/рисковать
         public const int RelZoneMax = 75;                  // выше — «красная зона» (задушил вниманием)
         // Разрыв копится ТОЛЬКО в КРАСНОЙ зоне (глубоко внизу), не в жёлтой. Основательница (плейтест
@@ -316,6 +323,20 @@ namespace ThanksNoThanks
                                                           // (нетто с дрейфом ~+3.4%/с), чтобы «держу ↑» ЯВНО
                                                           // двигало маркер; было слишком вяло/незаметно (плейтест)
         public const double RelOverloadPenaltyPerSec = 0.3;// >75% — доп. штраф вниз (риск ссоры)
+        // ⚠ ПОЛ УДЕРЖАНИЯ (плейтест-фиксы r4 п.3, живая жалоба «джойстиком двигаю — шкала не растёт»).
+        // Обещание строчкой выше («нетто «держу ↑» = +2.4 %/с») держалось только на ГОЛОМ дрейфе. Сверху
+        // на него множатся `DRIFT:Отн=xN` из колонки «Длительный эффект», и `MD01`-НЕТ («отказались от
+        // свадьбы», scenes.csv:18) даёт ×2 БЕЗ `DUR` — то есть НАВСЕГДА: дрейф 1.6 → 3.2, нетто удержания
+        // 4.0 − 3.2 = +0.8 %/с. Это ~1 деление шкалы за секунду с половиной — глазом «не растёт вообще»,
+        // ровно то, что увидела основательница. Множители при этом легальны и стакаются (×2·×2 = −6.4,
+        // нетто −2.4 — удержание УВОДИЛО БЫ ВНИЗ).
+        // Лечим не отменой множителя (он — обещание прозы карточки «тает даже при поддержке») и не
+        // задиранием RelBalancerPerSec (это разогнало бы и здоровый случай), а ПОЛОМ НЕТТО-СКОРОСТИ и
+        // только пока игрок ТЯНЕТ ВВЕРХ: активное удержание всегда отыгрывает ≥2 %/с, а НАКАЗАНИЕ
+        // БЕЗДЕЙСТВИЯ (axis = 0) множитель сохраняет целиком — «тает даже при поддержке» остаётся правдой,
+        // но перестаёт быть «не тянется вовсе». Штраф перегрева (>75%) накладывается ПОСЛЕ пола и потому
+        // по-прежнему работает: «задушил вниманием» не отменяется.
+        public const double RelHoldNetFloorPerSec = 2.0;   // удержание ↑ даёт ≥2%/с нетто при ЛЮБОМ дрейфе
         public const float RelBreakupSeconds = 10f;        // суммарно ~10 сек ниже зоны → разрыв
         public const int RelBreakupValue = 20;             // после разрыва шкала падает сюда (одиноко)
 
@@ -458,7 +479,7 @@ namespace ThanksNoThanks
         // каждый кадр, пока там сидим.
         private bool _inDebt;
 
-        /// <summary>True while the relationships balancer is live (open at 20 via YA03; closed again on a
+        /// <summary>True while the relationships balancer is live (open at 20 by AGE; closed again on a
         /// breakup). Drives the balancer HUD reveal and the drift/axis/breakup integration.</summary>
         public bool RelationshipsOpen { get; private set; }
         /// <summary>True once <see cref="Answer"/> resolves MD01=ДА (свадьба) — softens the drift (canon:
@@ -628,6 +649,74 @@ namespace ThanksNoThanks
         /// <summary>True once the money scale has opened (Age ≥ <see cref="MoneyOpenAge"/>). One-shot per life.</summary>
         public bool MoneyOpen { get; private set; }
 
+        /// ЛЬГОТА ПЕРВОЙ КАРТОЧКИ ПОСЛЕ ОБУЧЕНИЯ ДЕНЬГАМ (r4 п.1б, живой плейтест основательницы:
+        /// «сразу после туториала выпала карточка, на которую нет денег»).
+        /// Шкала открывается с 0 ₽, а обучение закрывается семью тиками крутилки — то есть игрок выходит
+        /// из §D-окна с почти пустым счётом, и первая же BLOCK$-карточка встречает его баннером «нет
+        /// денег». Механически это честно, но читается как «игра сломана на обучении»: первое, что
+        /// показали после урока, — запертую дверь.
+        /// Лечим ОТБОРОМ, а не контентом и не ценами: ровно одна следующая выдача пропускает карточки,
+        /// которые были бы заблокированы ПРЯМО СЕЙЧАС, и берёт следующую подходящую (пропущенная уходит
+        /// в обычную подмену из резерва, длина забега не страдает). Льгота одноразовая и гаснет на первой
+        /// же выданной карточке — дальше BLOCK$ работает как работал.
+        private bool _moneyGraceCard;
+
+        /// <summary>
+        /// Взвести льготу «следующая карточка — по карману» (см. <see cref="_moneyGraceCard"/>).
+        ///
+        /// ⚠ ВЗВОДИТ ДРАЙВЕР НА ЗАКРЫТИИ §D-ОКНА ДЕНЕГ, А НЕ САМО ОТКРЫТИЕ ШКАЛЫ. Жалоба основательницы
+        /// дословно — «сразу ПОСЛЕ ТУРИАЛА выпала карточка, на которую нет денег», и это не то же самое,
+        /// что «после открытия шкалы»: между открытием и закрытием окна игрок КРУТИТ КРУТИЛКУ (условие
+        /// выхода — семь тиков дохода), так что денег у него на выходе больше, чем на входе.
+        /// Считать «по карману» надо по счёту, с которым игра РЕАЛЬНО продолжится, — то есть на закрытии.
+        /// Побочная польза той же точности: чистые (бездрайверные) тесты `Game`, где никакого обучения
+        /// нет, льготу не получают и проверяют механику BLOCK$ ровно как раньше.
+        /// </summary>
+        public void ArmAffordableNextCard()
+        {
+            _moneyGraceCard = true;
+            ReplaceBlockedCurrentCard();
+        }
+
+        /// <summary>
+        /// ВТОРАЯ ПОЛОВИНА ЛЬГОТЫ — ПЕРЕОФОРМЛЕНИЕ УЖЕ ВЫДАННОЙ КАРТОЧКИ (находка код-скептика r4).
+        ///
+        /// Первая редакция взводила только флаг на СЛЕДУЮЩУЮ выдачу — и жалоба основательницы осталась
+        /// живой, потому что реальный порядок событий другой:
+        ///   <c>I03</c> → <c>YA01</c> (`OPEN:Дн`, игрок отвечает) → <see cref="Advance"/> УЖЕ выдаёт
+        ///   <c>FA05</c> (BLOCK$) и фиксирует <see cref="CurrentCardBlocked"/> → и только СЛЕДУЮЩИМ тиком
+        ///   <see cref="CheckMoneyOpen"/> поднимает §D-окно ПОВЕРХ этой карточки.
+        /// То есть к моменту закрытия обучения запертая дверь уже стоит на экране, и льгота на будущее её
+        /// не трогает: игрок видит ровно то, на что пожаловался.
+        ///
+        /// Поэтому текущая карточка переоформляется ТЕМ ЖЕ правилом отбора: она уходит в обычную подмену
+        /// из резерва (<see cref="Substitute"/>), а <see cref="Advance"/> под взведённой льготой выдаёт
+        /// следующую доступную и ЧЕСТНО перезапускает таймер — карточка приходит целой, а не доигрывает
+        /// чужие секунды.
+        ///
+        /// ⚠ ЭТО ПОДМЕНА ДО ВЗАИМОДЕЙСТВИЯ, А НЕ SKIP ОТВЕТА: путь ровно тот же, каким уходит любая
+        /// гейтованная карточка (ответ не пишется, Δ не применяется, строки некролога не появляется), —
+        /// игрок этой карточки ещё не касался, так что «побочных эффектов пропущенной» просто нет.
+        ///
+        /// Льгота при этом ОСТАЁТСЯ одноразовой: переоформление и есть та самая «первая карточка после
+        /// обучения», <see cref="Advance"/> гасит флаг на ней. Если же текущая карточка по карману —
+        /// ничего не происходит, и флаг доживает до следующей выдачи, как раньше.
+        ///
+        /// Спецрежимы исключены намеренно: в блице <see cref="CurrentCard"/> — мысль, а в депрессии
+        /// нормальная карточка ПРИОСТАНОВЛЕНА (её таймер заморожен), и дёргать колоду из-под них нельзя.
+        /// Совпасть с обучением деньгам они всё равно не могут (деньги открываются в 18, кризис — в 45+),
+        /// так что это страховка, а не рабочая ветка.
+        /// </summary>
+        private void ReplaceBlockedCurrentCard()
+        {
+            if (State != GameState.Playing) return;
+            if (_phase != CrisisPhase.None || InDepression) return;
+            if (CurrentCard == null || !CurrentCardBlocked) return;
+
+            Substitute(CurrentCard);   // …та же подмена из резерва, что у гейтованной карточки
+            Advance();                 // …и та же выдача: льгота пропустит неподъёмные, таймер стартует заново
+        }
+
         /// <summary>
         /// Tutorial-pause flag (set by the driver while the S5 overlay is up). While true, <see cref="Tick"/>
         /// freezes EVERYTHING — age, cost-of-living, installment drains and the card timer (canon §Подсказки).
@@ -741,7 +830,7 @@ namespace ThanksNoThanks
         public event Action EnergyOpened;
         /// <summary>Fired the first time health starts decaying (Age 30) — drives the S5 health hint + pause.</summary>
         public event Action HealthOpened;
-        /// <summary>Fired the first time the relationships balancer opens (Age 20, YA03) — drives the S5
+        /// <summary>Fired the first time the relationships balancer opens (Age 20, by age alone) — drives the S5
         /// «держите отношения в зоне — ↑/↓» hint + pause.</summary>
         public event Action RelationshipsOpened;
         /// <summary>Fired the instant a breakup resolves (relationships spent ~10s cumulative below the
@@ -1088,15 +1177,23 @@ namespace ThanksNoThanks
             return Paused;
         }
 
-        // The relationships balancer opens the first time Age reaches 20 (YA03 «первая любовь», OPEN:Отн):
-        // starts at 55% (already restored by Scales.Reset), drift + axis + breakup begin from here. Fires
-        // the S5 «держите отношения в зоне» hint. Once a breakup has closed it (RelationshipsLost) the
-        // age gate does NOT reopen it — the MD06 second chance that would is deferred. Returns true if a
-        // listener paused the frame (parallels money/energy/health opens).
+        // The relationships balancer opens the first time Age reaches 20: starts at 55% (already restored
+        // by Scales.Reset), drift + axis + breakup begin from here. Fires the S5 «держите отношения в
+        // зоне» hint. Once a breakup has closed it (RelationshipsLost) the age gate does NOT reopen it —
+        // the MD06 second chance that would is deferred. Returns true if a listener paused the frame
+        // (parallels money/energy/health opens).
+        //
+        // ⚠ ГЕЙТ `HeldByItsOwnCard` ДЛЯ ОТН СНЯТ (r4 п.2, решение основательницы). Раньше открытие
+        // придерживалось, пока на экране стоит YA03 «ПЕРВАЯ ЛЮБОВЬ! Начать встречаться?» — шкала
+        // появлялась «по карточке». Основательница убрала YA03 из колоды целиком: карточка, на которую
+        // можно ответить НЕТ без последствий (шкала всё равно откроется по возрасту), — обман игрока.
+        // Шкала отношений теперь открывается ЧИСТО ПО ВОЗРАСТУ (20), без карточки-привратника.
+        // Деньги (18/YA01) и энергия (25/YA05) свой `HeldByItsOwnCard` СОХРАНЯЮТ — их карточки-открывашки
+        // в колоде остались. MD06 («Второй шанс на любовь?», ~40, OPEN:Отн) ничего не теряет: пока она на
+        // экране, `RelationshipsLost` ещё true и строка выше уже возвращает false — гейт для неё был мёртв.
         private bool CheckRelationshipsOpen()
         {
             if (RelationshipsOpen || RelationshipsLost || Age < RelationshipsOpenAge) return false;
-            if (HeldByItsOwnCard(Card.OpenRelations)) return false;  // «начать встречаться?» → и только потом шкала
             RelationshipsOpen = true;
             RelationshipsOpened?.Invoke();
             return Paused;
@@ -1131,6 +1228,30 @@ namespace ThanksNoThanks
         /// </summary>
         private bool ScaleGatedOff(Card c)
             => c.RequiresScaleOpen != null && !ScaleIsOpenNow(c.RequiresScaleOpen);
+
+        /// <summary>
+        /// Условие «если в браке» (r4 п.5) — ЖИВОЙ гейт свадебной ветки поверх чейна ответов.
+        ///
+        /// ⚠ ЖАЛОБА ОСНОВАТЕЛЬНИЦЫ (живой плейтест 2026-08-08): «после расставания приходят карточки про
+        /// свадьбу — ветка должна уходить целиком». Корень — в том, что <see cref="GatedOff"/> смотрит
+        /// ТОЛЬКО в <c>_answers</c>: `свадьба +N` подставляет `RequiresParentYes = "MD01"`, а пак «Брак на
+        /// износе» пишет «если MD01=ДА» руками. Обе формы спрашивают «сказал ли игрок ДА на свадьбе
+        /// КОГДА-ТО», и ответ остаётся ДА и через тридцать лет после развода: <see cref="BreakUp"/> гасит
+        /// <see cref="Married"/>, но историю не переписывает (и не должен — некролог по ней строится).
+        ///
+        /// Поэтому гейт живого состояния добавляется ОТДЕЛЬНОЙ строкой в колонке «Когда», а не подменяет
+        /// чейн: «когда-то поженились» И «женаты сейчас» — разные вопросы, ветке нужны оба ответа.
+        /// </summary>
+        private bool MarriedGatedOff(Card c) => c.RequiresMarried && !Married;
+
+        /// <summary>
+        /// Была бы эта карточка выдана ЗАБЛОКИРОВАННОЙ (BLOCK$ дороже, чем есть на счету СЕЙЧАС) —
+        /// ровно то правило, по которому <see cref="CurrentCardBlocked"/> фиксируется на выдаче.
+        /// Один источник истины на две точки: сама выдача и льгота первой карточки после обучения
+        /// деньгам (<see cref="_moneyGraceCard"/>).
+        /// </summary>
+        private bool WouldBeBlocked(Card c)
+            => c.IsBlockCost && BlockPrices.TryGetValue(c.Id, out var price) && Money < price;
 
         // Токены те же, что в колонке Δ и во флагах `OPEN:*`. Незнакомого токена сюда не приходит:
         // CardLoader.NormalizeScaleToken его не выдаёт, а нераспознанная форма краснит валидатор колоды.
@@ -1182,7 +1303,8 @@ namespace ThanksNoThanks
                 var c = _deck[_index];
                 if (GatedOff(c) || HealthGatedOff(c) || ExcludedByBranch(c)
                     || MoneyGatedOff(c) || RelationshipsGatedOff(c)
-                    || ScaleGatedOff(c) || AgeGatedOff(c))            // parent≠ДА / здоровье выше порога
+                    || ScaleGatedOff(c) || MarriedGatedOff(c) || AgeGatedOff(c)   // parent≠ДА / здоровье / живой брак
+                    || (_moneyGraceCard && WouldBeBlocked(c)))                    // / нечем платить сразу после обучения
                 {                                 // / ветка `EXCL:*` уже занята / не тот счёт
                                                   // / отношения ещё целы / шкала условия ЗАКРЫТА
                                                   // / рано по возрасту → skip…
@@ -1191,9 +1313,8 @@ namespace ThanksNoThanks
                 }
                 CurrentCard = c;
                 // BLOCK$ affordability fixed at draw time («на момент показа денег меньше цены»).
-                CurrentCardBlocked = c.IsBlockCost
-                    && BlockPrices.TryGetValue(c.Id, out var price)
-                    && Money < price;
+                CurrentCardBlocked = WouldBeBlocked(c);
+                _moneyGraceCard = false;   // льгота одноразовая — тратится на ПЕРВОЙ же выданной карточке
                 // §3: длительность = фаза возраста ЭТОЙ карточки (блиц идёт своей веткой).
                 CardTimerMax = AnswerSecondsFor(c.Age);
                 CardTimer = CardTimerMax;
@@ -1852,6 +1973,7 @@ namespace ThanksNoThanks
         {
             Money = 0;
             MoneyOpen = false;
+            _moneyGraceCard = false;
             _inDebt = false;
             Paused = false;
             PausedInputsLive = false;
@@ -2065,11 +2187,18 @@ namespace ThanksNoThanks
         {
             if (!RelationshipsOpen) return;
 
+            int axis = _relAxis;
+            _relAxis = 0;                                                      // consume this tick's axis
+
             double rate = -RelationshipDriftPerSec;                            // drift down (× DRIFT-эффекты)
-            rate += _relAxis * RelBalancerPerSec;                              // held axis (±)
+            rate += axis * RelBalancerPerSec;                                  // held axis (±)
+            // ПОЛ УДЕРЖАНИЯ — только пока рычаг ТЯНЕТ ВВЕРХ (см. RelHoldNetFloorPerSec). Бездействие
+            // (axis = 0) и тяга ВНИЗ (axis < 0) проходят мимо: наказание за то, что не держишь, остаётся
+            // ровно таким, каким его написала карточка.
+            if (axis > 0 && rate < RelHoldNetFloorPerSec)
+                rate = RelHoldNetFloorPerSec;
             if (Scales.Relationships > RelZoneMax)                             // задушил вниманием →
                 rate -= RelOverloadPenaltyPerSec;                             // extra pull back toward zone
-            _relAxis = 0;                                                      // consume this tick's axis
 
             _relFrac += rate * dt;
             int whole = (int)_relFrac;   // truncates toward zero → symmetric for up and down

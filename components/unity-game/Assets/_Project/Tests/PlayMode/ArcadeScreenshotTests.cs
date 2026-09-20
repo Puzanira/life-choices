@@ -110,6 +110,10 @@ namespace ThanksNoThanks.Tests.PlayMode
                 // §D: модальный экран появления новой шкалы — по одному кадру на каждую из четырёх шкал
                 // (сверяется с эталоном «Экран - появление новой шкалы.png»; эталон нарисован для энергии).
                 case "tutmoney": driver.DebugPreviewNewScale(NewScale.Money); break;
+                // r4 п.1а/п.4 — позы, которыми дизайн-гейт судит плейтест-фиксы.
+                case "tutmoneyquiet": driver.DebugPreviewMoneyTutorialQuiet(); break;
+                case "blitzidle": driver.DebugPreviewBlitzPlates(punch: false); break;
+                case "blitzpunch": driver.DebugPreviewBlitzPlates(punch: true); break;
                 case "tutrel": driver.DebugPreviewNewScale(NewScale.Relations); break;
                 case "tutenergy": driver.DebugPreviewNewScale(NewScale.Energy); break;
                 case "tutchild": driver.DebugPreviewNewScale(NewScale.Child); break;

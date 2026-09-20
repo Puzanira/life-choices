@@ -37,7 +37,7 @@ namespace ThanksNoThanks.Tests
         }
 
         // Ordinary = a normal player-choice card. Excludes TIMELINE / FORCED announcements (the reveal
-        // banners YA03/YA05, вехи), the crisis blitz/impulse cards, and the LT08 system heal card. NOCONS
+        // banners YA05, вехи), the crisis blitz/impulse cards, and the LT08 system heal card. NOCONS
         // flavour cards (FA01/FA03/FA07/FC08…) ARE ordinary — they are still real choice cards on screen.
         private static bool IsOrdinary(Card c)
             => c != null
@@ -187,11 +187,11 @@ namespace ThanksNoThanks.Tests
         }
 
         /// <summary>
-        /// r3 (п.8) — ПОРЯДОК «КАРТОЧКА → ОТКРЫТИЕ ШКАЛЫ». Живой плейтест основательницы: «карточка
-        /// „начать встречаться“ приходит ПОСЛЕ открытия шкалы отношений — нелогично».
+        /// r3 (п.8) — ПОРЯДОК «КАРТОЧКА → ОТКРЫТИЕ ШКАЛЫ». Живой плейтест основательницы: шкала
+        /// открывалась ПОВЕРХ собственного вопроса — нелогично.
         ///
         /// Причина была в МОМЕНТЕ, а не в колоде: возраст догоняет возраст текущей карточки сразу, как её
-        /// выдали, поэтому гейт 20 щёлкал, пока `YA03` («ПЕРВАЯ ЛЮБОВЬ! Начать встречаться?») ещё висела
+        /// выдали, поэтому возрастной гейт щёлкал, пока карточка с флагом `OPEN:{шкала}` ещё висела
         /// НЕОТВЕЧЕННОЙ, и туториал шкалы вставал поверх собственного вопроса. Канон-возрасты не тронуты —
         /// открытие ПРИДЕРЖИВАЕТСЯ, пока текущая карточка сама несёт флаг `OPEN:{шкала}`.
         ///
@@ -259,27 +259,9 @@ namespace ThanksNoThanks.Tests
             }
         }
 
-        /// <summary>
-        /// Прямая проверка канона колоды, без симуляции: карточка «начать встречаться» (`OPEN:Отн`) —
-        /// САМАЯ РАННЯЯ среди карточек своего возраста, т.е. игрок встречает её первой из двадцатилетних.
-        /// Это вторая половина порядка: придержка в Game спасает от «шкала поверх вопроса», а вот это —
-        /// от «между вопросом и шкалой вклинилась чужая карточка того же возраста».
-        /// </summary>
-        [Test]
-        public void TheDatingCard_IsTheFirstCardOfItsAge()
-        {
-            foreach (int seed in Seeds)
-            {
-                var deck = DeckSampler.BuildPlan(AllCards(), new System.Random(seed)).Deck;
-                var open = deck.FirstOrDefault(c => c.Opens(Card.OpenRelations));
-                Assert.IsNotNull(open, $"seed {seed}: карточка OPEN:Отн есть в колоде");
-
-                int idx = deck.IndexOf(open);
-                for (int i = 0; i < idx; i++)
-                    Assert.Less(deck[i].Age, open.Age,
-                        $"seed {seed}: {deck[i].Id} (возраст {deck[i].Age}) вклинилась ПЕРЕД "
-                        + $"{open.Id} (возраст {open.Age}) — «встречаться» обязана быть первой в своём возрасте");
-            }
-        }
+        // Тест `TheDatingCard_IsTheFirstCardOfItsAge` удалён: решением основательницы карточка `YA03`
+        // («ПЕРВАЯ ЛЮБОВЬ! Начать встречаться?») выброшена из колоды, а шкала «Отн» теперь открывается
+        // ЧИСТО ПО ВОЗРАСТУ (20), без карточки-триггера (r4 п.2). Правила порядка «карточка „встречаться“
+        // → OPEN:Отн» больше не существует, проверять нечего.
     }
 }

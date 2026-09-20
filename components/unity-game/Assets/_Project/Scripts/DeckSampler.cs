@@ -129,7 +129,7 @@ namespace ThanksNoThanks
 
         // Milestones always present at their canonical age (I02 intro is pinned first).
         private static readonly string[] UnconditionalMilestones =
-            { "I02", "I03", "YA01", "YA03", "YA05", "MD01" };
+            { "I02", "I03", "YA01", "YA05", "MD01" };   // YA03 удалена из колоды (r4 п.2)
 
         // Conditional milestones — always placed in the plan, gated at runtime.
         private static readonly string[] ConditionalMilestones = { "MD02", "LT04" };
@@ -353,7 +353,8 @@ namespace ThanksNoThanks
                || !double.IsNaN(c.RequiresHealthBelow)
                || c.RequiresScaleOpen != null
                || c.RequiresMinAge >= 0
-               || c.RequiresRelationshipsLost;
+               || c.RequiresRelationshipsLost
+               || c.RequiresMarried;      // «если в браке» — живой гейт свадебной ветки (r4 п.5)
 
         private static void ClampSize(List<Card> deck, List<Card> normals, List<Card> leftover,
                                       List<Card> protectedNormals, Random rng)

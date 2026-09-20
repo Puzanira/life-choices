@@ -209,8 +209,15 @@ namespace ThanksNoThanks.Tests.PlayMode
         /// <summary>Колода, гарантированно приводящая к настоящей BLOCK$-карточке MD03 (цена 60₽).</summary>
         private static Game BlockDeck()
         {
-            var deck = new List<Card> { Starter(), Plain("FILL", 18), Plain("MD03", 30), Plain("NORMAL", 40) };
-            deck[2].IsBlockCost = true;
+            // ⚠ «GRACE» — ЖЕРТВЕННАЯ КАРТОЧКА ПОД ЛЬГОТУ r4 п.1б. Первая карточка, выданная ПОСЛЕ
+            // закрытия §D-окна денег, гарантированно по карману (иначе обучение заканчивалось запертой
+            // дверью — жалоба основательницы). Без этого филлера льгота съедала бы ровно ту MD03,
+            // которую тесты ниже и хотят увидеть заблокированной, и они проверяли бы пустоту.
+            var deck = new List<Card>
+            {
+                Starter(), Plain("FILL", 18), Plain("GRACE", 20), Plain("MD03", 30), Plain("NORMAL", 40),
+            };
+            deck[3].IsBlockCost = true;
             return new Game(deck, coin: () => false);
         }
 
@@ -227,7 +234,8 @@ namespace ThanksNoThanks.Tests.PlayMode
             Assert.IsFalse(driver.Game.CurrentCardBlocked, "обычная карточка — денег хватает по определению");
             Assert.IsFalse(driver.AlarmActive(AlarmScale.Money), "…и тревоги денег нет");
 
-            fake.No();                               // FILL → MD03, денег 0 < 60 → БЛОКИРОВКА
+            fake.No();                               // FILL → GRACE
+            fake.No();                               // GRACE → MD03, денег 0 < 60 → БЛОКИРОВКА
             Assert.IsTrue(driver.Game.CurrentCardBlocked, "настоящая BLOCK$-карточка при пустом кармане");
             driver.DebugApplyAgeGates(40f);
             driver.DebugPumpAlarms(0.02f);
@@ -671,6 +679,7 @@ namespace ThanksNoThanks.Tests.PlayMode
             fake.Confirm();
             fake.No();                                   // → FILL (18)
             yield return OpenMoneyInGame(driver, fake);  // …возраст доезжает до 18: деньги открыты В ИГРЕ
+            fake.No();                                   // → GRACE (льгота r4 п.1б тратится здесь)
             fake.No();                                   // → MD03 (цена 60₽ ≫ туториальных монет: блокировка)
             driver.DebugApplyAgeGates(40f);
             driver.DebugPumpAlarms(0.02f);
@@ -703,9 +712,10 @@ namespace ThanksNoThanks.Tests.PlayMode
         {
             var deck = new List<Card>
             {
-                Starter(), Plain("FILL", 18), Plain("MD03", 30), Plain("NORMAL", 40), Plain("TAIL", 41),
+                Starter(), Plain("FILL", 18), Plain("GRACE", 20),   // GRACE — под льготу r4 п.1б, см. BlockDeck
+                Plain("MD03", 30), Plain("NORMAL", 40), Plain("TAIL", 41),
             };
-            deck[2].IsBlockCost = true;   // MD03 → BLOCK$ (Game.BlockPrices["MD03"] = 60)
+            deck[3].IsBlockCost = true;   // MD03 → BLOCK$ (Game.BlockPrices["MD03"] = 60)
             return new Game(deck, coin: () => false);
         }
 
@@ -724,7 +734,8 @@ namespace ThanksNoThanks.Tests.PlayMode
             fake.Confirm();                              // опенер → I03
             fake.No();                                   // I03 → FILL
             yield return OpenMoneyInGame(driver, fake);  // деньги открыты В ИГРЕ (но их всё равно < 60₽)
-            fake.No();                                   // FILL → MD03: цена 60₽, карман пуст → БЛОКИРОВКА
+            fake.No();                                   // FILL → GRACE (льгота r4 п.1б тратится здесь)
+            fake.No();                                   // GRACE → MD03: цена 60₽, карман пуст → БЛОКИРОВКА
             driver.DebugApplyAgeGates(40f);
             Assert.IsTrue(driver.Game.CurrentCardBlocked, "MD03 действительно заблокирована ценой");
 

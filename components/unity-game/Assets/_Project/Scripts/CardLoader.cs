@@ -31,7 +31,7 @@ namespace ThanksNoThanks
         {
             "I02", "I03",
             "CH01", "CH02", "CH03", "CH04", "CH05", "CH06", "CH07", "CH08",
-            "YA01", "RND03", "YA03", "YA06"
+            "YA01", "RND03", "YA06"   // YA03 удалена из колоды (r4 п.2)
         };
 
         // Fatal-cause phrasing for the finale (GAME_SPEC §финал / screens S12).
@@ -289,6 +289,10 @@ namespace ThanksNoThanks
         // «если Отн открыта» / «если шкала отношений открыта» / «если Дн открыта».
         private static readonly Regex WhenScaleOpenRx =
             new(@"^\s*(?:если\s+)?(?:шкала\s+)?([А-Яа-яЁё]+)\s+открыта\s*$", RegexOptions.Compiled);
+        // «если в браке» — живой гейт свадебной ветки (r4 п.5). Отдельно от «если Отн открыта»: после
+        // развода шкала может быть СНОВА открыта (MD06 «второй шанс»), а брака при этом нет.
+        private static readonly Regex WhenMarriedRx =
+            new(@"^\s*(?:если\s+)?в\s+браке\s*$", RegexOptions.Compiled);
         private static readonly Regex WhenScaleLostRx =
             new(@"^\s*(?:если\s+)?(?:шкала\s+)?([А-Яа-яЁё]+)\s+потеряна\s*$", RegexOptions.Compiled);
         // «если Здр<50%» (LT02) / «когда здоровье < 40%» (LT08).
@@ -396,6 +400,9 @@ namespace ThanksNoThanks
                 var minAge = WhenMinAgeRx.Match(clause);
                 if (minAge.Success && int.TryParse(minAge.Groups[1].Value, out var age))
                 { card.RequiresMinAge = age; continue; }
+
+                if (WhenMarriedRx.IsMatch(clause))
+                { card.RequiresMarried = true; continue; }
 
                 var lost = WhenScaleLostRx.Match(clause);
                 if (lost.Success && NormalizeScaleToken(lost.Groups[1].Value) == Card.OpenRelations)

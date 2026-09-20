@@ -110,6 +110,15 @@ namespace ThanksNoThanks.Tests.PlayMode
         // than the short pill — which is exactly how the old check passed a label spilling off the pill).
         private const float PillInset = 55f;
 
+        // ⚠ У ПЛАШКИ БЛИЦА ЭТОТ ОТСТУП ДРУГОЙ, и это не послабление, а смена источника формы (r4 п.4,
+        // переделка по дизайн-гейту). Плашка блица больше не 9-slice код-плашка: она рисуется ОДНИМ
+        // спрайтом под свой размер, поэтому «видимое цветное поле» начинается сразу за чёрным кантом —
+        // на 0.024·H от края, а не на фиксированных 55 px чужого 9-slice-угла. Считаем по тем же долям,
+        // которыми плашка нарисована, плюс жёлтая полоса: подпись обязана лечь ВНУТРЬ полосы.
+        private static float BlitzPillInset(Graphic plate)
+            => (GameDriver.BlitzPlateStripeOutFrac + GameDriver.BlitzPlateStripeFrac)
+               * plate.rectTransform.rect.height;
+
         // Real rendered glyph extents (best-fit honoured, via the Text's own generator) in local (rect) units.
         private static Rect GlyphLocalBounds(Text t, out int visibleChars)
         {
@@ -147,7 +156,7 @@ namespace ThanksNoThanks.Tests.PlayMode
         // far taller/wider than the short pill, so the label spills «ВСЁ» above the pill and «НОРМАЛЬНО» past
         // its sides (the founder bug). Geometric + deterministic: unlike rasterised glyph metrics it is stable
         // headless. The text is a child of the plate and shares its tilt, so the mapping is rotation-exact.
-        private static void AssertLabelFits(Text t, Graphic plate, string what)
+        private static void AssertLabelFits(Text t, Graphic plate, string what, float pillInset = PillInset)
         {
             GlyphLocalBounds(t, out int vis);
             Assert.Greater(vis, 0, what + " renders glyphs (not empty/tofu-collapsed)");
@@ -164,8 +173,8 @@ namespace ThanksNoThanks.Tests.PlayMode
                 if (pl.y < minY) minY = pl.y; if (pl.y > maxY) maxY = pl.y;
             }
             var pr = plateRt.rect;
-            float fillL = pr.xMin + PillInset, fillR = pr.xMax - PillInset;
-            float fillB = pr.yMin + PillInset, fillT = pr.yMax - PillInset;
+            float fillL = pr.xMin + pillInset, fillR = pr.xMax - pillInset;
+            float fillB = pr.yMin + pillInset, fillT = pr.yMax - pillInset;
             const float tol = 1f;
             Assert.GreaterOrEqual(minX, fillL - tol, what + " text rect within the visible pill (left)");
             Assert.LessOrEqual(maxX, fillR + tol, what + " text rect within the visible pill (right)");
@@ -207,7 +216,8 @@ namespace ThanksNoThanks.Tests.PlayMode
             // scoring coupling itself is asserted in Blitz_NormalLabelSide_ScoresForThatSidesLever) and its
             // rendered glyphs land fully on the plate's visible colored pill — no spill on any side.
             Assert.AreEqual("ВСЁ\nНОРМАЛЬНО", driver.YesPlateText.text, "the ДА plate reads «ВСЁ НОРМАЛЬНО»");
-            AssertLabelFits(driver.YesPlateText, driver.YesPlateImage, "«ВСЁ НОРМАЛЬНО»");
+            AssertLabelFits(driver.YesPlateText, driver.YesPlateImage, "«ВСЁ НОРМАЛЬНО»",
+                             BlitzPillInset(driver.YesPlateImage));
 
             // (4) Купол-таймер disjoint from the counter badge and the card.
             var timer = OwnBounds(canvas, driver.TimerDomeOutline.rectTransform);
@@ -227,7 +237,14 @@ namespace ThanksNoThanks.Tests.PlayMode
                 "timer-dome", "timer-dome", "timer-dome",           // купол: обводка + трек + дуга
                 "timer-dome-hand",                                  // …и стрелка-кромка
                 "choice-plate-v2",                                  // blitz thought card (art-pack plate)
-                "plate-yes", "plate-no",                            // the two blitz buttons
+                // ⚠ ПЛАШКИ БЛИЦА ПЕРЕОДЕТЫ В АРТ-ПАК (r4 п.4). Раньше здесь стояли "plate-yes"/"plate-no"
+                // — плоские код-плашки «старого стиля», на которые пожаловалась основательница. Чистой
+                // заготовки в паке нет (в btn-yes/btn-no ВПИСАНЫ слова), поэтому плашка РИСУЕТСЯ КОДОМ.
+                // Первая редакция складывала её из восьми 9-slice `bar-track` и была завёрнута гейтом
+                // (9-slice тащит радиус углов исходника ⇒ почти прямоугольник); теперь это ОДИН спрайт
+                // на плашку, сгенерированный под её размер, — 8 `bar-track` схлопнулись в 2 спрайта.
+                "BlitzPlateYes",                                    // зелёная плашка блица (кодом)
+                "BlitzPlateNo",                                     // красная плашка блица (кодом)
                 "bar-track",                                        // the dark counter badge
             }.OrderBy(s => s).ToList();
             CollectionAssert.AreEqual(expected, actual,
@@ -322,10 +339,13 @@ namespace ThanksNoThanks.Tests.PlayMode
             driver.DebugPumpHost(3f);                     // age out the CR00 announce bubble
             yield return null;
 
-            // (2) blitz: blank code-plates + the live relabel.
+            // (2) blitz: art-pack-style plates (собраны кодом) + the live relabel.
+            // ⚠ r4 п.4: раньше здесь ждали "plate-yes"/"plate-no" — плоские код-плашки. Основательница
+            // назвала их «старым стилем»; переиспользовать btn-yes/btn-no нельзя (слова впечатаны), так
+            // что плашка блица собрана из 9-slice `bar-track` в языке пака. База = чёрный кант.
             Assert.AreEqual(CrisisPhase.Blitz, g.Phase, "in the blitz");
-            Assert.AreEqual("plate-yes", driver.YesPlateImage.sprite.name, "the blitz uses the blank code-plate");
-            Assert.AreEqual("plate-no", driver.NoPlateImage.sprite.name, "the blitz uses the blank code-plate");
+            Assert.AreEqual("BlitzPlateYes", driver.YesPlateImage.sprite.name, "плашка блица нарисована кодом");
+            Assert.AreEqual("BlitzPlateNo", driver.NoPlateImage.sprite.name, "плашка блица нарисована кодом");
             Assert.IsTrue(driver.YesPlateText.gameObject.activeInHierarchy, "the blitz label overlay is VISIBLE");
             Assert.IsTrue(driver.NoPlateText.gameObject.activeInHierarchy, "the blitz label overlay is VISIBLE");
             StringAssert.Contains("НОРМАЛЬНО", driver.YesPlateText.text + driver.NoPlateText.text,
