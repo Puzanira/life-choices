@@ -107,8 +107,17 @@ namespace ThanksNoThanks
         private static readonly Color TextLight = new(0.918f, 0.941f, 1f);     // #eaf0ff
         private static readonly Color Bulb = new(1f, 0.847f, 0.451f);          // #ffd873
         private static readonly Color Energy = new(0.973f, 0.824f, 0.271f);    // #f8d24c
-        // Красный «тревоги» — остался за плашкой разрыва и красной зоной балансира (купол на своих токенах).
+        // Красный «тревоги» — красная зона балансира и плашки блица (купол на своих токенах). Плашка
+        // «РАССТАЛИСЬ» ушла с него на PackRed (дизайн-гейт r6): она фигура ПАКА, а не тревога.
         private static readonly Color TimerRed = new(0.910f, 0.267f, 0.227f);  // #e8443a
+        /// <summary>
+        /// `RED` АРТ-ПАКА (build-spec §1.1 `#E60E17`, «кнопка НЕ НАДО») — единственный красный, которым
+        /// пак красит ПЛАШКИ. Замерен на кадре по заливке `btn-no`: (229, 14, 23), то есть спек и
+        /// растр сходятся. Заведён в r6, когда дизайн-гейт снял плашку «РАССТАЛИСЬ» с TimerRed: красных
+        /// на экране и так четыре, и новая фигура обязана брать красный ОТТУДА ЖЕ, откуда его берёт
+        /// соседняя кнопка ответа, а не заводить пятый оттенок.
+        /// </summary>
+        private static readonly Color PackRed = new(230f / 255f, 14f / 255f, 23f / 255f);   // #E60E17 RED
         // ---- купол-таймер (§5a): токены build-spec §1.1, не выборки с PNG ----
         private static readonly Color Cream = new(254f / 255f, 249f / 255f, 232f / 255f);   // #FEF9E8 CREAM
         private static readonly Color DomeYellow = new(1f, 212f / 255f, 0f);                // #FFD400 YELLOW
@@ -156,9 +165,21 @@ namespace ThanksNoThanks
         /// <summary>НАРИСОВАННЫЙ бокс карточки (`choice-plate-v2` 1536×1024, alpha-bbox 33…1501 × 26…994):
         /// x 412.3…1506.0, y 229.0…950.7. Рект карточки заметно шире рисунка (по 25 px прозрачных полей).</summary>
         public static readonly Vector4 CardPlateDrawnBox = new(959.13f, 589.87f, 1093.75f, 721.74f);
-        /// <summary>BLOCK$-баннер «нет денег» на экране: центр x, центр y от ВЕРХА, w, h. Те же пиксели,
-        /// что давала прежняя доля карточки (y 705…815 внутри её кремового поля 286…892).</summary>
-        public static readonly Vector4 BlockBannerRect = new(959.5f, 760f, 900f, 110f);
+        /// <summary>
+        /// BLOCK$-баннер «нет денег» на экране: центр x, центр y от ВЕРХА, w, h.
+        ///
+        /// ⚠ ПЕРЕВЁРСТАН ДИЗАЙН-ГЕЙТОМ r6 (MAJOR). Было 900×110 по центру y 760 — то есть x 509.5…1409.5,
+        /// y 705…815: баннер НАЕЗЖАЛ на плашку «СПАСИБО НЕ НАДО» (пересечение 6876 px², глубина 54 px) и
+        /// целовал раму карточки (зазоры 14 px с боков). Стало 780×70 по центру y 710 — x 569…1349,
+        /// y 675…745:
+        ///   • ширина 780 даёт боковые гаттеры ~70 px, такие же, как у бокса вопроса над ним;
+        ///   • высота 80 — паддинг ровно под ОДНУ строку баннера и ни пикселем больше: глифы кегля 34
+        ///     занимают 44 px, видимая пилюля `bar-track` съедает по 16 px сверху и снизу;
+        ///   • низ 745 отпускает плашку ответа (просвет ≥20 px до её краски) и оставляет 66 px до чипа.
+        /// Верх баннера и есть <see cref="CardBandTop"/> — бокс вопроса заканчивается над ним, поэтому
+        /// полоса и её потолок двигаются ОДНИМ числом (иначе длинный вопрос напечатался бы по баннеру).
+        /// </summary>
+        public static readonly Vector4 BlockBannerRect = new(959.5f, 705f, 780f, 80f);
         /// <summary>Чип цены («СТОИТ N ₽» / «цена N ₽») — так же абсолютным боксом (y 811…889).</summary>
         public static readonly Vector4 CardPriceRect = new(959.5f, 850f, 360f, 78f);
         // ---- ЖИВОЙ ЭКРАН ДЕПРЕССИИ (r5 п.3): боксы ОБЪЯВЛЕНЫ, как у всех экранов D-стиля ----------------
@@ -201,8 +222,13 @@ namespace ThanksNoThanks
         /// <summary>Импульсная пилюля «молчание = ДА»: центр y от ВЕРХА (x 940, ширина 380). Полоса
         /// 323.5…423.5 — верхнее внутреннее поле кремовой карточки, над боксом вопроса.</summary>
         public const float ImpulseWarnCy = 373.5f;
-        private static readonly Color PlateMute = new(0.62f, 0.62f, 0.64f);    // S10: muted answer plates while BLOCK$-blocked
-        private static readonly Color CardBlockDim = new(0.52f, 0.54f, 0.60f); // S10: tint the card frame when unaffordable (dims to muted cobalt)
+        // S10 + r6 п.2: ЕДИНЫЙ ДИМ-ТОН НЕДОСТУПНОСТИ (#858A99, приглушённый кобальт). Им красится и
+        // рамка самой карточки, и ЗЕЛЁНАЯ плашка ответа — одно сообщение «покупка недоступна» одним
+        // тоном. Красная плашка этим тоном НЕ красится никогда (отказ доступен всегда).
+        private static readonly Color CardBlockDim = new(0.52f, 0.54f, 0.60f);
+
+        /// <summary>Тот же дим-тон наружу — гардам, чтобы они сверяли ТОКЕН, а не своё число.</summary>
+        public static Color CardBlockDimTone => CardBlockDim;
         // S1 opener, снято с эталона «Стартовый экран.png»: золото марки-рамки и тёплый крем её плашки —
         // это СВОИ значения экрана (крем опенера теплее токена CREAM карточек), поэтому отдельные токены.
         private static readonly Color MarqueeGold = new(248f / 255f, 180f / 255f, 50f / 255f); // #f8b432
@@ -338,6 +364,45 @@ namespace ThanksNoThanks
         private static readonly Vector4 AgeBadgeRect = new(1745.78f, 492.70f, 229.24f, 229.65f);
         private static readonly Vector4 CardPlateRect = new(959.50f, 590.99f, 1143.63f, 762.71f);
 
+        /// <summary>
+        /// Плашка «РАССТАЛИСЬ»: СОБСТВЕННЫЙ габарит на слоте отношений (дизайн-гейт r6, MAJOR).
+        ///
+        /// Было 360×96 — на 33 % уже слота (539.6), и правый край резал жёлтый купол ровно по x≈853:
+        /// плоский прямоугольник обрывался посреди чужой фигуры. Теперь плашка занимает слот почти
+        /// целиком (поле 30 px с боков, 20 сверху/снизу) и накрывает купол ТАК ЖЕ, как его накрывает
+        /// сам бар отношений, — то есть законно, кантом наружу, а не обрезком.
+        /// </summary>
+        public const float BreakupPlateW = 480f, BreakupPlateH = 103f;
+        /// <summary>Скругление угла плашки «РАССТАЛИСЬ», px (канон пака: 0.17·H у блица ≈ 17 при H 103 —
+        /// здесь 24, как у крупных значков HUD, плашка читается «наклейкой»).</summary>
+        public const float BreakupPlateRadius = 24f;
+        /// <summary>Чёрный кант плашки, px — верх коридора пака (BlockKeylineInk 4 … OpenerRim 6).</summary>
+        public const float BreakupPlateKeyline = 6f;
+        /// <summary>Красная обойма между кантом и кремовым полем, px.</summary>
+        public const float BreakupPlateBezel = 14f;
+        /// <summary>Жёсткая тень плашки: вправо-вниз на 6 px (UI-координаты, вниз = −y).</summary>
+        public static readonly Vector2 BreakupPlateShadowOffset = new(6f, -6f);
+        /// <summary>Кегль «РАССТАЛИСЬ»: ряд HUD, заполнение ~60 % ширины плашки (было 40 на 360 px).</summary>
+        public const int BreakupTextFont = 46;
+
+        /// <summary>
+        /// Слот плашки «РАССТАЛИСЬ» (r6 п.3) — ЦЕНТР СЛОТА ОТНОШЕНИЙ, выведенный из
+        /// <see cref="RelBarRect"/>, а не назначенный числом. Плашка сообщает о шкале отношений и
+        /// встаёт ровно туда, где эта шкала стояла: расставание гасит балансир, слот свободен.
+        /// Размер — собственный (<see cref="BreakupPlateW"/>×<see cref="BreakupPlateH"/>), плашка на слот
+        /// САДИТСЯ, а не растягивается. Историю отъезда см. в комментарии у сборки плашки (коммит
+        /// c824ddd1, перекладка HUD).
+        ///
+        /// ⚠ МЕТОДОМ, А НЕ ПОЛЕМ (находка код-скептика r6, NIT). Статический инициализатор ПОЛЯ читает
+        /// другие статические поля в порядке ОБЪЯВЛЕНИЯ: сегодня <see cref="RelBarRect"/> объявлен выше
+        /// и всё сходится, а любая перестановка строк выше по файлу молча дала бы плашке нули. Ровно
+        /// эту мину файл уже документирует у `BigEnergySrc/Dst` («боксы берутся ЧЕРЕЗ вызов, не полем»);
+        /// здесь тот же приём: вычисляем В МОМЕНТ ОБРАЩЕНИЯ, и порядок объявлений перестаёт что-либо
+        /// значить.
+        /// </summary>
+        public static Vector4 BreakupPlateRect =>
+            new(RelBarRect.x, RelBarRect.y, BreakupPlateW, BreakupPlateH);
+
         // ---- КУПОЛ-ТАЙМЕР (revisions §5a / build-spec §2) --------------------------------------------
         // РЕШЕНИЕ ОСНОВАТЕЛЬНИЦЫ (2026-07-31): купол КРУПНЫЙ, по центру экрана, слоем ПОД барами — «как
         // наклейки на афише»: бары нарисованы ПОВЕРХ купола, а дуга читается в просветах (полоса над
@@ -379,6 +444,26 @@ namespace ThanksNoThanks
         public const float AlarmScaleOnBelow = 20f;
         /// <summary>Ширина гистерезиса, п.п.: выключение — на «порог ± столько» внутрь нормы (тюнится).</summary>
         public const float AlarmHysteresis = 2f;
+        /// <summary>
+        /// ТО ЖЕ САМОЕ ДЛЯ ДЕНЕГ, НО В РУБЛЯХ (находка код-скептика r6, MAJOR).
+        ///
+        /// Тревога денег — единственная из четырёх, что шла БЕЗ гистерезиса: считалось, что сигнал
+        /// «BLOCK$ и денег не хватает» дискретный и дребезжать нечему. С r6 п.2 он стал ЖИВЫМ и
+        /// дребезжит ровно как шкала на пороге: один тик крутилки (+1 ₽) переводит счёт через цену,
+        /// стоимость жизни (0.5 ₽/с) возвращает его назад за 2 с — и так по кругу, пока карточка висит.
+        /// Каждый такой цикл стоил ЗВУКА тревоги (фронт вверх) и САЛЮТА ЗВЁЗД (фронт вниз): салют за
+        /// «калибровку», которую игрок не делал, каждые две секунды.
+        ///
+        /// Зазор тот же, что у шкал (2), просто в единицах денег — ₽ вместо п.п.: ровно один тик
+        /// крутилки плюс запас. НАПРАВЛЕНИЕ ЗАЗОРА ЗЕРКАЛЬНОЕ к шкалам, и это сознательно. У шкал
+        /// тревога включается на пороге и гаснет, ОТСТУПИВ внутрь нормы; у денег наоборот — гаснет
+        /// РОВНО на цене (контракт r6 п.2 основательницы: «накрутил до цены → всё ожило», задержка тут
+        /// читалась бы как поломка), а ВОЗВРАЩАЕТСЯ только когда счёт провалился на δ НИЖЕ цены.
+        /// Плата — зазор [цена−δ, цена), где банка уже не красная, а баннер «Как жаль…» ещё стоит:
+        /// баннер говорит о КАРТОЧКЕ (честно, по живому значению), тревога — о СЧЁТЕ («всё плохо»),
+        /// и рубля недобора для «всё плохо» мало.
+        /// </summary>
+        public const float MoneyAlarmHysteresis = 2f;
         /// <summary>Период пульса яркости, с (спек §4/§6: синус ~0.7 с).</summary>
         public const float AlarmPulsePeriod = 0.7f;
         /// <summary>Яркость в ПРОВАЛЕ пульса (1.0 = полная) — тревога «дышит», а не мигает выключателем.</summary>
@@ -577,11 +662,15 @@ namespace ThanksNoThanks
         /// <summary>Высота полного бокса вопроса — потолок роста, а не посадка (см. <see cref="CardTextFullCy"/>).</summary>
         public const float CardTextFullH = 290f;
         /// <summary>
-        /// Top of the RESERVED bottom band of the cream field: the BLOCK$ banner (y 705…815) and the price
-        /// sub-line (y 811…889) live here. While either is up the question box must end above this line —
-        /// без этого длинный вопрос гарантированно печатается прямо по баннеру и цене (skeptic MAJOR-1).
+        /// Top of the RESERVED bottom band of the cream field: the BLOCK$ banner (y 665…745 после
+        /// перевёрстки дизайн-гейтом r6) and the price sub-line (y 811…889) live here. While either is up
+        /// the question box must end above this line — без этого длинный вопрос гарантированно печатается
+        /// прямо по баннеру и цене (skeptic MAJOR-1).
+        /// ⚠ ЭТО ВЕРХ БАННЕРА: <c>BlockBannerRect.y − BlockBannerRect.w / 2</c> (710 − 35). Константой, а
+        /// не выражением, только потому, что <see cref="CardTextShortBottom"/> обязан быть `const`;
+        /// равенство сторожит гард `CardQuestion_ClearsTheBlockBannerAndPrice_WhenBothAreUp`.
         /// </summary>
-        public const float CardBandTop = 705f;
+        public const float CardBandTop = 665f;
         /// <summary>Clearance between the last line of the question and the reserved band.</summary>
         public const float CardTextBandGap = 12f;
         /// <summary>Bottom of the question box while the reserved band is occupied.</summary>
@@ -719,6 +808,11 @@ namespace ThanksNoThanks
         private GameObject _blockOverlay;     // r3: контейнер баннера+чипа, созданный ПОСЛЕ плашек ответа
         private GameObject _blockBanner;
         private GameObject _blockBannerInk;   // чёрный keyline вокруг баннера (сосед НИЖЕ него)
+        // r6 п.2: состояние недоступности, КОТОРОЕ СЕЙЧАС НАРИСОВАНО. Живой пересчёт ходит в обе
+        // стороны, и баннер/приглушение/чип цены перекладываются только на ФРОНТЕ — см.
+        // ReflectBlockedVisuals. Держится в синхроне в OnCardChanged (выдача) и в RenderCrisis
+        // (кризис гасит BLOCK$-визуал принудительно), иначе после кризиса фронт бы потерялся.
+        private bool _blockedShown;
         private Image _cardPriceInk;          // тот же keyline вокруг чипа цены
         // BLOCK$ price sub-line on the card: «СТОИТ N ₽» when affordable, «НУЖНО N ₽» when blocked.
         // Above the veil (drawn after it), so it stays legible in the dimmed/blocked state too.
@@ -1820,11 +1914,48 @@ namespace ThanksNoThanks
             _openerPanel.SetActive(false); _finalePanel.SetActive(false); _gamePanel.SetActive(true);
             ApplyAgeGates(58f);
             _cardText.text = "Пора подлечиться!";
+            _moneyText.text = FormatMoneyJar(40);   // r6: ВИДНО, что на счету меньше цены
             SetCardBlockedDim(true);
             SetBlockBannerVisible(true);
             ApplyPriceLabel(true, 100, blocked: true);
-            _yesPlate.color = PlateMute; _noPlate.color = PlateMute;
+            // r6 п.2: гаснет ТОЛЬКО зелёная (недоступна покупка), и тем же тоном, что карточка;
+            // красная подсвечена как обычно — «спасибо, не надо» доступно всегда.
+            _yesPlate.color = CardBlockDim; _noPlate.color = Color.white;
             enabled = false;
+        }
+
+        /// <summary>
+        /// ПАРНАЯ ПОЗА К <see cref="DebugPreviewBlocked"/> (r6 п.2): ТА ЖЕ САМАЯ КАРТОЧКА, но игрок
+        /// докрутил до цены и она ОЖИЛА. Всё, кроме денег и производного от них состояния, совпадает
+        /// с запертым кадром — иначе дизайн-гейт сравнивал бы две разные сцены и не увидел бы, что
+        /// именно меняет живой пересчёт: баннер «Как жаль…» снят, приглушение карточки снято, зелёная
+        /// вернулась в полный цвет, строка цены сменила формулировку на «СТОИТ».
+        /// Только визуал: чистый Game не трогается.
+        /// </summary>
+        public void DebugPreviewUnblocked()
+        {
+            _openerPanel.SetActive(false); _finalePanel.SetActive(false); _gamePanel.SetActive(true);
+            ApplyAgeGates(58f);
+            _cardText.text = "Пора подлечиться!";
+            _moneyText.text = FormatMoneyJar(120);  // накручено ВЫШЕ цены — то самое «докрутил»
+            SetCardBlockedDim(false);
+            SetBlockBannerVisible(false);
+            ApplyPriceLabel(true, 100, blocked: false);
+            _yesPlate.color = Color.white; _noPlate.color = Color.white;
+            enabled = false;
+        }
+
+        /// <summary>
+        /// ПОЗА «РАССТАЛИСЬ» (r6 п.3): обычный кадр, но отношения потеряны — балансир погашен, и его
+        /// слот занимает транзиентная красная плашка. Кадр существует ровно для того, чтобы увидеть
+        /// ГЛАЗОМ, что плашка стоит НА МЕСТЕ ШКАЛЫ, а не уехала под неё (жалоба основательницы).
+        /// Только визуал: чистый Game не трогается.
+        /// </summary>
+        public void DebugPreviewBreakup()
+        {
+            DebugPreviewArcadeShot();          // обычный кадр, драйвер заморожен
+            _balancerGroup.SetActive(false);   // расставание гасит шкалу — слот освободился
+            _breakupPlate.SetActive(true);     // …и плашка садится ровно в него
         }
 
         // Screenshot hook (arcade-packaging increment): pose a clean, representative mid-life frame — a card
@@ -1895,7 +2026,9 @@ namespace ThanksNoThanks
             SetCardBlockedDim(true);
             SetBlockBannerVisible(true);
             ApplyPriceLabel(true, 100, blocked: true);
-            _yesPlate.color = PlateMute; _noPlate.color = PlateMute;
+            // r6 п.2: гаснет ТОЛЬКО зелёная (недоступна покупка), и тем же тоном, что карточка;
+            // красная подсвечена как обычно — «спасибо, не надо» доступно всегда.
+            _yesPlate.color = CardBlockDim; _noPlate.color = Color.white;
             for (int i = 0; i < AlarmCount; i++)
             {
                 _alarmOn[i] = true;
@@ -2289,7 +2422,8 @@ namespace ThanksNoThanks
         /// </summary>
         private void DestroyBlitzPlateSprites()
         {
-            foreach (var sp in new[] { _blitzYesSprite, _blitzNoSprite, _impulseYesSprite, _impulseNoSprite })
+            foreach (var sp in new[] { _blitzYesSprite, _blitzNoSprite, _impulseYesSprite, _impulseNoSprite,
+                                       _breakupPlateSprite })
             {
                 if (sp == null) continue;
                 var tex = sp.texture;
@@ -2324,6 +2458,9 @@ namespace ThanksNoThanks
             _game.DepressionEnded += OnDepressionEnded;
             _game.CrisisEnded += OnCrisisEnded;
             _game.ChildBadParent += OnChildBadParent;
+            // r6 п.2: доступность текущей карточки переключилась (в любую сторону) — снять/вернуть
+            // баннер, приглушение и чип цены ТЕМ ЖЕ тактом, не дожидаясь следующего кадра.
+            _game.CardBlockedChanged += OnCardBlockedChanged;
         }
 
         private void UnsubscribeGame()
@@ -2348,6 +2485,17 @@ namespace ThanksNoThanks
             _game.DepressionEnded -= OnDepressionEnded;
             _game.CrisisEnded -= OnCrisisEnded;
             _game.ChildBadParent -= OnChildBadParent;
+            _game.CardBlockedChanged -= OnCardBlockedChanged;
+        }
+
+        // r6 п.2: фронт живой доступности. Сам пересчёт визуала общий с покадровым путём — разница
+        // только в моменте: событие приходит внутри Game.Tick, кадровый вызов подстрахует всё
+        // остальное (кризис, рестарт, подмена игры в тестах).
+        private void OnCardBlockedChanged()
+        {
+            if (_game == null || _game.State != GameState.Playing) return;
+            if (_game.InCrisis) return;          // BLOCK$-визуал в кризисе не живёт вовсе
+            ReflectBlockedVisuals();
         }
 
         /// <summary>
@@ -2694,11 +2842,9 @@ namespace ThanksNoThanks
                                  && _smPending != SpecialMode.Burnout
                                  && _phoneOut <= 0.001f;
                 if (_burnoutPlate.activeSelf != burnPlate) _burnoutPlate.SetActive(burnPlate);
-                // S10: while the current card is BLOCK$-blocked, mute the two answer plates (the card veil
-                // dims the marquee, this dims the plates) so the whole board reads «недоступно».
-                var plateTint = _game.CurrentCardBlocked ? PlateMute : Color.white;
-                if (_yesPlate.color != plateTint) _yesPlate.color = plateTint;
-                if (_noPlate.color != plateTint) _noPlate.color = plateTint;
+                // S10 + r6 п.2: недоступность карточки рисуется ЖИВЬЁМ и каждый кадр — баннер, приглушение
+                // карточки, чип цены и неактивная зелёная снимаются и возвращаются вместе с деньгами.
+                ReflectBlockedVisuals();
                 ReflectChildPhone(Time.deltaTime);  // reveal on MD02=ДА; slide/wobble the handset on a call
                 // Age-gated reveals run every frame (SetActive is a no-op on same value): a widget
                 // opening MID-CARD (18/25/30 crossings) appears the moment its age is crossed instead
@@ -2744,6 +2890,8 @@ namespace ThanksNoThanks
             // BLOCK$ visuals never apply during a crisis.
             SetCardBlockedDim(false);
             SetBlockBannerVisible(false);
+            _blockedShown = false;   // r6 п.2: визуал снят принудительно — фронт синхронизируем, иначе
+                                     // возврат из кризиса к той же гашёной карточке его бы не заметил
             _cardPriceText.gameObject.SetActive(false);
             _cardPricePlate.gameObject.SetActive(false);
             ReflectCardTextBand();          // band free again → the thought/impulse text gets the full box
@@ -2859,6 +3007,9 @@ namespace ThanksNoThanks
         public const float BlitzPlateStripeOutFrac = 0.059f;// внешний край жёлтой полосы / высота
         public const float BlitzPlateStripeFrac = 0.025f;   // толщина жёлтой полосы / высота
         private Sprite _blitzYesSprite, _blitzNoSprite;
+        /// <summary>Сгенерированный спрайт плашки «РАССТАЛИСЬ» (та же семья, см. BuildRingPlateSprite).
+        /// Живёт ОДИН на драйвер и уничтожается вместе с плашками блица — текстура нативная.</summary>
+        private Sprite _breakupPlateSprite;
         // r5 п.3 — ИМПУЛЬС ПЕРЕОДЕТ В ТУ ЖЕ СЕМЬЮ ПЛАШЕК. Блиц и импульс — два раунда ОДНОГО кризиса
         // среднего возраста, и после r4 они выглядели по-разному: блиц получил сгенерированную плашку в
         // канон-пропорциях (радиус 0.17·H, чернильный кант, жёлтая полоса), а импульс остался на плоских
@@ -2922,12 +3073,27 @@ namespace ThanksNoThanks
         /// диагональ угла не лесенкой (тот же приём, что у купола-таймера).
         /// </summary>
         private static UnityEngine.Sprite BuildBlitzPlateSprite(string name, int w, int h, Color body)
-        {
-            float r = BlitzPlateRadiusFrac * h;
-            float kant = BlitzPlateKeylineFrac * h;
-            float stripeOut = BlitzPlateStripeOutFrac * h;
-            float stripeIn = stripeOut + BlitzPlateStripeFrac * h;
+            => BuildRingPlateSprite(name, w, h, BlitzPlateRadiusFrac * h, Ink,
+                (BlitzPlateKeylineFrac * h, body),
+                (BlitzPlateStripeOutFrac * h, DomeYellow),
+                ((BlitzPlateStripeOutFrac + BlitzPlateStripeFrac) * h, body));
 
+        /// <summary>
+        /// ЯДРО СЕМЕЙСТВА ПЛАШЕК r4 — скруглённый прямоугольник, собранный ИЗ КОЛЕЦ.
+        ///
+        /// Вынесено из <see cref="BuildBlitzPlateSprite"/> без единого изменения арифметики (r6, дизайн-гейт:
+        /// плашке «РАССТАЛИСЬ» нужен ТОТ ЖЕ рисовальщик, а не второй похожий). Цвет точки = последовательные
+        /// лерпы с окном в один пиксель по ГЛУБИНЕ от внешнего контура: начинаем с <paramref name="edge"/>
+        /// (чёрный кант) и на каждой заявленной глубине переходим в следующий цвет. Края и швы размыты
+        /// ровно на пиксель, поэтому диагональ угла не лесенкой.
+        ///   блиц:      кант → поле → жёлтая полоса → поле;
+        ///   «РАССТАЛИСЬ»: кант → красная обойма → кремовое поле.
+        /// Глубины — В ПИКСЕЛЯХ (вызывающий сам решает, брать их долей высоты, как блиц, или числом, как
+        /// уведомление); спрайт рисуется Simple и 1:1 (pixelsPerUnit 100 = referencePixelsPerUnit холста).
+        /// </summary>
+        private static UnityEngine.Sprite BuildRingPlateSprite(
+            string name, int w, int h, float r, Color edge, params (float Depth, Color Color)[] rings)
+        {
             var tex = new Texture2D(w, h, TextureFormat.RGBA32, false)
             {
                 name = name + "Tex",
@@ -2948,11 +3114,10 @@ namespace ThanksNoThanks
                                              + Mathf.Max(qy, 0f) * Mathf.Max(qy, 0f));
                     float depth = r - (Mathf.Min(Mathf.Max(qx, qy), 0f) + outside);
 
-                    // Кольца: последовательные лерпы с окном в один пиксель — кант, поле, полоса, поле.
-                    var c = Ink;
-                    c = Color.Lerp(c, body, Mathf.Clamp01(depth - kant + 0.5f));
-                    c = Color.Lerp(c, DomeYellow, Mathf.Clamp01(depth - stripeOut + 0.5f));
-                    c = Color.Lerp(c, body, Mathf.Clamp01(depth - stripeIn + 0.5f));
+                    // Кольца: последовательные лерпы с окном в один пиксель (см. BuildRingPlateSprite).
+                    var c = edge;
+                    for (int k = 0; k < rings.Length; k++)
+                        c = Color.Lerp(c, rings[k].Color, Mathf.Clamp01(depth - rings[k].Depth + 0.5f));
                     c.a = Mathf.Clamp01(depth + 0.5f);
                     px[y * w + x] = c;
                 }
@@ -3465,10 +3630,25 @@ namespace ThanksNoThanks
 
         // Transient «РАССТАЛИСЬ» plate: advance its own ~2s clock and mirror visibility (only while
         // Playing). The timer keeps its state, so leaving play simply hides it.
+        //
+        // r6 п.3 — ПЛАШКА УСТУПАЕТ СЛОТ БАЛАНСИРУ. С тех пор как плашка села на рект шкалы отношений
+        // (BreakupPlateRect ← RelBarRect), «плашка видна» и «балансир виден» стали ВЗАИМОИСКЛЮЧАЮЩИМИ:
+        // иначе два разных виджета рисуются в одной точке друг поверх друга. В обычной жизни это и так
+        // разведено — расставание гасит балансир, — но ВТОРОЙ ШАНС (MD06) снимает RelationshipsLost и
+        // возвращает балансир тем же кадром, а собственные ~2 с плашки могут ещё не истечь. Владелец
+        // слота в споре — ЖИВАЯ шкала: она постоянна, а плашка транзиентна и своё уже сказала.
+        // Тот же закон, что у плашки выгорания и трубки ребёнка (см. Update): разводим ВРЕМЕНЕМ, а не
+        // пикселями. Сверяется гардом Breakup_Plate_YieldsSlot_ToBalancer_OnSecondChance.
         private void ReflectBreakupPlate(bool playing)
         {
             _breakupTimer.Advance(Time.deltaTime);
-            bool show = playing && _breakupTimer.Visible;
+            // ⚠ И НЕ В КРИЗИС (находка код-скептика r6, MINOR). Зовётся это при State == Playing, а кризис
+            // — тоже Playing: RenderCrisis прячет ряд HUD (включая балансир), из-за чего проверка «слот
+            // свободен» становилась ИСТИННОЙ и плашка «РАССТАЛИСЬ» всплывала поверх экрана блица. Слот
+            // в кризисе не свободен — его вообще нет. Плашка в кризисе скрыта, а после него вернётся,
+            // если её ~2 с ещё не истекли: таймер идёт своим ходом и ничего не теряет.
+            bool show = playing && !_game.InCrisis && _breakupTimer.Visible
+                        && !(_balancerGroup != null && _balancerGroup.activeSelf);
             if (_breakupPlate.activeSelf != show) _breakupPlate.SetActive(show);
         }
 
@@ -3562,6 +3742,37 @@ namespace ThanksNoThanks
         private const int OpenerBulbsAcross = 48, OpenerBulbsDown = 13;
         private const float OpenerRim = 6f;            // тёмный кант вокруг рамки и вокруг кремовой плашки
 
+        // ---- r6 п.1: вёрстка плашки правил под КОРОТКИЙ founder-текст (две строки) ------------------
+        // Кремовая плашка живёт по y 556…1006 (OpenerPlateCy ± OpenerCreamH/2), а зелёная CTA стоит
+        // ПОВЕРХ её низа (y 831…947 после подъёма группы на OpenerGroupLift; до r6-гейта — 863…979).
+        // Свободное поле под текст — 556…831, высота ~275, центр ~693; именно на него и смотрит
+        // anchoredPosition.y = OpenerRulesLiftY (781 − 100 = 681). САМА ПЛАШКА НЕ МЕНЯЛАСЬ.
+        // Менялся КЕГЛЬ: потолок 46 был подобран под пять строк эталона, и две строки при нём занимали
+        // меньше трети поля. Потолок 64 — ширинный: длинная строка («Делай выборы, которые определят
+        // твою судьбу.», 43 знака) при нём набирает ~1.35 к из 1620 доступных, то есть поля по бокам
+        // остаются, а надпись перестаёт тонуть. Высота бокса — ровно под две строки этого кегля с
+        // запасом на выносные (64 × 1.2 × 2 ≈ 154 → 215).
+        private const int OpenerRulesMaxFont = 64;
+        private const float OpenerRulesBoxW = 1620f, OpenerRulesBoxH = 215f;
+
+        /// <summary>
+        /// ГРУППА «ТЕКСТ + CTA» ПОДНЯТА НА 32 px (дизайн-гейт r6, MINOR).
+        ///
+        /// Композиция опенера (лого, рамка, кремовая плашка) НЕ трогается — двигается только содержимое
+        /// плашки, и обе фигуры на одну и ту же величину, так что их взаимное положение сохранено
+        /// пиксель-в-пиксель. Причина: вертикальные поля внутри кремовой плашки (556…1006) разъехались
+        /// вдвое с лишним — сверху до первой строки 92 px, снизу от канта CTA до края плашки 27 px, и
+        /// зелёная кнопка лежала на нижней «рейке» плашки. После подъёма — ≈60/59, поле симметрично.
+        /// Интерлиньяж и кегль не тронуты: это перемещение, а не перевёрстка текста.
+        /// </summary>
+        public const float OpenerGroupLift = 32f;
+        /// <summary>Центр CTA по вертикали (от ВЕРХА экрана): был 921, см. <see cref="OpenerGroupLift"/>.</summary>
+        public const float OpenerCtaCy = 921f - OpenerGroupLift;
+        /// <summary>Подъём бокса правил над центром плашки: был 68, см. <see cref="OpenerGroupLift"/>.
+        /// Знак противоположный — это UI-координата (вверх = +y), а <see cref="OpenerCtaCy"/> считается
+        /// от верха экрана (вверх = −y).</summary>
+        public const float OpenerRulesLiftY = 68f + OpenerGroupLift;
+
         // `bar-track` — не белая заготовка: её заливка #E7E9F5, и uGUI УМНОЖАЕТ тинт на неё, так что
         // «покрасить в токен» напрямую даёт ~10 % грязи (замерено на кадре: золото выходило 224,164,47
         // вместо 248,180,50). Делим токен на заливку спрайта; канал ярче заливки недостижим и просто
@@ -3589,16 +3800,26 @@ namespace ThanksNoThanks
         }
 
         /// <summary>
-        /// Канон-текст правил опенера (build-spec §A, БЕЗ «5 секунд»). Переносы расставлены ВРУЧНУЮ ровно
-        /// по строкам эталона (5 строк) — автоперенос по ширине ректа рвал второе предложение в другом
-        /// месте и оставлял куцую строку в две трети пустоты.
+        /// КАНОН-ТЕКСТ ПРАВИЛ ОПЕНЕРА — ПРОДИКТОВАН ОСНОВАТЕЛЬНИЦЕЙ ДОСЛОВНО (живой плейтест
+        /// 2026-09-22, r6 п.1). Менять нельзя ни на букву: два предложения, ровно эта пунктуация,
+        /// «длиною» (старая редакция build-spec §A несла опечатку «длинною» и четыре строки про
+        /// «правильные решения» — снято её решением).
+        ///
+        /// Перенос ОДИН и стоит по границе предложений: строка = предложение. Автоперенос по ширине
+        /// ректа рвал бы второе предложение в произвольном месте, а тут граница смысловая.
+        /// Сверяется гардом <c>Opener_RulesText_IsFounderCanon_Verbatim</c> — он держит и саму строку,
+        /// и её посадку в драйвере.
         /// </summary>
         public const string OpenerRulesText =
-            "Добро пожаловать в увлекательное шоу длинною в жизнь!\n" +
-            "Пройди от 1 года до 100 лет, постарайся принять\n" +
-            "правильные решения и за всем уследить.\n" +
-            "Со временем жизнь будет становиться всё сложнее и быстрее.\n" +
-            "Уследить за всем невозможно, но давай попробуем!";
+            "Увлекательное шоу длиною в жизнь.\n" +
+            "Делай выборы, которые определят твою судьбу.";
+
+        /// <summary>
+        /// Та же founder-строка ОДНОЙ строкой (переносы — вёрстка, не текст): источник для гардов и
+        /// для доков. Ровно то, что она продиктовала в чате.
+        /// </summary>
+        public const string OpenerRulesCanonFlat =
+            "Увлекательное шоу длиною в жизнь. Делай выборы, которые определят твою судьбу.";
 
         /// <summary>CTA опенера — называет ФИЗИЧЕСКИЙ контрол (founder 99fab3c), не dev-клавишу.</summary>
         public const string OpenerStartHintText = "НАЧАТЬ ЖИЗНЬ — ЖМИ ЗЕЛЁНУЮ КНОПКУ";
@@ -3659,15 +3880,24 @@ namespace ThanksNoThanks
             // вариативный с дефолтом wght=300 (Light), а на эталоне обводка/капитель = 0.135 (≈Regular),
             // так что лёгкое начертание догоняется однопиксельным Outline того же цвета: чисто «вес»,
             // без тени и без каймы другого цвета.
-            _openerRules = NewText("RulesText", _openerPlate.transform, OpenerRulesText, 46,
-                TextAnchor.MiddleCenter, Ink, _body);
+            //
+            // r6 п.1 — ВЁРСТКА ПОДТЯНУТА ПОД КОРОТКИЙ ТЕКСТ. Поле осталось тем же (оно и есть свободная
+            // часть кремовой плашки: низ занят зелёной CTA, что стоит ПОВЕРХ плашки), а вот кегль был
+            // рассчитан на ПЯТЬ строк — потолок best-fit стоял 46. Две founder-строки при 46 занимали
+            // меньше трети высоты поля и болтались в пустоте («не должны болтаться в поле, рассчитанном
+            // на 5»). Потолок поднят до OpenerRulesMaxFont: теперь ширину связывает ДЛИННАЯ строка
+            // (второе предложение), а не искусственный кап, и текст садится в поле как надпись, а не
+            // как строчка мелким шрифтом. Высота бокса ужата до двух строк этого кегля — центр бокса
+            // (anchoredPosition.y = 68) НЕ ТРОНУТ: он выверен по эталону и держит композицию опенера.
+            _openerRules = NewText("RulesText", _openerPlate.transform, OpenerRulesText,
+                OpenerRulesMaxFont, TextAnchor.MiddleCenter, Ink, _body);
             var rrt = _openerRules.rectTransform;
             rrt.anchorMin = rrt.anchorMax = new Vector2(0.5f, 0.5f);
             rrt.pivot = new Vector2(0.5f, 0.5f);
-            rrt.sizeDelta = new Vector2(1620f, 260f);
-            rrt.anchoredPosition = new Vector2(0f, 68f);
+            rrt.sizeDelta = new Vector2(OpenerRulesBoxW, OpenerRulesBoxH);
+            rrt.anchoredPosition = new Vector2(0f, OpenerRulesLiftY);
             _openerRules.resizeTextForBestFit = true;
-            _openerRules.resizeTextMinSize = 26; _openerRules.resizeTextMaxSize = 46;
+            _openerRules.resizeTextMinSize = 34; _openerRules.resizeTextMaxSize = OpenerRulesMaxFont;
             _openerRules.verticalOverflow = VerticalWrapMode.Truncate;   // best-fit честно держит и ВЫСОТУ
             var weight = _openerRules.gameObject.AddComponent<Outline>();
             weight.effectColor = Ink;
@@ -3679,12 +3909,12 @@ namespace ThanksNoThanks
             var startEdge = NewSprite("StartPlateEdge", _openerPanel.transform, Sprite("bar-track"));
             startEdge.type = Image.Type.Sliced;
             startEdge.color = OnBarTrack(Ink);
-            AnchorPx(startEdge.rectTransform, OpenerPlateCx, 921f, 972f, 116f);
+            AnchorPx(startEdge.rectTransform, OpenerPlateCx, OpenerCtaCy, 972f, 116f);
 
             var start = NewSprite("StartPlate", _openerPanel.transform, Sprite("bar-track"));
             start.type = Image.Type.Sliced;
             start.color = OnBarTrack(GoGreen);
-            AnchorPx(start.rectTransform, OpenerPlateCx, 921f, 960f, 104f);
+            AnchorPx(start.rectTransform, OpenerPlateCx, OpenerCtaCy, 960f, 104f);
             var startText = NewText("StartText", start.transform,
                 OpenerStartHintText, 46, TextAnchor.MiddleCenter, Ink, _display);
             Inset(startText.rectTransform, 26f);   // ≥ видимого скругления bar-track (16) → глифы всегда на плашке
@@ -3887,11 +4117,18 @@ namespace ThanksNoThanks
             // field's 286..892) — the old «just below the card» anchor now lands on the answer plates.
             AnchorPx(blockBannerImg.rectTransform, BlockBannerRect.x, BlockBannerRect.y,
                 BlockBannerRect.z, BlockBannerRect.w);
+            // Кегль 34 (было 40): на перевёрстанном баннере (дизайн-гейт r6) глифы кегля 40 вылезали
+            // за ВИДИМУЮ пилюлю `bar-track` — плашка стала ниже, а буква нет. Высота баннера и кегль
+            // подобраны ПАРОЙ: глифы 34-го кегля рисуются в 44 px, пилюля съедает по 16 px сверху и
+            // снизу, итого 80 — и это те же пропорции «строка/поле», что у чипа цены (40 на 78).
             var blockTxt = NewText("BlockText", _blockBanner.transform,
-                "Как жаль, у вас нет денег на это!", 40, TextAnchor.MiddleCenter, Color.white, _display);
+                "Как жаль, у вас нет денег на это!", 34, TextAnchor.MiddleCenter, Color.white, _display);
             blockTxt.horizontalOverflow = HorizontalWrapMode.Overflow;   // single line, best-fit shrinks to width
-            Inset(blockTxt.rectTransform, 40f);
-            blockTxt.resizeTextForBestFit = true; blockTxt.resizeTextMinSize = 20; blockTxt.resizeTextMaxSize = 44;
+            // Поле 16 px = видимое скругление `bar-track` (тот же порог, что у CTA опенера): глифы всегда
+            // на плашке. Было 40 — под баннер 900×110; на перевёрстанном 780×80 (дизайн-гейт r6) сорок
+            // пикселей не оставили бы высоты вовсе (80 − 80 = 0).
+            Inset(blockTxt.rectTransform, 16f);
+            blockTxt.resizeTextForBestFit = true; blockTxt.resizeTextMinSize = 20; blockTxt.resizeTextMaxSize = 34;
             DisplayFx(blockTxt);
             SetBlockBannerVisible(false);
 
@@ -4024,15 +4261,54 @@ namespace ThanksNoThanks
             burnoutSub.verticalOverflow = VerticalWrapMode.Truncate;
             _burnoutPlate.SetActive(false);
 
-            // ---- Breakup notice: transient red «РАССТАЛИСЬ» plate (shown ~2s on a breakup) ----
-            _breakupPlate = NewSolid("BreakupPlate", _gamePanel.transform, TimerRed).gameObject;
-            // Right under the relationships bar it reports on (the old 0.775/0.70 anchor now lands on the
-            // age badge). Transient (~2s) — drawn above the card.
-            AnchorPx(_breakupPlate.GetComponent<RectTransform>(), 674f, 215f, 360f, 96f);
+            // ---- Breakup notice: transient «РАССТАЛИСЬ» plate (shown ~2s on a breakup) ----
+            //
+            // ⚠ ПЕРЕСОБРАНА ГЕНЕРАТОРОМ ПЛАШЕК r4 (дизайн-гейт r6, MAJOR). Была `NewSolid` — плоский
+            // прямоугольник сплошного TimerRed: без канта, без скругления, без тени, ЧЕТВЁРТЫЙ красный
+            // на экране и единственная фигура HUD, нарисованная не по языку арт-пака. Теперь это та же
+            // конструкция, что у плашек блица (BuildRingPlateSprite): чёрный кант → КРАСНАЯ ОБОЙМА
+            // цветом ПАКА (PackRed — замерен на `btn-no`) → КРЕМОВОЕ поле, и тёмно-синий текст на нём.
+            // Красного на экране стало меньше, а не больше: это плашка-значок, а не красное пятно.
+            _breakupPlate = NewGroup("BreakupPlate", _gamePanel.transform);
+            _breakupPlateSprite = BuildRingPlateSprite("BreakupPlate",
+                Mathf.RoundToInt(BreakupPlateW), Mathf.RoundToInt(BreakupPlateH),
+                BreakupPlateRadius, Ink,
+                (BreakupPlateKeyline, PackRed),
+                (BreakupPlateKeyline + BreakupPlateBezel, Cream));
+            // ЖЁСТКАЯ ТЕНЬ — ОТДЕЛЬНОЙ КОПИЕЙ СПРАЙТА, а не компонентом Shadow: Shadow дублирует МЕШ
+            // (у Image это прямоугольник рект-трансформа), то есть тень вышла бы прямоугольной из-под
+            // скруглённой плашки. Тот же приём, что у подписи блица (см. ApplyBlitzLabel).
+            var breakupShade = NewSprite("BreakupPlateShadow", _breakupPlate.transform, _breakupPlateSprite);
+            Stretch(breakupShade.rectTransform);
+            breakupShade.rectTransform.anchoredPosition = BreakupPlateShadowOffset;
+            breakupShade.color = Ink;
+            var breakupFace = NewSprite("BreakupPlateFace", _breakupPlate.transform, _breakupPlateSprite);
+            Stretch(breakupFace.rectTransform);   // цвет уже в текстуре — тинт только исказил бы токены
+            // r6 п.3 — ПЛАШКА ВЕРНУЛАСЬ НА СЛОТ ОТНОШЕНИЙ.
+            //
+            // Куда и почему она уезжала: до 2026-07-31 плашка стояла на нормированном якоре
+            // (0.775, 0.70). Коммит c824ddd1 «increment(hud-row): full HUD rebuilt on the art pack»
+            // перевёл ВЕСЬ HUD с нормированных якорей на пиксельные ректы арт-пака (RelBarRect,
+            // HealthBarRect, AgeBadgeRect…), и старая точка плашки стала попадать на новый бейдж
+            // возраста. Её отодвинули руками — 674, 215 — лишь бы не пересекалась, x взяли от
+            // RelBarRect (674), а y назначили на глаз. Из ректа шкалы (y 29.9…172.5) это вынесло
+            // плашку ВНИЗ, в случайно свободный зазор под ним: ни r3 (38015cb, трогает только
+            // BurnoutPlateRect), ни r5 к этому месту не возвращались. Отсюда и «уехала вниз».
+            //
+            // Теперь позиция ВЫВОДИТСЯ из слота, а не назначается: центр плашки = центр RelBarRect.
+            // Слот в этот момент всегда свободен — расставание гасит балансир (ApplyAgeGates по
+            // RelationshipsLost), так что плашка занимает ровно то место, о котором она сообщает.
+            // Собственный размер плашки сохранён (BreakupPlateW×H): на слот она САДИТСЯ, а не
+            // растягивается в него. Сверяется гардом Breakup_Plate_SitsOnRelationshipSlot.
+            AnchorPx(_breakupPlate.GetComponent<RectTransform>(),
+                BreakupPlateRect.x, BreakupPlateRect.y, BreakupPlateRect.z, BreakupPlateRect.w);
+            // Текст — ТЁМНО-СИНИЙ INK на кремовом поле, кеглем ряда HUD (дизайн-гейт r6): белый по
+            // красному был «ещё одной кнопкой», а плашка — это ТАБЛИЧКА. DisplayFx (тёмная обводка +
+            // тень) снят по той же причине, по какой его нет у CTA опенера: тёмный текст на светлом
+            // поле от тёмной обводки только мутнеет.
             var breakupTxt = NewText("BreakupText", _breakupPlate.transform,
-                "РАССТАЛИСЬ", 40, TextAnchor.MiddleCenter, Color.white, _display);
-            Stretch(breakupTxt.rectTransform);
-            DisplayFx(breakupTxt);
+                "РАССТАЛИСЬ", BreakupTextFont, TextAnchor.MiddleCenter, Ink, _display);
+            Inset(breakupTxt.rectTransform, BreakupPlateKeyline + BreakupPlateBezel);
             _breakupPlate.SetActive(false);
 
             BuildCrisisHud();
@@ -4589,10 +4865,17 @@ namespace ThanksNoThanks
                     float hi = ThanksNoThanks.Game.RelZoneMax - (on ? AlarmHysteresis : 0f);
                     return sc.Relationships < lo || sc.Relationships > hi;
                 default:
-                    // Деньги: тревога РОВНО по существующему сигналу блокировки — карточка BLOCK$ и денег
-                    // не хватает. Сигнал дискретный (меняется только со сменой карточки/платежом), так что
-                    // дребезжать нечему и гистерезис ему не нужен.
-                    return _game.CurrentCardBlocked;
+                    // ДЕНЬГИ: тревога по живому сигналу блокировки (BLOCK$ и денег не хватает) — С
+                    // ЗАЗОРОМ, см. MoneyAlarmHysteresis. Прежний комментарий здесь утверждал, что
+                    // сигнал «дискретный, меняется только со сменой карточки/платежом, дребезжать
+                    // нечему»; с r6 п.2 это НЕПРАВДА — он пересчитывается каждый тик от текущих денег,
+                    // а деньги ползут непрерывно (стоимость жизни) и прыгают тиками крутилки.
+                    //   гаснет  — РОВНО на цене (Money ≥ price): карточка ожила, тревоге нечего держать;
+                    //   зажигается — только когда счёт провалился на δ ниже цены.
+                    if (!_game.CurrentCardBlocked) return false;
+                    if (on) return true;
+                    return !_game.CurrentCardHasPrice
+                           || _game.Money < _game.CurrentCardPrice - MoneyAlarmHysteresis;
             }
         }
 
@@ -4602,10 +4885,10 @@ namespace ThanksNoThanks
         {
             if (_game == null) return;
             bool frozen = _game.Paused;
-            // Сменилась ли карточка В ЭТОМ такте. Тревога ДЕНЕГ — это CurrentCardBlocked, а он фиксируется
-            // на ВЫДАЧЕ карточки, поэтому гаснуть он умеет ровно двумя способами: игрок довёл сумму до
-            // цены (починка) ИЛИ пришла другая карточка (не заслуга игрока). Второе не должно давать
-            // салют НИКОГДА — даже если крутилку крутили секунду назад на заблокированной карточке.
+            // Сменилась ли карточка В ЭТОМ такте. Тревога ДЕНЕГ — это живой CurrentCardBlocked (r6 п.2),
+            // поэтому гаснуть он умеет ровно двумя способами: игрок довёл сумму до цены (починка) ИЛИ
+            // пришла другая карточка (не заслуга игрока). Второе не должно давать салют НИКОГДА — даже
+            // если крутилку крутили секунду назад на заблокированной карточке.
             bool cardChanged = !ReferenceEquals(_game.CurrentCard, _lastReflectCard);
             _lastReflectCard = _game.CurrentCard;
             for (int i = 0; i < AlarmCount; i++)
@@ -4623,6 +4906,10 @@ namespace ThanksNoThanks
                 else
                 {
                     bool on = AlarmRaised(scale, _alarmOn[i]);
+                    // НОВАЯ КАРТОЧКА — НОВЫЙ ПРЕДМЕТ РАЗГОВОРА: зазор MoneyAlarmHysteresis гасит дребезг
+                    // ВНУТРИ жизни одной карточки, но вердикт ВЫДАЧИ обязан читаться точно. Иначе
+                    // карточка, пришедшая запертой «всего на рубль», въезжала бы с некрасной банкой.
+                    if (scale == AlarmScale.Money && cardChanged) on = _game.CurrentCardBlocked;
                     if (on && !_alarmOn[i])
                     {
                         _alarmClock[i] = 0f;      // вход в тревогу — фаза с пика
@@ -4634,6 +4921,18 @@ namespace ThanksNoThanks
                             Audio.Play(scale == AlarmScale.Relations
                                 ? SoundEvent.ZoneOut
                                 : AudioCatalog.ForAlarm(scale));
+                        // ✍ ГОЛОС ЖИВОГО ЗАПИРАНИЯ (находка код-скептика r6, MINOR; громкость и сама
+                        // уместность — на ушной гейт основательницы). «Вомп-вомп» BLOCK$ звучал только
+                        // на ВЫДАЧЕ запертой карточки (OnCardChanged), а живое «заперлась прямо сейчас»
+                        // уходило молча: картинка гасла без звука.
+                        // ПОЧЕМУ ИМЕННО ЗДЕСЬ, А НЕ НА ФРОНТЕ КАРТИНКИ: визуальный фронт ходит по цене
+                        // БЕЗ зазора и на границе дребезжит; фронт тревоги отодвинут на
+                        // MoneyAlarmHysteresis и потому редок. И это ТА ЖЕ ПАРА ГОЛОСОВ, что играет на
+                        // выдаче запертой карточки (BlockMoney + AlarmMoney), — то есть одно и то же
+                        // событие звучит одинаково, случилось оно на выдаче или посреди жизни карточки.
+                        // На СМЕНЕ карточки не дублируем: там BlockMoney уже сыграл OnCardChanged.
+                        if (scale == AlarmScale.Money && !cardChanged && Audio != null && !frozen)
+                            Audio.Play(SoundEvent.BlockMoney);
                     }
                     // …и симметрично: маркер отношений ВЕРНУЛСЯ в зелёную зону — мягкий позитивный блип.
                     if (!on && _alarmOn[i] && scale == AlarmScale.Relations && Audio != null && !frozen)
@@ -6413,6 +6712,7 @@ namespace ThanksNoThanks
             SetCardBlockedDim(blocked);           // S10: dim the card (frame tint) + red banner when unaffordable
             SetBlockBannerVisible(blocked);
             RefreshPriceLabel();                  // S10: show the required amount on any BLOCK$ card
+            _blockedShown = blocked;              // r6 п.2: выдача — точка синхронизации живого фронта
             // TIMELINE-веха больше НИЧЕГО не объявляет: жёлтая рубрика-баннер и её блокирующий бит сняты
             // (плейтест основательницы 2026-08-05 — «их нет в макетах»). Веха приходит обычной карточкой;
             // голос Ведущего живёт в облачке и остаётся ответным (OnAnswerResolved), поэтому здесь его
@@ -6471,6 +6771,44 @@ namespace ThanksNoThanks
             if (bub) _bubbleText.text = _bubbleTimer.Text;
         }
 
+        /// <summary>
+        /// ЖИВАЯ ОТРИСОВКА НЕДОСТУПНОСТИ (r6 п.2). Зовётся КАЖДЫЙ КАДР обычного хода, потому что
+        /// доступность карточки теперь живая и ходит в обе стороны: игрок докрутил до цены — баннер
+        /// «Как жаль…» и приглушение уходят, зелёная оживает; стоимость жизни съела разницу — всё
+        /// возвращается. До r6 это решалось ОДИН раз на выдаче (OnCardChanged), и запертая карточка
+        /// оставалась запертой, сколько бы игрок ни крутил.
+        ///
+        /// Разделено на два слоя по цене вызова:
+        ///   • ТИНТ ПЛАШЕК переписывается каждый кадр — это одно сравнение цвета, и так уже было;
+        ///   • БАННЕР / ПРИГЛУШЕНИЕ / ЧИП ЦЕНЫ — только НА ФРОНТЕ (_blockedShown): ApplyPriceLabel
+        ///     меряет текст и перекладывает ректы (включая бокс вопроса), и гонять это каждый кадр —
+        ///     лишняя работа и дрожь вёрстки.
+        ///
+        /// ⚠ ЗЕЛЁНАЯ ГАСНЕТ ОДНА, КРАСНАЯ НЕ ТРОГАЕТСЯ (решение основательницы, живой плейтест
+        /// 2026-09-22). Недоступна именно ПОКУПКА — «спасибо, не надо» доступно всегда и подсвечено
+        /// как обычно; гашение обеих читалось как «экран умер целиком». Тон зелёной — тот же
+        /// <see cref="CardBlockDim"/>, которым приглушается сама карточка: одно сообщение, один тон.
+        /// Ввод по зелёной при этом глушится не цветом, а blockedSkip в OnInput (без панча и звука).
+        /// </summary>
+        private void ReflectBlockedVisuals()
+        {
+            bool blocked = _game.CurrentCardBlocked;
+
+            var yesTint = blocked ? CardBlockDim : Color.white;
+            if (_yesPlate.color != yesTint) _yesPlate.color = yesTint;
+            if (_noPlate.color != Color.white) _noPlate.color = Color.white;
+
+            if (blocked == _blockedShown) return;
+            _blockedShown = blocked;
+            SetCardBlockedDim(blocked);
+            SetBlockBannerVisible(blocked);
+            RefreshPriceLabel();
+            // ⚠ ЗВУКА ЗДЕСЬ НЕТ СОЗНАТЕЛЬНО. Этот фронт — ЧЕСТНЫЙ и потому ЧАСТЫЙ: он ходит ровно по
+            // цене, без зазора (контракт основательницы r6 п.2 требует именно этого от КАРТИНКИ), и на
+            // границе цены переключается каждые пару секунд. Голос живого запирания висит на фронте
+            // ТРЕВОГИ ДЕНЕГ — у той есть MoneyAlarmHysteresis, и она срабатывает редко (см. ReflectAlarms).
+        }
+
         // BLOCK$ price sub-line: reads the single source (Game.CurrentCardPrice / CurrentCardBlocked) and
         // shows the required amount on the card in both the affordable and the blocked (dimmed) states.
         private void RefreshPriceLabel()
@@ -6497,8 +6835,15 @@ namespace ThanksNoThanks
                 ReflectCardTextBand();   // band may now be free → the question gets its full box back
                 return;
             }
+            // ОДНА ФОРМУЛИРОВКА В ОБОИХ СОСТОЯНИЯХ (дизайн-гейт r6, MINOR). Было «цена 100 ₽» в блоке и
+            // «СТОИТ 100 ₽» в доступном: рассинхрон регистра (строчная против капса) ПЛЮС скачок ширины
+            // чипа на ±18 px в момент, когда карточка оживает, — чип дёргался ровно на том фронте, за
+            // которым игрок и следит. Теперь строка одна и та же, и живой пересчёт r6 не перекладывает
+            // ни чип, ни бокс вопроса под ним: меняется ТОЛЬКО цвет текста —
+            //   бело-лавандовый TextLight = «столько нужно, и столько у тебя нет»;
+            //   золото Bulb = «столько это стоит, и ты можешь себе это позволить».
             int p = Mathf.RoundToInt((float)price);
-            _cardPriceText.text = (blocked ? "цена " : "СТОИТ ") + p + " ₽";
+            _cardPriceText.text = "СТОИТ " + p + " ₽";
             _cardPriceText.color = blocked ? TextLight : Bulb;
 
             // Size the text rect to its content, then wrap the dark plate around it (with padding) so the

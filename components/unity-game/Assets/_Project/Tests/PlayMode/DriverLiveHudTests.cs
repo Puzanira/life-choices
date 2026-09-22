@@ -65,7 +65,7 @@ namespace ThanksNoThanks.Tests.PlayMode
         }
 
         [UnityTest]
-        public IEnumerator PriceLine_Blocked_RealCard_Showsцена_WithBanner()
+        public IEnumerator PriceLine_Blocked_RealCard_ShowsСТОИТ_WithBanner()
         {
             // Broke path: a REAL BLOCK$ card (MD03, 60₽) is drawn while money < price → the on-card price
             // line reads «цена 60 ₽» (S10 mockup wording) and the S10 block banner is up. Asserts the Text via the
@@ -81,7 +81,10 @@ namespace ThanksNoThanks.Tests.PlayMode
             Assert.IsTrue(driver.Game.CurrentCardBlocked, "drawn while broke → blocked");
             Assert.IsTrue(driver.CardPriceText.gameObject.activeSelf, "price line shown on a blocked BLOCK$ card");
             StringAssert.Contains("60", driver.CardPriceText.text, "shows the required amount");
-            StringAssert.Contains("цена", driver.CardPriceText.text, "blocked wording (S10: «цена N ₽»)");
+            // ⚠ ФОРМУЛИРОВКА СВЕДЕНА К ОДНОЙ (дизайн-гейт r6): было «цена N ₽» в блоке против
+            // «СТОИТ N ₽» в доступном — разный регистр и скачок ширины чипа на живом фронте r6 п.2.
+            // Состояние теперь несёт ЦВЕТ, а не текст (см. PlaytestFixesR6Tests.PriceChip_SaysTheSame…).
+            StringAssert.Contains("СТОИТ", driver.CardPriceText.text, "blocked wording (S10: «СТОИТ N ₽»)");
             Assert.IsTrue(driver.BlockBanner.activeSelf, "S10 block banner is up alongside the price");
 
             Object.Destroy(go);

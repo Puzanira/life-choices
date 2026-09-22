@@ -200,12 +200,12 @@ namespace ThanksNoThanks.Tests.PlayMode
 
         // ============================================================ S1 opener
 
-        /// <summary>Канон-текст правил опенера (build-spec §A) — независимая копия, чтобы тест реально
-        /// СВЕРЯЛ строку драйвера с каноном, а не сравнивал константу саму с собой.</summary>
+        /// <summary>Канон-текст правил опенера — НЕЗАВИСИМАЯ КОПИЯ продиктованного основательницей
+        /// (r6 п.1, живой плейтест 2026-09-22), чтобы тест реально СВЕРЯЛ строку драйвера с каноном,
+        /// а не сравнивал константу саму с собой. Набран здесь ЗАНОВО с её формулировки, букву в
+        /// букву; ссылаться отсюда на GameDriver.OpenerRulesCanonFlat НЕЛЬЗЯ — это и убило бы сверку.</summary>
         private const string CanonRules =
-            "Добро пожаловать в увлекательное шоу длинною в жизнь! Пройди от 1 года до 100 лет, "
-            + "постарайся принять правильные решения и за всем уследить. Со временем жизнь будет "
-            + "становиться всё сложнее и быстрее. Уследить за всем невозможно, но давай попробуем!";
+            "Увлекательное шоу длиною в жизнь. Делай выборы, которые определят твою судьбу.";
 
         private static string Squash(string s)
             => System.Text.RegularExpressions.Regex.Replace(s ?? string.Empty, @"\s+", " ").Trim();
@@ -281,7 +281,7 @@ namespace ThanksNoThanks.Tests.PlayMode
 
             // (3) The CANON rules copy, whole and unedited, with its drawn glyphs inside the cream plate.
             Assert.AreEqual(CanonRules, Squash(driver.OpenerRules.text),
-                "правила опенера = канон build-spec §A (без «5 секунд»), целиком");
+                "правила опенера = founder-канон r6 п.1, целиком и дословно");
             AssertGeneratedInPill(driver.OpenerRules, driver.OpenerPlate, BarTrackPill, "канон-текст правил");
             AssertNoTofu(driver.OpenerRules, "канон-текст правил");
 

@@ -458,14 +458,18 @@ namespace ThanksNoThanks.Tests
         }
 
         [Test]
-        public void BlockedCard_AffordabilitySnapshot_CrankDuringTimer_DoesNotUnblock()
+        public void BlockedCard_LiveAffordability_CrankDuringTimer_UNBLOCKS_AndTheYesGoesThrough()
         {
-            // BLOCK$ is fixed «на момент показа»: cranking past the price while the blocked card is
-            // up must NOT unblock it — any answer still skips with no Δ and no necrolog line.
+            // ⚠ ПРАВИЛО ПЕРЕВЁРНУТО В r6 п.2 (решение основательницы, живой плейтест 2026-09-22).
+            // До r6 доступность была СНИМКОМ «на момент показа»: игрок докручивал нужную сумму прямо
+            // под запертой карточкой, видел её на счету — и карточка всё равно оставалась запертой до
+            // таймаута. Прежний гард ровно это и закреплял («still blocked — affordability snapshot is
+            // at draw time»), то есть охранял саму жалобу. Теперь доступность ЖИВАЯ: накрутил до цены —
+            // карточка ожила, ДА проходит, списывает цену и применяет Δ с некрологом, как у обычной.
             var open = Plain("OPEN", 18);
             var block = Block("MD03", 30);           // price 60₽
             block.YesDeltas = new[] { new ScaleDelta(Scale.Health, DeltaKind.Add, -50) };
-            block.YesNecrolog = "НЕ ДОЛЖНО ПОПАСТЬ";
+            block.YesNecrolog = "КУПИЛ НА ДОКРУЧЕННЫЕ";
             var after = Plain("AFTER", 40);
             var g = NewGame(() => false, open, block, after);
 
@@ -476,16 +480,63 @@ namespace ThanksNoThanks.Tests
 
             for (int i = 0; i < 200; i++) Crank(g);  // crank during the card's phase window (age 5 → 10 s)
             Assert.GreaterOrEqual(g.Money, 60.0, "now affordable in raw money terms");
-            Assert.IsTrue(g.CurrentCardBlocked, "still blocked — affordability snapshot is at draw time");
+            Assert.IsFalse(g.CurrentCardBlocked,
+                "ОЖИЛА: доступность считается от ТЕКУЩИХ денег, а не от снимка выдачи");
 
             int health = g.Scales.Health;
-            Yes(g);                                  // any answer = skip regardless of the new balance
-            Assert.AreEqual("AFTER", g.CurrentCard.Id, "skipped to the next card");
-            Assert.AreEqual(health, g.Scales.Health, "no Δ applied on the late-crank skip");
+            double money = g.Money;
+            Yes(g);                                  // …и ДА теперь проходит как у обычной карточки
+            Assert.AreEqual("AFTER", g.CurrentCard.Id, "карточка разрешилась и уступила следующей");
+            Assert.AreEqual(health - 50, g.Scales.Health, "Δ применена — это НЕ пропуск");
+            Assert.AreEqual(money - 60.0, g.Money, Eps, "списана ровно цена BLOCK$");
 
             Yes(g);                                  // finish → finale
+            CollectionAssert.Contains(g.Necrolog.StoryLines, "КУПИЛ НА ДОКРУЧЕННЫЕ",
+                "строка некролога есть — карточка была сыграна, а не пропущена");
+        }
+
+        [Test]
+        public void AffordableCard_LiveAffordability_CostOfLivingDuringTimer_RE_BLOCKS_It()
+        {
+            // …и ТА ЖЕ ЖИВАЯ ДОСТУПНОСТЬ В ОБРАТНУЮ СТОРОНУ (r6 п.2): карточка пришла по карману, но
+            // стоимость жизни капает, пока игрок думает. Просела ниже цены — карточка запирается
+            // обратно, и ДА снова уходит пропуском без Δ и без строки некролога.
+            // ДЁШЕВАЯ карточка взята намеренно: запас над ценой надо проесть стоимостью жизни
+            // (0.5 ₽/с) В ПРЕДЕЛАХ ЖИЗНИ КАРТОЧКИ — у возраста 30 это 6 с (AnswerSecondsMature),
+            // то есть окно всего на 3 ₽. На 60-рублёвой цене запас проедался бы пять минут, и
+            // карточка ушла бы по таймауту раньше, чем вернулась бы блокировка.
+            var open = Plain("OPEN", 18);
+            var block = Block("FA02", 30);           // price 10₽
+            block.YesDeltas = new[] { new ScaleDelta(Scale.Health, DeltaKind.Add, -50) };
+            block.YesNecrolog = "НЕ ДОЛЖНО ПОПАСТЬ";
+            var after = Plain("AFTER", 40);
+            var g = NewGame(() => false, open, block, after);
+
+            g.StartLife(); No(g); g.Tick(2f);        // open money (broke)
+            while (g.Money < 11.0) Crank(g);         // ЧУТЬ выше цены — запас на один-два рубля
+            No(g);                                   // OPEN resolved → FA02 drawn AFFORDABLE
+            Assert.AreEqual("FA02", g.CurrentCard.Id);
+            Assert.IsFalse(g.CurrentCardBlocked, "пришла по карману");
+
+            // …и проедаем запас стоимостью жизни, не трогая карточку.
+            double over = g.Money - 10.0;
+            Assert.Greater(over, 0.0, "запас над ценой действительно есть");
+            float eat = (float)(over / Game.CostOfLivingPerSec) + 0.4f;
+            Assert.Less(eat, Game.AnswerSecondsMature, "проедание укладывается в жизнь карточки");
+            g.Tick(eat);
+
+            Assert.Less(g.Money, 10.0, "стоимость жизни съела разницу");
+            Assert.IsTrue(g.CurrentCardBlocked, "ЗАПЕРЛАСЬ ОБРАТНО — пересчёт живой в обе стороны");
+
+            int health = g.Scales.Health;
+            double money = g.Money;
+            Yes(g);
+            Assert.AreEqual(health, g.Scales.Health, "Δ не применена — это пропуск");
+            Assert.AreEqual(money, g.Money, Eps, "ничего не списано с запертой");
+
+            Yes(g);
             CollectionAssert.DoesNotContain(g.Necrolog.StoryLines, "НЕ ДОЛЖНО ПОПАСТЬ",
-                "no necrolog line for the still-blocked card");
+                "строки некролога нет — карточка ушла пропуском");
         }
 
         [Test]

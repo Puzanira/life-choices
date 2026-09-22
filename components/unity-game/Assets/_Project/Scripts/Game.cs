@@ -806,11 +806,70 @@ namespace ThanksNoThanks
         private bool InputsFrozen => Paused && !PausedInputsLive;
 
         /// <summary>
-        /// BLOCK$ state of the CURRENT card, fixed at draw time: true when the card is a BLOCK$ card and
-        /// money was below its price when it came up. Timer still runs; any answer/timeout skips it with
-        /// no Δ, no necrolog line, no reschedule (design-agent variant «а», мокап S10).
+        /// BLOCK$-состояние ТЕКУЩЕЙ карточки. Любой ответ/таймаут по гашёной = пропуск без Δ, без строки
+        /// некролога и без переноса (design-agent вариант «а», мокап S10); таймер при этом идёт.
+        ///
+        /// ⚠ r6 п.2 — ЭТО БОЛЬШЕ НЕ СНИМОК НА ВЫДАЧЕ, А ЖИВОЕ СВОЙСТВО. Раньше значение фиксировалось
+        /// один раз в <see cref="Advance"/> и не менялось, пока карточка висит: игрок докручивал нужную
+        /// сумму на глазах у запертой карточки, и она оставалась запертой до самого таймаута (жалоба
+        /// основательницы, живой плейтест 2026-09-22). Теперь доступность считается ОТ ТЕКУЩИХ ДЕНЕГ
+        /// и ходит В ОБЕ СТОРОНЫ: накрутил до цены — карточка ожила; стоимость жизни съела разницу —
+        /// заперлась обратно. Пересчёт бесплатный (одно сравнение), поэтому никакого кэша нет вовсе —
+        /// нечему и рассинхронизироваться.
+        ///
+        /// ⚠ КРЕДИТНЫЕ (<see cref="CreditCards"/>) — ИСКЛЮЧЕНИЕ, И ОНО ЖИВЁТ НА ОДНОСТОРОННЕЙ ЗАЩЁЛКЕ.
+        /// У них уход в минус и есть содержание карточки, а взнос по ипотеке банк гейтит РОВНО ОДИН РАЗ,
+        /// на показе (<see cref="UnaffordableNow"/> их тем же правилом освобождает от перепроверки на
+        /// ответе). Отбирать УЖЕ ОДОБРЕННЫЙ кредит нельзя — поэтому защёлка выдачи
+        /// (<see cref="_blockedAtDeal"/>) работает ТОЛЬКО В ОДНУ СТОРОНУ: она может удержать «не заперта»
+        /// (одобрили на показе — значит одобрено до конца карточки), но НЕ МОЖЕТ удержать «заперта».
+        ///
+        /// ⚠ ЗАЧЕМ ИМЕННО ОДНОСТОРОННЯЯ (находка код-скептика r6, MAJOR). Первая редакция читала для
+        /// кредитных голый `_blockedAtDeal`, и защёлка держала В ОБЕ СТОРОНЫ: `FC02` (ранняя ипотека,
+        /// взнос 25 ₽), ВЫДАННАЯ НА МЕЛИ, оставалась запертой НАВСЕГДА — игрок докручивал 25 ₽ на её
+        /// глазах, а карточка не отпиралась. Это ровно та жалоба, с которой основательница пришла в r6,
+        /// и вдобавок прямое противоречие канону §3.5 «кредитные не блокируются вовсе». Теперь путь
+        /// «заперта → ожила» открыт и кредитным, а обратный («банк передумал, пока ты думал») закрыт.
         /// </summary>
-        public bool CurrentCardBlocked { get; private set; }
+        public bool CurrentCardBlocked =>
+            CurrentCard != null
+            && (IsCreditCard(CurrentCard)
+                    ? (_blockedAtDeal && WouldBeBlocked(CurrentCard))
+                    : WouldBeBlocked(CurrentCard));
+
+        /// <summary>
+        /// Вердикт ВЫДАЧИ: была ли карточка заперта в момент, когда её показали. Для обычных BLOCK$ это
+        /// теперь лишь историческая отметка (живое состояние считает <see cref="CurrentCardBlocked"/>),
+        /// а для КРЕДИТНЫХ — единственный источник истины на всю жизнь карточки.
+        /// </summary>
+        private bool _blockedAtDeal;
+
+        /// <summary>
+        /// Последнее значение <see cref="CurrentCardBlocked"/>, о котором уже сообщено наружу, — чтобы
+        /// <see cref="CardBlockedChanged"/> поднималось на ФРОНТЕ, а не каждый тик.
+        /// </summary>
+        private bool _blockedAnnounced;
+
+        /// <summary>
+        /// Доступность текущей карточки ПЕРЕКЛЮЧИЛАСЬ (r6 п.2) — в любую сторону. Драйвер по этому
+        /// событию снимает/возвращает баннер «Как жаль…», приглушение карточки и чип цены; тинт зелёной
+        /// плашки он и так переписывает каждый кадр. Поднимается из <see cref="Tick"/> после того, как
+        /// деньги за этот такт уже сдвинулись (<see cref="IntegrateMoney"/>), и только на фронте.
+        /// </summary>
+        public event Action CardBlockedChanged;
+
+        /// <summary>
+        /// Свести «объявленное» состояние с фактическим и поднять фронт, если он есть. Зовётся и из
+        /// тика (живой пересчёт), и из точек выдачи — чтобы новая карточка не унесла с собой чужой
+        /// фронт от предыдущей.
+        /// </summary>
+        private void NoteBlockedChanged()
+        {
+            bool now = CurrentCardBlocked;
+            if (now == _blockedAnnounced) return;
+            _blockedAnnounced = now;
+            CardBlockedChanged?.Invoke();
+        }
 
         /// <summary>
         /// True when the CURRENT card is a BLOCK$ card with a known price. Drives the on-card price line
@@ -1169,6 +1228,12 @@ namespace ThanksNoThanks
             IntegrateRelationships(dt);            // drift + RELATION_AXIS + breakup (no death), real-time
             IntegrateChild(dt);                    // flash scheduler + missed-flash bad-parent penalty (no death)
 
+            // r6 п.2: деньги за этот такт уже сдвинулись (стоимость жизни/дренажи выше, крутилка — в
+            // HandleInput этого же кадра), значит доступность текущей карточки могла ПЕРЕКЛЮЧИТЬСЯ —
+            // в любую сторону. Само значение живое и читается свойством; здесь только поднимается
+            // фронт для драйвера, чтобы он снял/вернул баннер и чип цены, не перекладывая их каждый кадр.
+            NoteBlockedChanged();
+
             if (Scales.HealthDepleted) { End("здоровье не выдержало"); return; }
             if (EnergyOpen && Scales.EnergyDepleted) { End("полное выгорание"); return; }
             MaybeTriggerLt08();                    // «Пора подлечиться!» when health<40% & age≥30
@@ -1367,8 +1432,11 @@ namespace ThanksNoThanks
                     continue;
                 }
                 CurrentCard = c;
-                // BLOCK$ affordability fixed at draw time («на момент показа денег меньше цены»).
-                CurrentCardBlocked = WouldBeBlocked(c);
+                // Вердикт ВЫДАЧИ («на момент показа денег меньше цены»). Для обычных BLOCK$ это
+                // отметка истории — живое состояние считает CurrentCardBlocked; для КРЕДИТНЫХ это
+                // и есть их единственный гейт (r6 п.2).
+                _blockedAtDeal = WouldBeBlocked(c);
+                _blockedAnnounced = CurrentCardBlocked;   // новая карточка не тащит чужой фронт
                 _moneyGraceCard = false;   // льгота одноразовая — тратится на ПЕРВОЙ же выданной карточке
                 // §3: длительность = фаза возраста ЭТОЙ карточки (блиц идёт своей веткой).
                 CardTimerMax = AnswerSecondsFor(c.Age);
@@ -1724,7 +1792,7 @@ namespace ThanksNoThanks
             _suspendedCard = CurrentCard;         // resumed verbatim after the crisis
             _suspendedTimer = CardTimer;
             _suspendedTimerMax = CardTimerMax;
-            _suspendedBlocked = CurrentCardBlocked;
+            _suspendedBlocked = _blockedAtDeal;   // сохраняем ВЕРДИКТ ВЫДАЧИ: живое состояние пересчитается само
             _phase = CrisisPhase.Blitz;
             _blitzIndex = 0;
             _blitzFails = 0;
@@ -1737,7 +1805,8 @@ namespace ThanksNoThanks
         private void StartBlitzThought()
         {
             CurrentCard = _blitzThoughts[_blitzIndex];
-            CurrentCardBlocked = false;
+            _blockedAtDeal = false;                  // мысль блица — не BLOCK$-карточка ни на каком счету
+            _blockedAnnounced = CurrentCardBlocked;
             _blitzNormalOnYes = BlitzNormalOnYesRoll != null
                 ? BlitzNormalOnYesRoll()
                 : _blitzRng.Next(2) == 0;
@@ -1831,9 +1900,8 @@ namespace ThanksNoThanks
             // BLOCK$ И В ИМПУЛЬСЕ (отрезок 0). Основательница решила правило денег не ломать: мотоцикл и
             // Шри-Ланка — привилегия тех, кто накрутил, а не «импульс денег не спросил». Гейт считается
             // ровно так же, как в Advance — по деньгам НА МОМЕНТ ПОКАЗА.
-            CurrentCardBlocked = card.IsBlockCost
-                && BlockPrices.TryGetValue(card.Id, out var price)
-                && Money < price;
+            _blockedAtDeal = WouldBeBlocked(card);   // то же правило, что в Advance — один источник
+            _blockedAnnounced = CurrentCardBlocked;
             _crisisTimer = ImpulseSeconds;
             CardTimer = CardTimerMax = ImpulseSeconds;
         }
@@ -1869,7 +1937,8 @@ namespace ThanksNoThanks
             CurrentCard = _suspendedCard;
             CardTimer = _suspendedTimer;
             CardTimerMax = _suspendedTimerMax;
-            CurrentCardBlocked = _suspendedBlocked;
+            _blockedAtDeal = _suspendedBlocked;
+            _blockedAnnounced = CurrentCardBlocked;
             _suspendedCard = null;
             CrisisEnded?.Invoke();
             CardChanged?.Invoke();                // driver re-renders the resumed card (normal HUD)
@@ -2032,7 +2101,8 @@ namespace ThanksNoThanks
             _inDebt = false;
             Paused = false;
             PausedInputsLive = false;
-            CurrentCardBlocked = false;
+            _blockedAtDeal = false;
+            _blockedAnnounced = false;
             _mults.Clear();
             _drains.Clear();
             _onces.Clear();

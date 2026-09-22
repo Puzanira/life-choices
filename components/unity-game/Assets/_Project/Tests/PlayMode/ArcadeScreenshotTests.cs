@@ -97,6 +97,15 @@ namespace ThanksNoThanks.Tests.PlayMode
                     driver.CardRect.Find("CardText").GetComponent<UnityEngine.UI.Text>().text =
                         "Ваш ребёнок вырос и больше не нуждается в помощи. Помочь всё равно?";
                     break;
+                // r6 п.2: ПАРА КАДРОВ на живой пересчёт BLOCK$ — одна и та же карточка недоступной и
+                // ожившей. Текст карточки задаётся одинаковый, чтобы гейт сравнивал ровно состояние.
+                case "unblocked":
+                    driver.DebugPreviewUnblocked();
+                    driver.CardRect.Find("CardText").GetComponent<UnityEngine.UI.Text>().text =
+                        "Ваш ребёнок вырос и больше не нуждается в помощи. Помочь всё равно?";
+                    break;
+                // r6 п.3: «РАССТАЛИСЬ» на слоте погашенной шкалы отношений.
+                case "broken": driver.DebugPreviewBreakup(); break;
                 // §5b: трубка ребёнка — поза ЗВОНКА (выехала, дуги запечены) и поза ПОКОЯ (за левым краем).
                 case "phonering": driver.DebugPreviewChildCall(); break;
                 case "phonerest": driver.DebugPreviewChildPhoneRest(); break;

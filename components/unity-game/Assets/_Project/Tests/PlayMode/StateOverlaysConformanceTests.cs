@@ -415,7 +415,8 @@ namespace ThanksNoThanks.Tests.PlayMode
 
             // «цена N ₽» on its dark plate — real ₽ glyph (Rubik), drawn glyphs inside the pill.
             Assert.IsTrue(driver.CardPriceText.gameObject.activeSelf, "the price line is shown on the blocked card");
-            StringAssert.Contains("цена", driver.CardPriceText.text, "S10 wording «цена N ₽»");
+            // ⚠ Одна формулировка в обоих состояниях (дизайн-гейт r6): разницу несёт цвет текста.
+            StringAssert.Contains("СТОИТ", driver.CardPriceText.text, "S10 wording «СТОИТ N ₽»");
             StringAssert.Contains("60", driver.CardPriceText.text, "shows the required amount");
             AssertGeneratedInPill(driver.CardPriceText, driver.CardPricePlate, BarTrackPill, "«цена N ₽» on its dark plate");
             AssertNoTofu(driver.CardPriceText, "«цена N ₽» (has ₽)");
@@ -435,10 +436,20 @@ namespace ThanksNoThanks.Tests.PlayMode
             AssertInkKeyline(driver.BlockBannerInk.GetComponent<Image>(), bannerImg, "BLOCK$-баннер");
             AssertInkKeyline(driver.CardPriceInk, driver.CardPricePlate, "чип цены");
 
-            // Both answer plates are MUTED while blocked (not the full-bright white of a normal card).
-            Assert.Less(driver.YesPlateImage.color.g, 0.9f, "the ДА plate is muted while blocked");
-            Assert.Less(driver.NoPlateImage.color.r, 0.9f, "the «СПАСИБО, НЕ НАДО» plate is muted while blocked");
-            Assert.Greater(driver.YesPlateImage.color.g, 0.3f, "muted, not black (still legible)");
+            // ⚠ r6 п.2 — ГАСНЕТ ТОЛЬКО ЗЕЛЁНАЯ (решение основательницы, живой плейтест 2026-09-22).
+            // До r6 приглушались ОБЕ плашки, и экран читался как «всё умерло». Недоступна ровно
+            // ПОКУПКА: зелёная выглядит неактивной, а красная «СПАСИБО, НЕ НАДО» доступна всегда и
+            // подсвечена как обычно. Тон зелёной — тот же CardBlockDim, которым приглушена карточка.
+            Assert.Less(driver.YesPlateImage.color.g, 0.9f, "зелёная ДА выглядит НЕАКТИВНОЙ при блоке");
+            Assert.Greater(driver.YesPlateImage.color.g, 0.3f, "приглушена, а не вычернена (читается)");
+            var dim = GameDriver.CardBlockDimTone;
+            Assert.AreEqual(dim.r, driver.YesPlateImage.color.r, 0.001f, "тон зелёной = CardBlockDim (r)");
+            Assert.AreEqual(dim.g, driver.YesPlateImage.color.g, 0.001f, "тон зелёной = CardBlockDim (g)");
+            Assert.AreEqual(dim.b, driver.YesPlateImage.color.b, 0.001f, "тон зелёной = CardBlockDim (b)");
+            Assert.AreEqual(1f, driver.NoPlateImage.color.r, 0.001f,
+                "красная плашка НЕ ТРОГАЕТСЯ блокировкой — отказ доступен всегда (r)");
+            Assert.AreEqual(1f, driver.NoPlateImage.color.g, 0.001f, "красная не тронута (g)");
+            Assert.AreEqual(1f, driver.NoPlateImage.color.b, 0.001f, "красная не тронута (b)");
 
             // Exhaustive: the blocked card carries EXACTLY the frame (dimmed via its own tint — no overlay veil)
             // + red banner + price plate, and exactly the question + banner + price texts — a stray sprite/label
