@@ -298,5 +298,5 @@
 
 ## 6. Playtest verdict
 
-`Playtest ok:` —
-`Landed:` —
+`Playtest ok:` — (кадры на отсмотре; ребёнок принят ранее)
+`Landed:` 64224b0efbf88ac386bba22583358523d6bd1c00 (2026-09-22)
