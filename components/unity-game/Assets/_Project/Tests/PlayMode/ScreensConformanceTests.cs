@@ -496,13 +496,22 @@ namespace ThanksNoThanks.Tests.PlayMode
         private static Vector4 RectOf(RectTransform rt) => new(
             rt.anchorMin.x * 1920f, (1f - rt.anchorMin.y) * 1080f, rt.sizeDelta.x, rt.sizeDelta.y);
 
-        /// <summary>Inner box ⊆ outer box, both (cx, cy-from-top, w, h) in reference px.</summary>
-        private static void AssertRefBoxInside(Vector4 inner, Vector4 outer, string what)
+        /// <summary>
+        /// Inner box ⊆ outer box, both (cx, cy-from-top, w, h) in reference px.
+        ///
+        /// <paramref name="tolPx"/> — ДОПУСК НА ОКРУГЛЕНИЕ, не на вёрстку. Рект, снятый с живого
+        /// RectTransform (<see cref="RectOf"/>), проходит через нормализованный anchor
+        /// (<c>x / 1920 → × 1920</c>), и кромка, заданная ровно 415, возвращается как 414.99994. Пока у
+        /// ректа есть хоть какой-то запас до бокса, это незаметно; у блока, чей рект РАВЕН своему боксу
+        /// (строка исхода), запаса нет — и гард краснел бы на 6·10⁻⁵ px. Допуск здесь субпиксельный: он
+        /// гасит round-trip и НЕ прощает ни одного видимого пикселя.
+        /// </summary>
+        private static void AssertRefBoxInside(Vector4 inner, Vector4 outer, string what, float tolPx = 0f)
         {
-            Assert.GreaterOrEqual(inner.x - inner.z / 2f, outer.x - outer.z / 2f, what + " (слева)");
-            Assert.LessOrEqual(inner.x + inner.z / 2f, outer.x + outer.z / 2f, what + " (справа)");
-            Assert.GreaterOrEqual(inner.y - inner.w / 2f, outer.y - outer.w / 2f, what + " (сверху)");
-            Assert.LessOrEqual(inner.y + inner.w / 2f, outer.y + outer.w / 2f, what + " (снизу)");
+            Assert.GreaterOrEqual(inner.x - inner.z / 2f, outer.x - outer.z / 2f - tolPx, what + " (слева)");
+            Assert.LessOrEqual(inner.x + inner.z / 2f, outer.x + outer.z / 2f + tolPx, what + " (справа)");
+            Assert.GreaterOrEqual(inner.y - inner.w / 2f, outer.y - outer.w / 2f - tolPx, what + " (сверху)");
+            Assert.LessOrEqual(inner.y + inner.w / 2f, outer.y + outer.w / 2f + tolPx, what + " (снизу)");
         }
 
         /// <summary>
@@ -625,8 +634,15 @@ namespace ThanksNoThanks.Tests.PlayMode
             // (4c) Цепочка боксов: оба текстовых ректа ⊆ безопасный бокс ⊆ ЗАМЕРЕННОЕ кремовое поле.
             // Кремового поля мало как приёмки: оно не прямоугольник (скруглённые углы + три запечённые
             // звезды-выкуса), и текст, легший на выкус, читался бы «на звезде», а не на креме.
-            AssertRefBoxInside(RectOf(driver.FinaleOutcomeText.rectTransform), GameDriver.FinaleTextBox,
-                "рект строки исхода — в безопасном боксе плашки");
+            // Строка исхода живёт в СВОЁМ боксе с 2026-09-22 (вторая итерация фикса финала): она уехала на
+            // общую с некрологом колонку x 415…1511, то есть левее общего бокса (его левый край 430).
+            // Полосе исхода (y 330…452) не мешает ни одна из трёх звёзд — левая начинается на y 474.
+            // Допуск 0.05 px — round-trip нормализованного anchor (см. AssertRefBoxInside): рект исхода
+            // РАВЕН своему боксу, запаса на округление у него нет.
+            AssertRefBoxInside(RectOf(driver.FinaleOutcomeText.rectTransform), GameDriver.FinaleHeadBox,
+                "рект строки исхода — в безопасном боксе своей полосы", 0.05f);
+            AssertRefBoxInside(GameDriver.FinaleHeadBox, BakedCreamField,
+                "…и бокс полосы исхода — внутри кремового поля");
             // Некролог живёт в СВОЁМ боксе: он шире общего (1104 против 1058), потому что из трёх
             // звёзд-выкусов в его полосу вгрызается только левая. Цепочка приёмки та же, что была,
             // просто звеньев теперь два (дизайн-гейт 2026-08-08, MINOR).
@@ -651,6 +667,20 @@ namespace ThanksNoThanks.Tests.PlayMode
             if (storyTop < 865f && storyBottom > 833f)
                 Assert.LessOrEqual(storyRight, 1411f,
                     $"правый край полосы некролога ({storyRight:0.#}) не заходит на правые звёзды (x 1411…1439)");
+
+            // ТОТ ЖЕ разбор для полосы ИСХОДА. Сегодня она звёзд не касается (y 330…452 кончается за 22 px
+            // до левой звезды), и именно поэтому её можно было пустить на колонку x 415. Сдвиньте полосу
+            // вниз — и проверка перестанет быть холостой ровно в тот момент, когда это станет важно.
+            var headBox = GameDriver.FinaleHeadBox;
+            float headLeft = headBox.x - headBox.z / 2f, headRight = headBox.x + headBox.z / 2f;
+            float headTop = headBox.y - headBox.w / 2f, headBottom = headBox.y + headBox.w / 2f;
+
+            if (headTop < 556f && headBottom > 474f)
+                Assert.GreaterOrEqual(headLeft, 403f,
+                    $"левый край полосы исхода ({headLeft:0.#}) не заходит на левую звезду-выкус (x ≤ 403)");
+            if (headTop < 865f && headBottom > 833f)
+                Assert.LessOrEqual(headRight, 1411f,
+                    $"правый край полосы исхода ({headRight:0.#}) не заходит на правые звёзды (x 1411…1439)");
 
             // …и бокс симметричен оси плашки: текст в нём центрирован, перекос увёл бы блок с оси.
             Assert.AreEqual(BakedCreamField.x, storyBox.x, 1f, "бокс некролога стоит на оси кремового поля");
@@ -873,6 +903,19 @@ namespace ThanksNoThanks.Tests.PlayMode
         /// выравнивает именно ПЕРО (<c>UICharInfo.cursorPos</c>), поэтому гард смотрит туда же —
         /// и допуск тогда честно жёсткий, а не подогнанный под шрифт.
         /// </summary>
+        /// <summary>
+        /// КЕГЛЬ, КОТОРЫМ ТЕКСТ РЕАЛЬНО НАРИСОВАН. При <c>resizeTextForBestFit</c> подобранный кегль живёт
+        /// ТОЛЬКО в генераторе — в <c>Text.fontSize</c> остаётся авторский потолок, и наивная проверка
+        /// «заголовок крупнее» мерила бы потолок вместо картинки.
+        /// </summary>
+        private static int EffectiveFontSizePx(Text t)
+        {
+            if (!t.resizeTextForBestFit) return t.fontSize;
+            var tg = t.cachedTextGenerator;
+            tg.Populate(t.text, t.GetGenerationSettings(t.rectTransform.rect.size));
+            return tg.fontSizeUsedForBestFit;
+        }
+
         private static float[] RowLeftKerbsPx(Text t)
         {
             var settings = t.GetGenerationSettings(t.rectTransform.rect.size);
@@ -940,10 +983,15 @@ namespace ThanksNoThanks.Tests.PlayMode
 
             var t = driver.FinaleStoryText;
 
-            // (0) Заголовок НЕ ТРОНУТ: он отдельный Text и остаётся по центру.
-            Assert.AreEqual(TextAnchor.UpperCenter, driver.FinaleOutcomeText.alignment,
-                "строка исхода как стояла по центру, так и стоит — её решение основательницы не касалось");
+            // (0) Заголовок — НА ТОЙ ЖЕ КРОМКЕ И ТЕМ ЖЕ ЛИЦОМ (founder 2026-09-22, вторая итерация:
+            // «причина конца и ты дожил тоже надо по левому краю. плюс шрифт текста я другой выбрала же»).
+            // Это ДВА разных Text — значит «одинаково» приходится проверять, а не наследовать.
+            Assert.AreEqual(TextAnchor.UpperLeft, driver.FinaleOutcomeText.alignment,
+                "строка исхода выровнена по ЛЕВОМУ краю, как и некролог");
             Assert.AreNotSame(driver.FinaleOutcomeText, t, "исход и некролог — РАЗНЫЕ Text, а не один блок");
+            Assert.AreSame(t.font, driver.FinaleOutcomeText.font,
+                $"исход и некролог набраны ОДНИМ лицом (некролог «{t.font?.name}», "
+                    + $"исход «{driver.FinaleOutcomeText.font?.name}»)");
 
             // (1) Режим выравнивания — по левому краю, по вертикали по-прежнему по центру бокса.
             Assert.AreEqual(TextAnchor.MiddleLeft, t.alignment,
@@ -977,6 +1025,113 @@ namespace ThanksNoThanks.Tests.PlayMode
             StringAssert.DoesNotContain("переживайте", t.text, $"[{which}] зачина на экране нет");
             StringAssert.DoesNotContain("прекрасных родителей", t.text,
                 $"[{which}] и всегда-первой строки родителей тоже");
+
+            Object.Destroy(go);
+            yield return null;
+        }
+
+        /// <summary>
+        /// ВСЕ ПРИЧИНЫ, КОТОРЫМИ ИГРА УМЕЕТ КОНЧАТЬСЯ — перепись с КОДА, а не выдумка теста:
+        /// шесть именованных фаталов (<c>CardLoader.FatalCauses</c>), безымянный фатал («неведомая дичь»,
+        /// там же), два шкальных конца (<c>Game.End</c>: здоровье/энергия) и три тона старости
+        /// (<c>Game.EndNatural</c>). Длиннейшая — «вы сунули палец в розетку» (25 знаков), она и делает
+        /// худшую строку заголовка «Причина конца: вы сунули палец в розетку».
+        /// </summary>
+        private static readonly string[] EveryCauseTheGameCanEndWith =
+        {
+            "вы сунули палец в розетку", "белый порошок", "селфи на краю крыши", "за вами пришли",
+            "прыжок с гаража", "чужая фирма", "неведомая дичь",
+            "здоровье не выдержало", "полное выгорание",
+            "весёлая старость", "одинокая старость", "спокойная старость",
+        };
+
+        /// <summary>
+        /// ЗАГОЛОВОК ФИНАЛА СТОИТ НА КРОМКЕ НЕКРОЛОГА, НАБРАН ЕГО ЛИЦОМ, И ПРИЧИНА НЕ ПЕРЕНОСИТСЯ.
+        ///
+        /// ⚠ РЕШЕНИЕ ОСНОВАТЕЛЬНИЦЫ 2026-09-22 (вторая итерация фикса финала), дословно: «причина конца и
+        /// ты дожил тоже надо по левому краю. плюс шрифт текста я другой выбрала же». Первая итерация
+        /// выровняла только список вех, и заголовок остался центрованным Arimo Bold над левым Rubik-Bold —
+        /// два разных лица и две разных вертикали на одном экране.
+        ///
+        /// Гард держит ЧЕТЫРЕ вещи, и ни одна не выводится из другой:
+        ///  (1) ЛИЦО заголовка = лицо некролога (тот же ассет, а не «тоже жирный»);
+        ///  (2) обе строки заголовка начинаются на ОДНОЙ кромке — то есть он действительно выровнен;
+        ///  (3) эта кромка совпадает с кромкой некролога (± <see cref="LeftKerbTolerancePx"/> px) — общая
+        ///      колонка <c>GameDriver.FinaleTextColumnLeft</c>, а не два случайно похожих числа;
+        ///  (4) строка ПРИЧИНЫ набрана В ОДИН РЯД. Это не косметика: заголовок стоит на best-fit, а
+        ///      best-fit с переносом слов «влезает» и в три ряда, просто мельче — и «Причина конца: вы
+        ///      сунули палец в» / «розетку» прошло бы все остальные проверки насквозь.
+        ///
+        /// Иерархия (заголовок крупнее списка) проверяется тут же: одно лицо на два блока снимает
+        /// единственный сигнал «это разные уровни», кроме кегля.
+        /// </summary>
+        [UnityTest]
+        public IEnumerator Finale_OutcomeHead_OnTheNecrologKerb_SameFace_CauseNeverWraps(
+            [ValueSource(nameof(EveryCauseTheGameCanEndWith))] string cause)
+        {
+            var driver = Boot(out var go, out var fake);
+            yield return null;
+
+            // Возраст 100 — длиннейшая строка возраста («Ты дожил до 100 лет»); история — худшая реальная,
+            // чтобы заголовок мерился в той же сцене, где блок под ним работает на пределе.
+            var worst = LongestRealStory();
+            worst.Cause = cause;
+            driver.DebugRenderFinale(worst, 100);
+            yield return null;
+            yield return PinCabinetCanvas(driver);
+
+            var head = driver.FinaleOutcomeText;
+            var body = driver.FinaleStoryText;
+
+            // (1) ЛИЦО — тот же ассет шрифта, что у некролога.
+            Assert.AreSame(body.font, head.font,
+                $"[{cause}] заголовок набран лицом некролога (у некролога «{body.font?.name}», "
+                    + $"у заголовка «{head.font?.name}»)");
+            Assert.AreEqual(TextAnchor.UpperLeft, head.alignment, $"[{cause}] заголовок по левому краю");
+            AssertNoTofu(head, $"заголовок «{cause}»");
+
+            // (2) Обе строки заголовка — на одной кромке. При центровке «Ты дожил до 100 лет» и
+            // «Причина конца: …» расходятся на сотни пикселей: они сильно разной длины.
+            var headKerbs = RowLeftKerbsPx(head);
+            Assert.AreEqual(2, headKerbs.Length,
+                $"[{cause}] заголовок — РОВНО два ряда: возраст и причина. Больше двух означает перенос "
+                    + "внутри строки причины, меньше — что одна из строк пропала");
+            Assert.AreEqual(headKerbs[0], headKerbs[1], LeftKerbTolerancePx,
+                $"[{cause}] обе строки заголовка начинаются на одной кромке "
+                    + $"({headKerbs[0]:0.##} и {headKerbs[1]:0.##})");
+
+            // (3) …и это кромка НЕКРОЛОГА. Мерим по перу обоих блоков — одна общая колонка.
+            var bodyKerbs = RowLeftKerbsPx(body);
+            Assert.AreEqual(bodyKerbs[0], headKerbs[0], LeftKerbTolerancePx,
+                $"[{cause}] заголовок ({headKerbs[0]:0.##}) стоит на кромке некролога ({bodyKerbs[0]:0.##})");
+            Assert.AreEqual(GameDriver.FinaleTextColumnLeft, headKerbs[0], LeftKerbTolerancePx,
+                $"[{cause}] и это ОБЪЯВЛЕННАЯ колонка {GameDriver.FinaleTextColumnLeft:0.#}, "
+                    + "а не совпадение");
+
+            // (4) Причина В ОДИН РЯД — проверено ещё и по тексту, независимо от счёта рядов: генератор
+            // отдал ровно два ряда, и второй обязан содержать причину ЦЕЛИКОМ.
+            StringAssert.Contains("Причина конца: " + cause, head.text,
+                $"[{cause}] строка причины на экране целиком");
+
+            // …и заголовок не свесился за крем ни вправо (длинная причина), ни вниз (best-fit).
+            AssertGlyphsInRefBox(head, BakedCreamField, 0f, $"заголовок «{cause}»");
+            var headInk = GlyphBoxOf(head);
+            Assert.LessOrEqual(headInk.x + headInk.z / 2f, GameDriver.FinaleTextColumnRight,
+                $"[{cause}] правая кромка заголовка внутри колонки");
+
+            // (5) ИЕРАРХИЯ: одно лицо на два блока — значит уровень различает ТОЛЬКО кегль.
+            //
+            // ⚠ Мерить `head.fontSize` НЕЛЬЗЯ: заголовок стоит на best-fit, а best-fit НЕ ПИШЕТ подобранный
+            // кегль обратно в компонент — там так и лежит авторский потолок 56. Спрашиваем генератор,
+            // который и рисует (`fontSizeUsedForBestFit`), иначе гард всегда сравнивал бы 56 с 30 и был бы
+            // зелёным даже при заголовке, ужатом в ничто.
+            int headSize = EffectiveFontSizePx(head);
+            Assert.Greater(headSize, body.fontSize,
+                $"[{cause}] заголовок крупнее списка (заголовок {headSize}, список {body.fontSize}) — "
+                    + "на общем лице это единственный признак иерархии");
+            Assert.GreaterOrEqual(headSize, GameDriver.FinaleOutcomeMinSize,
+                $"[{cause}] кегль заголовка ({headSize}) не сорвался в аварийный пол "
+                    + $"{GameDriver.FinaleOutcomeMinSize}");
 
             Object.Destroy(go);
             yield return null;
