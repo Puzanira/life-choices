@@ -3,6 +3,7 @@
     "rootNamespace": "ThanksNoThanks",
     "references": [
         "AiGameStudio.ArcadeControls",
+        "Unity.InputSystem",
         "UnityEngine.UI"
     ],
     "includePlatforms": [],

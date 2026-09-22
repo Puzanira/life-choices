@@ -44,8 +44,8 @@ namespace ThanksNoThanks.Tests
 
         private static void Yes(Game g) => g.HandleInput(GameInput.AnswerYes);
         private static void No(Game g) => g.HandleInput(GameInput.AnswerNo);
-        private static void Up(Game g) => g.HandleInput(GameInput.RelationUp);
-        private static void Down(Game g) => g.HandleInput(GameInput.RelationDown);
+        private static void Up(Game g) => g.HandleInput(GameInput.RelationRight);
+        private static void Down(Game g) => g.HandleInput(GameInput.RelationLeft);
 
         private static List<Card> AdultFiller(int from = 22, int to = 84, int step = 3)
         {

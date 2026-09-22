@@ -52,9 +52,38 @@ namespace ThanksNoThanks.Tests.PlayMode
             if (_go != null) Object.Destroy(_go);
         }
 
+        /// <summary>
+        /// Ожидаемая строка — собранная ЗДЕСЬ из того же конфига пакета, что читает игра (буквы не зашиты
+        /// ни тут, ни там: поменяется маппинг — поедут обе стороны, и гард останется честным).
+        ///
+        /// ⚠ r7: для ДЖОЙСТИКА и ДАТЧИКОВ ожидание считается НЕ через
+        /// <see cref="KeyboardHints.PrimaryFor"/>. Пакет для джойстика отдаёт ВЕРТИКАЛЬНУЮ пару, а
+        /// балансир переехал на горизонталь; датчик пакет знает один, а заряжают оба. Пакет нам трогать
+        /// нельзя — значит выбор пары делает игра, и проверяем мы именно её выбор.
+        /// </summary>
+        /// <remarks>
+        /// ⚠ РАЗДЕЛИТЕЛИ — ЛИТЕРАЛАМИ (находка код-скептика r7). Ожидание, собранное из
+        /// <c>GameDriver.AxisKeySeparator</c>/<c>EitherKeySeparator</c>, двигалось ВМЕСТЕ с мутацией этих
+        /// констант, и гард не заметил бы подмены « / » на « или » и наоборот. А разница смысловая:
+        /// « / » — ДВА НАПРАВЛЕНИЯ одной оси (нужны оба), « или » — ВЗАИМОЗАМЕНЯЕМЫЕ клавиши (хватит
+        /// любой). Зашиты здесь именно разделители; буквы клавиш по-прежнему только из конфига пакета.
+        /// </remarks>
         private static string ExpectedHint(ArcadeControlId control)
         {
-            string key = KeyboardHints.PrimaryFor(KeyboardMapping.LoadDefault(), control);
+            Assert.AreEqual(" / ", GameDriver.AxisKeySeparator, "пара НАПРАВЛЕНИЙ клеится слешем");
+            Assert.AreEqual(" или ", GameDriver.EitherKeySeparator, "ВЗАИМОЗАМЕНЯЕМЫЕ клавиши — «или»");
+
+            KeyboardMapping map = KeyboardMapping.LoadDefault();
+            string key = control switch
+            {
+                ArcadeControlId.Joystick => KeyboardHints.Label(map.JoystickLeft)
+                                          + " / "
+                                          + KeyboardHints.Label(map.JoystickRight),
+                ArcadeControlId.HeightA => KeyboardHints.Label(map.HeightAUp)
+                                         + " или "
+                                         + KeyboardHints.Label(map.HeightBUp),
+                _ => KeyboardHints.PrimaryFor(map, control),
+            };
             return (control == ArcadeControlId.HeightA ? GameDriver.BreathKeyHintPrefix
                                                        : GameDriver.KeyHintPrefix) + key;
         }

@@ -102,7 +102,7 @@ namespace ThanksNoThanks.Tests
             for (int i = 0; i < steps; i++)
             {
                 if (g.State != GameState.Playing || !g.RelationshipsOpen) break;
-                if (dir != 0) g.HandleInput(dir > 0 ? GameInput.RelationUp : GameInput.RelationDown);
+                if (dir != 0) g.HandleInput(dir > 0 ? GameInput.RelationRight : GameInput.RelationLeft);
                 g.Tick(dt);
                 lived++;
             }
@@ -149,7 +149,7 @@ namespace ThanksNoThanks.Tests
             while (g.CurrentCard != null && g.CurrentCard.Id != id
                    && g.State == GameState.Playing && guard++ < 200000)
             {
-                if (g.RelationshipsOpen) g.HandleInput(GameInput.RelationUp);   // не дать разорваться
+                if (g.RelationshipsOpen) g.HandleInput(GameInput.RelationRight);   // не дать разорваться
                 g.HandleInput(GameInput.EnergyHold);                            // …и не умереть по пути
                 g.Tick(0.05f);
             }
@@ -162,7 +162,7 @@ namespace ThanksNoThanks.Tests
             int guard = 0;
             while (g.Scales.Relationships > target && g.State == GameState.Playing && guard++ < 20000)
             {
-                g.HandleInput(GameInput.RelationDown);
+                g.HandleInput(GameInput.RelationLeft);
                 g.Tick(0.05f);
             }
         }

@@ -138,11 +138,11 @@ namespace ThanksNoThanks.Tests.PlayMode
 
         /// <summary>
         /// ГИПОТЕЗА «б» ЖАЛОБЫ «джойстиком двигаю — шкала не растёт»: путь «зажатая стрелка →
-        /// RelationUp КАЖДЫЙ КАДР → латч _relAxis → интеграция» где-то рвётся.
+        /// RelationRight КАЖДЫЙ КАДР → латч _relAxis → интеграция» где-то рвётся.
         ///
         /// Проверяется ДВА свойства латча, которых не было ни в одном прежнем тесте:
         ///  (1) переиздание оси КАЖДЫЙ КАДР на живых кадрах драйвера двигает маркер вверх;
-        ///  (2) ось — ЛАТЧ, а не счётчик: несколько RelationUp в ОДНОМ кадре дают ровно один шаг, а не
+        ///  (2) ось — ЛАТЧ, а не счётчик: несколько RelationRight в ОДНОМ кадре дают ровно один шаг, а не
         ///      кратный (иначе частота опроса железа превращалась бы в скорость балансира).
         ///
         /// ⚠ ВРЕМЯ ДВИГАЕТСЯ ЯВНО (`DebugTick`), А НЕ `Time.deltaTime`, И ЭТО НЕ ПОДЛОГ. В batchmode
@@ -177,7 +177,7 @@ namespace ThanksNoThanks.Tests.PlayMode
             // Сначала увести маркер вниз, чтобы у тяги вверх был ход (и потолок 100 не мешал замеру).
             for (int i = 0; i < 40; i++)
             {
-                fake.Fire(GameInput.RelationDown);
+                fake.Fire(GameInput.RelationLeft);
                 driver.DebugTick(0.05f);
                 yield return null;
             }
@@ -187,7 +187,7 @@ namespace ThanksNoThanks.Tests.PlayMode
             // (1) ЗАЖАТАЯ СТРЕЛКА ВВЕРХ — ось переиздаётся каждый кадр, ровно как у ArcadeInputSource.
             for (int i = 0; i < 40; i++)
             {
-                fake.Fire(GameInput.RelationUp);
+                fake.Fire(GameInput.RelationRight);
                 driver.DebugTick(0.05f);
                 yield return null;
             }
@@ -201,7 +201,7 @@ namespace ThanksNoThanks.Tests.PlayMode
             int before = driver.Game.Scales.Relationships;
             for (int i = 0; i < 20; i++)
             {
-                for (int k = 0; k < 5; k++) fake.Fire(GameInput.RelationUp);
+                for (int k = 0; k < 5; k++) fake.Fire(GameInput.RelationRight);
                 driver.DebugTick(0.05f);
                 yield return null;
             }
@@ -210,14 +210,14 @@ namespace ThanksNoThanks.Tests.PlayMode
             int singleBefore = driver.Game.Scales.Relationships;
             for (int i = 0; i < 20; i++)
             {
-                fake.Fire(GameInput.RelationUp);
+                fake.Fire(GameInput.RelationRight);
                 driver.DebugTick(0.05f);
                 yield return null;
             }
             int single = driver.Game.Scales.Relationships - singleBefore;
 
             Assert.AreEqual(single, multi, 1,
-                $"пять RelationUp в кадре дают тот же шаг, что один ({multi} против {single}) — "
+                $"пять RelationRight в кадре дают тот же шаг, что один ({multi} против {single}) — "
                 + "ось это ЛАТЧ направления, а не счётчик нажатий");
 
             Object.Destroy(go);

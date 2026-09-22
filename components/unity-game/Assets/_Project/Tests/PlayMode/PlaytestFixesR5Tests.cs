@@ -96,7 +96,7 @@ namespace ThanksNoThanks.Tests.PlayMode
             int spin = 0;
             while (driver.Game.Scales.Relationships == at && spin++ < 30)
             {
-                fake.Fire(GameInput.RelationUp);
+                fake.Fire(GameInput.RelationRight);
                 driver.DebugTick(frame);
             }
             Assume.That(spin, Is.LessThan(30), "предусловие: целый шаг набежал за разумное число кадров");
@@ -104,7 +104,7 @@ namespace ThanksNoThanks.Tests.PlayMode
             int whole0 = driver.Game.Scales.Relationships;
             float x0 = MarkerRefX(driver);
 
-            fake.Fire(GameInput.RelationUp);
+            fake.Fire(GameInput.RelationRight);
             driver.DebugTick(frame);
 
             Assert.AreEqual(whole0, driver.Game.Scales.Relationships,

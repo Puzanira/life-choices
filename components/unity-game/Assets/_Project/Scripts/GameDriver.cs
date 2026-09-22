@@ -438,7 +438,7 @@ namespace ThanksNoThanks
         //
         // ГИСТЕРЕЗИС. Порог «сырьём» дребезжит: энергия/здоровье тают долями процента в секунду и на
         // границе 20 шкала за секунду успевает перейти её несколько раз (а отношения на 40 ещё и
-        // тянутся рычагом вверх-вниз). Поэтому тревога ВКЛЮЧАЕТСЯ на спековом пороге и ВЫКЛЮЧАЕТСЯ
+        // тянутся рычагом влево-вправо). Поэтому тревога ВКЛЮЧАЕТСЯ на спековом пороге и ВЫКЛЮЧАЕТСЯ
         // на пороге, отодвинутом внутрь нормы на <see cref="AlarmHysteresis"/> — числа тюнимые.
         /// <summary>Энергия/здоровье: тревога ВКЛЮЧАЕТСЯ ниже этого (спек §4, тюнится).</summary>
         public const float AlarmScaleOnBelow = 20f;
@@ -1266,9 +1266,14 @@ namespace ThanksNoThanks
         /// <summary>Рассказ Ведущего на открытии ЗДОРОВЬЯ (30). ✍ черновик.</summary>
         public const string HealthStoryText =
             "А годы-то берут своё! С этого дня здоровье тает само — просто потому, что ты живёшь.";
-        /// <summary>Задача на открытии ЗДОРОВЬЯ (30). Своего контрола у шкалы нет — лечат ВЫБОРЫ. ✍ черновик.</summary>
+        /// <summary>Задача на открытии ЗДОРОВЬЯ (30). Своего контрола у шкалы нет — лечат ВЫБОРЫ. ✍ черновик.
+        /// ⚠ r7 п.3 (2026-09-22): текст ОСНОВАТЕЛЬНИЦЫ ДОСЛОВНО, продиктован ею в чат — прежняя задача
+        /// («Контрола у здоровья нет — лечись выборами за деньги, если накопил») была ей «стрёмная».
+        /// Ни одного слова от реализатора: сочинённые варианты она отклонила и написала сама. РАССКАЗ
+        /// (<see cref="HealthStoryText"/>) она оставила без изменений — трогать его нельзя.
+        /// ДВЕ ФРАЗЫ = допускается перенос на две строки; поля и общий кегль-токен держат гарды окна.</summary>
         public const string HealthTaskText =
-            "Контрола у здоровья нет — лечись выборами за деньги, если накопил";
+            "Здоровье можно лечить только делая выборы в его пользу. А они стоят денег.";
 
         /// <summary>Рассказ Ведущего на входе в БЛИЦ — то самое объявление кризиса (HostContent.CrisisAnnounce).</summary>
         public static string BlitzStoryText => HostContent.CrisisAnnounce;
@@ -3413,9 +3418,52 @@ namespace ThanksNoThanks
             }
         }
 
+        /// <summary>
+        /// Клавиша(и) эмуляции контрола — КАК ИХ ПОКАЗЫВАЕТ ЭТА ИГРА. Буквы по-прежнему берутся из
+        /// конфига ПАКЕТА (<see cref="KeyboardHints.Label"/> + <see cref="KeyboardMapping"/>), в игре не
+        /// зашита ни одна — гард `KeyHintLines_AreTheOnlyDevKeyStrings…` свипает константы и упадёт, если
+        /// зашить. Отличается от <see cref="KeyboardHints.PrimaryFor"/> ровно в двух местах, и оба — про
+        /// решения ИГРЫ, которых пакет знать не обязан (и трогать его нам нельзя):
+        ///
+        ///   • ДЖОЙСТИК (r7 п.1) — пакет отдаёт ВЕРТИКАЛЬНУЮ пару (JoystickUp/Down), потому что так его
+        ///     писали под прежнюю ось. Балансир отношений переехал на ГОРИЗОНТАЛЬ, и подсказка обязана
+        ///     называть ту пару, которая реально двигает маркер, иначе экран учит неработающей клавише.
+        ///   • ДАТЧИК ВЫСОТЫ (r7 п.2) — заряжает ЛЮБОЙ из двух, поэтому строка называет ОБА, через
+        ///     «или»: это альтернатива (хватит одной руки), а не пара направлений.
+        /// </summary>
+        private static string PrimaryKeyLabel(KeyboardMapping map, ArcadeControlId id)
+        {
+            if (map == null) return "";
+            switch (id)
+            {
+                case ArcadeControlId.Joystick:
+                    return KeyboardHints.Label(map.JoystickLeft) + AxisKeySeparator
+                         + KeyboardHints.Label(map.JoystickRight);
+                // ⚠ ТОЛЬКО HeightA — и это не забывчивость. Представителем ГРУППЫ датчиков всюду
+                // выступает HeightA (см. ControlOf: платы отдают высоты одним флагом ProvidesHeights),
+                // поэтому HeightB сюда не приходит НИКОГДА: ветка под него была мёртвой (находка
+                // код-скептика r7). Мёртвая ветка врёт о том, что такой вызов бывает, и переживает
+                // ровно до того дня, когда кто-то на неё сошлётся. Понадобится — вернуть вместе с
+                // вызовом, который её достигает.
+                case ArcadeControlId.HeightA:
+                    return KeyboardHints.Label(map.HeightAUp) + EitherKeySeparator
+                         + KeyboardHints.Label(map.HeightBUp);
+                default:
+                    return KeyboardHints.PrimaryFor(map, id);
+            }
+        }
+
+        /// <summary>Разделитель ДВУХ НАПРАВЛЕНИЙ одной оси («← / →») — тот же, которым клеит пакет.</summary>
+        public const string AxisKeySeparator = " / ";
+        /// <summary>Разделитель ВЗАИМОЗАМЕНЯЕМЫХ клавиш («Q или E»): достаточно любой, это не пара направлений.</summary>
+        public const string EitherKeySeparator = " или ";
+
         /// <summary>Какой контрол автомата объясняет §D-экран этой шкалы (для подсказки клавиши).</summary>
         private static ArcadeControlId? ControlOf(NewScale s) => s switch
         {
+            // ⚠ r7 п.2: заряжают ОБА датчика, но id здесь — ещё и вопрос «эмулируется ли контрол сейчас»,
+            // а платы отдают высоты ГРУППОЙ (ISerialBackend.ProvidesHeights — один флаг на оба датчика).
+            // Поэтому представителем группы остаётся HeightA, а обе клавиши называет PrimaryKeyLabel.
             NewScale.Energy => ArcadeControlId.HeightA,     // датчик высоты — «зажми и держи»
             NewScale.Relations => ArcadeControlId.Joystick, // балансир отношений
             NewScale.Money => ArcadeControlId.Crank,        // крутилка денег
@@ -3450,7 +3498,7 @@ namespace ThanksNoThanks
             string line = "";
             if (emulated)
             {
-                string key = KeyboardHints.PrimaryFor(map, id);
+                string key = PrimaryKeyLabel(map, id);
                 if (!string.IsNullOrEmpty(key))
                     line = (id == ArcadeControlId.HeightA ? BreathKeyHintPrefix : KeyHintPrefix) + key;
             }
@@ -5063,8 +5111,8 @@ namespace ThanksNoThanks
         {
             switch (input)
             {
-                case GameInput.RelationUp:
-                case GameInput.RelationDown: NoteScaleInput(AlarmScale.Relations); break;
+                case GameInput.RelationRight:
+                case GameInput.RelationLeft: NoteScaleInput(AlarmScale.Relations); break;
                 case GameInput.AnswerYes:
                 case GameInput.AnswerNo: NoteScaleInput(AlarmScale.Health); break;
             }
@@ -6194,8 +6242,8 @@ namespace ThanksNoThanks
                     _nsArmed = true;
                     return;
 
-                case GameInput.RelationUp:
-                case GameInput.RelationDown:
+                case GameInput.RelationRight:
+                case GameInput.RelationLeft:
                     if (_nsWhich != NewScale.Relations) return;       // чужой экран — ось не латчится
                     if (_game.State != GameState.Playing) return;
                     _game.HandleInput(input);                         // ось латчится, TickModalBalancer её сведёт

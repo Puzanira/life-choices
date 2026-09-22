@@ -24,8 +24,9 @@ namespace ThanksNoThanks
         MoneyTickRepeat,
 
         /// <summary>
-        /// ENERGY_HOLD — «датчик высоты ПОДНЯТ» (кабинет: HeightA выше середины хода; эмуляция: зажатая
-        /// клавиша датчика). Как и <see cref="RelationUp"/>, это НЕ дискретное событие, а УДЕРЖИВАЕМЫЙ
+        /// ENERGY_HOLD — «датчик высоты ПОДНЯТ» (кабинет: ЛЮБОЙ из двух датчиков — HeightA ИЛИ HeightB —
+        /// выше середины хода; эмуляция: зажатая клавиша любого из них). Как и
+        /// <see cref="RelationRight"/>, это НЕ дискретное событие, а УДЕРЖИВАЕМЫЙ
         /// сигнал: источник переиздаёт его КАЖДЫЙ кадр, пока датчик поднят, а <see cref="Game"/> латчит его
         /// и применяет ровно один такт роста энергии, после чего гасит латч (модель «потребить за тик»).
         /// Держишь — батарея наполняется <see cref="Game.EnergyRegenPerSec"/> %/с; отпустил — рост встал, а
@@ -34,23 +35,34 @@ namespace ThanksNoThanks
         /// ⚠ Заменил прежний ENERGY_PULSE (импульс на подъёме + ритм-гейт «раз в ~2 секунды») по слову
         /// основательницы, живой плейтест 2026-08-07: «просто зажать датчик высоты, пока батарейка не
         /// заполнится». Ритма в игре больше нет — ни гейта, ни отклика «не в ритм».
+        ///
+        /// ⚠ r7 п.2 («сделать оба датчика, чтобы работали»): значение производит ЛЮБОЙ из двух датчиков
+        /// высоты, а не только A. Источник шлёт РОВНО ОДИН EnergyHold за кадр, даже когда подняты оба —
+        /// две руки заряжают ровно так же быстро, как одна (MAX, не сумма).
         /// </summary>
         EnergyHold,
 
         /// <summary>
-        /// RELATION_AXIS ↑ — «держать балансир отношений вверх» (keyboard: ↑; later a physical balance
-        /// lever/joystick). Unlike the discrete answer/crank events this is a HELD axis: the source
-        /// re-emits it EVERY frame the key is down, and <see cref="Game"/> applies one tick's worth of
-        /// upward pull then clears the axis (a consume-per-tick model), so holding pulls the marker
-        /// steadily up while released lets the drift take over. Inert unless relationships are open and
-        /// the run is live/unpaused. Keeps <see cref="Game"/> semantic-only.
+        /// RELATION_AXIS → — «тянуть балансир отношений ВПРАВО» (кабинет: джойстик вправо; эмуляция: →).
+        /// Unlike the discrete answer/crank events this is a HELD axis: the source re-emits it EVERY frame
+        /// the lever is over, and <see cref="Game"/> applies one tick's worth of pull then clears the axis
+        /// (a consume-per-tick model), so holding pulls the marker steadily while released lets the drift
+        /// take over. Inert unless relationships are open and the run is live/unpaused. Keeps
+        /// <see cref="Game"/> semantic-only.
+        ///
+        /// ⚠ r7 п.1 — ОСЬ И ЕЁ СЕМАНТИКА. До r7 это звалось RelationUp и ехало по ВЕРТИКАЛИ джойстика,
+        /// а шкала отношений нарисована ГОРИЗОНТАЛЬНЫМ балансиром: рычаг спорил с картинкой. ВПРАВО
+        /// поднимает шкалу, потому что маркер-сердце едет вправо с ростом значения (GameDriver:
+        /// RelationsTrackFraction монотонно растёт, 0 → у лица парня слева, 100 → у лица девушки справа).
+        /// Правило одно: тяни туда, куда хочешь сдвинуть маркер.
         /// </summary>
-        RelationUp,
+        RelationRight,
 
-        /// <summary>RELATION_AXIS ↓ — same held-axis model as <see cref="RelationUp"/>, pulling the
-        /// balancer marker DOWN (keyboard: ↓). Emitted every frame the key is held. If both ↑ and ↓ are
-        /// held the source resolves to ↑ (safe direction) — the two are mutually exclusive on the wire.</summary>
-        RelationDown,
+        /// <summary>RELATION_AXIS ← — same held-axis model as <see cref="RelationRight"/>, pulling the
+        /// balancer marker LEFT, i.e. DOWN the scale (кабинет: джойстик влево; эмуляция: ←). Emitted every
+        /// frame the lever is held. If both ← and → are held the source resolves to → (safe direction —
+        /// away from the break-up end) — the two are mutually exclusive on the wire.</summary>
+        RelationLeft,
 
         /// <summary>
         /// CHILD_PRESS — «поднять трубку» звонящего ребёнка (кабинет: кнопка «!» / BangButton, dev-клавиша

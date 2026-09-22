@@ -4,5 +4,6 @@
   "displayName": "Спасибо, не надо (Life Choices)",
   "version": "0.1.0",
   "entry": "Assets/_Project/Scenes/ThanksNoThanks.unity",
-  "controls": ["GreenButton", "RedButton", "MenuButton", "Crank", "BangButton", "HeightA", "Joystick"]
+  "controls": ["GreenButton", "RedButton", "MenuButton", "Crank", "BangButton", "HeightA", "HeightB", "Joystick"],
+  "RelationAxisSign": 1
 }

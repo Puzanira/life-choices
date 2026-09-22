@@ -968,7 +968,7 @@ namespace ThanksNoThanks.Tests.PlayMode
             fake.Fire(GameInput.MoneyTick);
             Assert.Greater(driver.SinceScaleInput(AlarmScale.Money), GameDriver.AlarmRecentInputSeconds,
                 "…крутилка в депрессии — тоже не работа по шкале");
-            fake.Fire(GameInput.RelationUp);
+            fake.Fire(GameInput.RelationRight);
             Assert.Greater(driver.SinceScaleInput(AlarmScale.Relations), GameDriver.AlarmRecentInputSeconds,
                 "…и рычаг отношений");
             fake.No();
@@ -1003,7 +1003,7 @@ namespace ThanksNoThanks.Tests.PlayMode
             for (int i = 0; i < 5; i++) fake.Fire(GameInput.EnergyHold);
             driver.DebugAdvanceInputClocks(1f);
             fake.Fire(GameInput.MoneyTick);
-            fake.Fire(GameInput.RelationDown);
+            fake.Fire(GameInput.RelationLeft);
             Assert.AreEqual(CrisisPhase.Blitz, g.Phase, "всё ещё в блице (шкальные контролы тут инертны)");
             fake.Yes();                                               // рычаг ДА = кнопка блица, НЕ ответ
 

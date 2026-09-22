@@ -315,7 +315,7 @@ namespace ThanksNoThanks
         // РАЗРЫВА при полном бездействии ≈30–45 с. Число выводится, а не «на глаз»:
         //   t = (СТАРТ − RelBreakupFloor)/d + RelBreakupSeconds = (55 − 15)/d + 10.
         // d = 1.6 ⇒ 25 + 10 = 35 с — ровно середина коридора 30–45 (было d = 0.6 ⇒ 66.7 + 10 = 76.7 с).
-        // Удержание при этом по-прежнему уверенно вытягивает: нетто «держу ↑» = 4.0 − 1.6 = +2.4 %/с
+        // Удержание при этом по-прежнему уверенно вытягивает: нетто «держу →» = 4.0 − 1.6 = +2.4 %/с
         // (в браке +3.2). Пороги зон и сама механика не тронуты — изменено ОДНО число (и его половина).
         public const double RelDriftPerSec = 1.6;          // дрейф вниз ≈1.6%/сек, пока балансир открыт
         public const double RelDriftMarriedPerSec = 0.8;   // в браке (MD01=ДА) мягче — вдвое медленнее
@@ -335,11 +335,11 @@ namespace ThanksNoThanks
         // точку равновесия — держать рычаг надо 1.6/22.0 ≈ 7 % времени, чтобы не падать (было 40 %).
         // Пассивный игрок при этом по-прежнему НЕ выживает (сим: duty 0 % → разрыв на 35.6 с, 5 % → на
         // 94.5 с, 8 % → выживает) — железный инвариант живых шкал цел, см. гарды r5.
-        public const double RelBalancerPerSec = 22.0;      // RELATION_AXIS ↑/↓ тянет маркер ≈22%/сек
+        public const double RelBalancerPerSec = 22.0;      // RELATION_AXIS →/← тянет маркер ≈22%/сек
                                                           // (нетто +20.4%/с) — было 4.0, до этого 1.5
         public const double RelOverloadPenaltyPerSec = 0.3;// >75% — доп. штраф вниз (риск ссоры)
         // ⚠ ПОЛ УДЕРЖАНИЯ (плейтест-фиксы r4 п.3, живая жалоба «джойстиком двигаю — шкала не растёт»).
-        // Обещание строчкой выше («нетто «держу ↑» = +2.4 %/с») держалось только на ГОЛОМ дрейфе. Сверху
+        // Обещание строчкой выше («нетто «держу →» = +2.4 %/с») держалось только на ГОЛОМ дрейфе. Сверху
         // на него множатся `DRIFT:Отн=xN` из колонки «Длительный эффект», и `MD01`-НЕТ («отказались от
         // свадьбы», scenes.csv:18) даёт ×2 БЕЗ `DUR` — то есть НАВСЕГДА: дрейф 1.6 → 3.2, нетто удержания
         // 4.0 − 3.2 = +0.8 %/с. Это ~1 деление шкалы за секунду с половиной — глазом «не растёт вообще»,
@@ -363,7 +363,7 @@ namespace ThanksNoThanks
         // Гард (`PlaytestFixesR4Tests`, п.3) после этой находки ПЕРЕПИСАН: он больше не мерит кламп
         // шкалы на пятисекундном окне (тот замер давал ровно 10 %/с и был зелёным даже с удалённым
         // полом), а проверяет пол на СИНТЕТИЧЕСКОМ множителе, при котором дрейф обгоняет тягу.
-        public const double RelHoldNetFloorPerSec = 2.0;   // удержание ↑ даёт ≥2%/с нетто при ЛЮБОМ дрейфе
+        public const double RelHoldNetFloorPerSec = 2.0;   // удержание → даёт ≥2%/с нетто при ЛЮБОМ дрейфе
         public const float RelBreakupSeconds = 10f;        // суммарно ~10 сек ниже зоны → разрыв
         public const int RelBreakupValue = 20;             // после разрыва шкала падает сюда (одиноко)
 
@@ -945,7 +945,7 @@ namespace ThanksNoThanks
         /// <summary>Fired the first time health starts decaying (Age 30) — drives the S5 health hint + pause.</summary>
         public event Action HealthOpened;
         /// <summary>Fired the first time the relationships balancer opens (Age 20, by age alone) — drives the S5
-        /// «держите отношения в зоне — ↑/↓» hint + pause.</summary>
+        /// «держите отношения в зоне — джойстик ←/→» hint + pause.</summary>
         public event Action RelationshipsOpened;
         /// <summary>Fired the instant a breakup resolves (relationships spent ~10s cumulative below the
         /// zone floor): partner gone, balancer closed. NO death — drives the transient «РАССТАЛИСЬ» plate.</summary>
@@ -1097,8 +1097,8 @@ namespace ThanksNoThanks
                     }
                     if (input == GameInput.MoneyTick) return Crank();
                     if (input == GameInput.EnergyHold) return HoldBreath();  // датчик поднят ЭТОТ кадр
-                    if (input == GameInput.RelationUp) return SetRelationAxis(+1);
-                    if (input == GameInput.RelationDown) return SetRelationAxis(-1);
+                    if (input == GameInput.RelationRight) return SetRelationAxis(+1);
+                    if (input == GameInput.RelationLeft) return SetRelationAxis(-1);
                     if (input == GameInput.ChildPress) ChildPress();
                     break;
                 case GameState.Finale:
@@ -2292,7 +2292,7 @@ namespace ThanksNoThanks
             }
         }
 
-        // RELATION_AXIS ↑/↓: latch the held direction for the NEXT integration tick, which consumes and
+        // RELATION_AXIS →/←: latch the held direction for the NEXT integration tick, which consumes and
         // clears it. No-op unless relationships are open and the run is live/unpaused (inert in the
         // opener/finale/tutorial — HandleInput only routes it in Playing; this adds the open+pause guard).
         // Returns whether the axis input was ACCEPTED (see HandleInput) — an ignored lever must not open the
@@ -2317,9 +2317,10 @@ namespace ThanksNoThanks
 
             double rate = -RelationshipDriftPerSec;                            // drift down (× DRIFT-эффекты)
             rate += axis * RelBalancerPerSec;                                  // held axis (±)
-            // ПОЛ УДЕРЖАНИЯ — только пока рычаг ТЯНЕТ ВВЕРХ (см. RelHoldNetFloorPerSec). Бездействие
-            // (axis = 0) и тяга ВНИЗ (axis < 0) проходят мимо: наказание за то, что не держишь, остаётся
-            // ровно таким, каким его написала карточка.
+            // ПОЛ УДЕРЖАНИЯ — только пока рычаг ТЯНЕТ ВВЕРХ ПО ШКАЛЕ, то есть ВПРАВО (r7 п.1: ось
+            // балансира горизонтальная, axis = +1 приходит с GameInput.RelationRight). Бездействие
+            // (axis = 0) и тяга ВЛЕВО/вниз по шкале (axis < 0) проходят мимо: наказание за то, что не
+            // держишь, остаётся ровно таким, каким его написала карточка.
             if (axis > 0 && rate < RelHoldNetFloorPerSec)
                 rate = RelHoldNetFloorPerSec;
             if (Scales.Relationships > RelZoneMax)                             // задушил вниманием →
@@ -2365,23 +2366,24 @@ namespace ThanksNoThanks
             // Это не украшение, а лечение СОФТЛОКА, который завела ускоренная тяга. Условие выхода экрана —
             // «маркер внутри [RelZoneMin..RelZoneMax] непрерывно NewScaleHoldSeconds» (GameDriver.TickNewScale),
             // а под модалкой дрейфа НЕТ по определению (это пауза). На прежних 4 %/с игрок, который просто
-            // держал джойстик вверх, выходил из зоны за ≈5 с и успевал набрать удержание раньше. На 22 %/с
+            // держал джойстик В СТОРОНУ РОСТА, выходил из зоны за ≈5 с и успевал набрать удержание раньше. На 22 %/с
             // он вылетает за 75 уже через 0.9 с, упирается в 100 — и обратно его НЕЧЕМ тянуть: дрейф стоит,
             // а рычаг он держит. Экран не закрывается никогда, а он МОДАЛЬНЫЙ и морозит всю игру: на стойке
             // это намертво повешенный автомат. Поймал живой прогон реальной цепочки кабинета
             // (ChildPhoneTests.BangButton_ThroughTheRealCabinetChain…), вставший на таймауте.
             //
-            // Клампим ТОЛЬКО ВЕРХ и ТОЛЬКО на экране-туториале: вниз уйти по-прежнему можно (иначе
+            // Клампим ТОЛЬКО ВЕРХ ШКАЛЫ (вправо) и ТОЛЬКО на экране-туториале: вниз/влево уйти
+            // по-прежнему можно (иначе
             // исчезло бы то самое «верни маркер в зону», ради чего экран и стоит), а в живой игре
             // перелёт в красную зону «задушил вниманием» остаётся ровно таким, каким был.
             //
             // ⚠ ПОТОЛОК БЛОКИРУЕТ РОСТ, А НЕ ТЕЛЕПОРТИРУЕТ ВНИЗ (находка код-скептика r5, MINOR).
             // Глухое `Min(RelZoneMax, …)` мгновенно сдёргивало бы маркер к 75 из ЛЮБОЙ позиции выше
             // зоны — а войти в модалку сверху вполне законно: живая игра пускает в красную зону
-            // («задушил вниманием»), и §D-экран может открыться на 90. Игрок шевельнул рычагом вверх —
+            // («задушил вниманием»), и §D-экран может открыться на 90. Игрок шевельнул рычагом вправо —
             // и маркер прыгнул 90 → 75 одним кадром, то есть экран САМ сделал за него работу, которую
             // просит сделать. Потолок берётся как максимум зоны и ТЕКУЩЕГО значения: выше того, с чем
-            // вошёл, не поднимешься, но и вниз тебя никто не переставит — спускайся рычагом.
+            // вошёл, не поднимешься, но и вниз тебя никто не переставит — спускайся рычагом влево.
             int cap = Math.Max(RelZoneMax, Scales.Relationships);
             Scales.Relationships = Math.Max(0, Math.Min(cap, Scales.Relationships + whole));
             if (Scales.Relationships >= cap) _relFrac = 0;   // не копить дробь в упоре

@@ -59,9 +59,9 @@ namespace ThanksNoThanks.Tests.PlayMode
             Assert.IsFalse(driver.Game.Paused, "not paused (hint dismissed)");
             int rel0 = driver.Game.Scales.Relationships;
 
-            // HOLD ↑ for ~4s through the driver's REAL input path: source raises RelationUp EVERY frame the
-            // axis is held, exactly as ArcadeInputSource re-emits for a held Joystick.y (RelationUp/Down).
-            for (int i = 0; i < 40; i++) { fake.Fire(GameInput.RelationUp); driver.Game.Tick(0.1f); }
+            // HOLD → (вправо) for ~4s through the driver's REAL input path: source raises RelationRight EVERY frame the
+            // axis is held, exactly as ArcadeInputSource re-emits for a held Joystick.x (RelationRight/Left).
+            for (int i = 0; i < 40; i++) { fake.Fire(GameInput.RelationRight); driver.Game.Tick(0.1f); }
 
             Assert.Greater(driver.Game.Scales.Relationships, rel0,
                 "holding ↑ through the driver's input path RAISES relationships (net +axis beats the drift)");
@@ -80,7 +80,7 @@ namespace ThanksNoThanks.Tests.PlayMode
             Assert.IsTrue(driver.Game.RelationshipsOpen, "relationships opened");
             int rel0 = driver.Game.Scales.Relationships;
 
-            for (int i = 0; i < 20; i++) { fake.Fire(GameInput.RelationDown); driver.Game.Tick(0.1f); }
+            for (int i = 0; i < 20; i++) { fake.Fire(GameInput.RelationLeft); driver.Game.Tick(0.1f); }
 
             Assert.Less(driver.Game.Scales.Relationships, rel0,
                 "holding ↓ through the driver's input path LOWERS relationships (axis + drift both down)");

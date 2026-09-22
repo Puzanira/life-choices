@@ -416,7 +416,7 @@ namespace ThanksNoThanks.Tests
 
             Assert.AreEqual(g.MoneyOpen, g.HandleInput(GameInput.MoneyTick),
                 "крутилка принимается ровно тогда, когда деньги открыты");
-            Assert.AreEqual(g.RelationshipsOpen, g.HandleInput(GameInput.RelationUp),
+            Assert.AreEqual(g.RelationshipsOpen, g.HandleInput(GameInput.RelationRight),
                 "ось отношений принимается ровно тогда, когда балансир открыт");
             Assert.IsFalse(g.HandleInput(GameInput.Confirm),
                 "подтверждение — не шкальный ввод, окно §6 оно открывать не должно");

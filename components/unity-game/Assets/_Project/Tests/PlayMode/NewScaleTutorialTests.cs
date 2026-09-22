@@ -485,7 +485,7 @@ namespace ThanksNoThanks.Tests.PlayMode
                     case NewScale.Energy:
                         fake.Fire(GameInput.EnergyHold); driver.Game.Tick(0.5f); break;
                     case NewScale.Relations:
-                        fake.Fire(GameInput.RelationUp); driver.Game.Tick(0.1f); break;
+                        fake.Fire(GameInput.RelationRight); driver.Game.Tick(0.1f); break;
                     case NewScale.Child:
                         break;   // у ребёнка «взвод» = выполненное условие, окно уже уходит
                 }
@@ -532,7 +532,7 @@ namespace ThanksNoThanks.Tests.PlayMode
             int guard = 0;
             while (driver.Game.Scales.Relationships >= Game.RelZoneMin && guard++ < 400)
             {
-                fake.Fire(GameInput.RelationDown);
+                fake.Fire(GameInput.RelationLeft);
                 driver.Game.Tick(0.25f);
             }
             Assert.Less(driver.Game.Scales.Relationships, Game.RelZoneMin,
@@ -550,7 +550,7 @@ namespace ThanksNoThanks.Tests.PlayMode
             guard = 0;
             while (driver.Game.Scales.Relationships < Game.RelZoneMin && guard++ < 400)
             {
-                fake.Fire(GameInput.RelationUp);
+                fake.Fire(GameInput.RelationRight);
                 driver.Game.Tick(0.25f);
             }
             Assert.GreaterOrEqual(driver.Game.Scales.Relationships, Game.RelZoneMin, "маркер вернулся в зону");
@@ -671,7 +671,7 @@ namespace ThanksNoThanks.Tests.PlayMode
                 "крутилка на ЧУЖОМ экране не приносит ни копейки (иначе — бесконечная ферма денег)");
 
             // …и рычаг балансира — тоже чужой: ось не латчится, TickModalBalancer нечего сводить.
-            for (int i = 0; i < 40; i++) { fake.Fire(GameInput.RelationUp); driver.Game.Tick(0.25f); }
+            for (int i = 0; i < 40; i++) { fake.Fire(GameInput.RelationRight); driver.Game.Tick(0.25f); }
             Assert.AreEqual(rel0, driver.Game.Scales.Relationships,
                 "чужой рычаг не двигает маркер под модалкой");
 
@@ -725,7 +725,7 @@ namespace ThanksNoThanks.Tests.PlayMode
             {
                 driver.DebugAdvanceInputClocks(1f);
                 fake.Fire(GameInput.MoneyTick);
-                fake.Fire(GameInput.RelationUp);
+                fake.Fire(GameInput.RelationRight);
                 driver.Game.Tick(0.25f);
             }
             Assert.AreEqual(money0, driver.Game.Money, 1e-6, "на экране ребёнка крутилка мертва");
@@ -921,7 +921,7 @@ namespace ThanksNoThanks.Tests.PlayMode
                 driver.DebugAdvanceInputClocks(1f);
                 fake.Fire(GameInput.MoneyTick);       // чужие контролы — все, какие есть
                 fake.Fire(GameInput.EnergyHold);
-                fake.Fire(GameInput.RelationUp);
+                fake.Fire(GameInput.RelationRight);
                 fake.Yes(); fake.No();                // …и ответы, которые под экраном инертны
                 driver.DebugTick(0.1f);
             }

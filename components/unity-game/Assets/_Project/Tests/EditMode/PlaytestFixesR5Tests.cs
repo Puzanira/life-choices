@@ -59,7 +59,7 @@ namespace ThanksNoThanks.Tests
             float t = 0f;
             while (t < limit && g.State == GameState.Playing && g.RelationshipsOpen)
             {
-                if (dir != 0) g.HandleInput(dir > 0 ? GameInput.RelationUp : GameInput.RelationDown);
+                if (dir != 0) g.HandleInput(dir > 0 ? GameInput.RelationRight : GameInput.RelationLeft);
                 g.Tick(dt);
                 t += dt;
                 if (done(g)) return t;
@@ -92,7 +92,7 @@ namespace ThanksNoThanks.Tests
 
             var g = OpenRel(50);
             float before = g.RelationshipsPrecise;
-            g.HandleInput(GameInput.RelationUp);
+            g.HandleInput(GameInput.RelationRight);
             g.Tick(frame);
             float after = g.RelationshipsPrecise;
 
@@ -121,7 +121,7 @@ namespace ThanksNoThanks.Tests
             for (int i = 0; i < 1200; i++)                       // 20 с: вверх, вниз и в упор в потолок
             {
                 int dir = (i / 120) % 3 - 1;                     // −1 / 0 / +1 по очереди
-                if (dir != 0) g.HandleInput(dir > 0 ? GameInput.RelationUp : GameInput.RelationDown);
+                if (dir != 0) g.HandleInput(dir > 0 ? GameInput.RelationRight : GameInput.RelationLeft);
                 g.Tick(1f / 60f);
                 if (g.State != GameState.Playing || !g.RelationshipsOpen) break;
 
@@ -188,7 +188,7 @@ namespace ThanksNoThanks.Tests
 
             for (int i = 0; i < 600; i++)       // 10 с непрерывного «держу вверх»
             {
-                g.HandleInput(GameInput.RelationUp);
+                g.HandleInput(GameInput.RelationRight);
                 g.Tick(1f / 60f);
             }
 
@@ -220,14 +220,14 @@ namespace ThanksNoThanks.Tests
             g.Paused = true;
             g.PausedInputsLive = true;
 
-            g.HandleInput(GameInput.RelationUp);
+            g.HandleInput(GameInput.RelationRight);
             g.Tick(1f / 60f);
             Assert.AreEqual(entered, g.Scales.Relationships,
                 "первый же тик с зажатой осью вверх не имеет права ПЕРЕСТАВИТЬ маркер — только не пустить выше");
 
             for (int i = 0; i < 600; i++)        // 10 с «держу вверх» — выше не пускает и не роняет
             {
-                g.HandleInput(GameInput.RelationUp);
+                g.HandleInput(GameInput.RelationRight);
                 g.Tick(1f / 60f);
             }
             Assert.AreEqual(entered, g.Scales.Relationships,
@@ -249,7 +249,7 @@ namespace ThanksNoThanks.Tests
             var g = OpenRel(Scales.RelationshipsStart);
             for (int i = 0; i < 300; i++)       // 5 с удержания вверх в ОБЫЧНОЙ игре
             {
-                g.HandleInput(GameInput.RelationUp);
+                g.HandleInput(GameInput.RelationRight);
                 g.Tick(1f / 60f);
                 if (g.State != GameState.Playing) break;
             }
@@ -330,7 +330,7 @@ namespace ThanksNoThanks.Tests
             while (t < span && g.State == GameState.Playing)
             {
                 if (g.RelationshipsLost) return false;
-                if (t % period < period * duty) g.HandleInput(GameInput.RelationUp);
+                if (t % period < period * duty) g.HandleInput(GameInput.RelationRight);
                 g.Tick(dt);
                 t += dt;
             }

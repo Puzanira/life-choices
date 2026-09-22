@@ -67,8 +67,8 @@ namespace ThanksNoThanks.Tests
             if (g.Scales.Energy < 60) g.HandleInput(GameInput.EnergyHold);
             if (g.RelationshipsOpen)
             {
-                if (g.Scales.Relationships < 50) g.HandleInput(GameInput.RelationUp);
-                else if (g.Scales.Relationships > Game.RelZoneMax) g.HandleInput(GameInput.RelationDown);
+                if (g.Scales.Relationships < 50) g.HandleInput(GameInput.RelationRight);
+                else if (g.Scales.Relationships > Game.RelZoneMax) g.HandleInput(GameInput.RelationLeft);
             }
         }
 

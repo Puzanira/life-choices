@@ -133,8 +133,8 @@ namespace ThanksNoThanks.Tests
             if (g.Scales.Energy < p.BreathBelow) g.HandleInput(GameInput.EnergyHold);
             if (g.RelationshipsOpen)
             {
-                if (g.Scales.Relationships < p.BalanceBelow) g.HandleInput(GameInput.RelationUp);
-                else if (g.Scales.Relationships > Game.RelZoneMax) g.HandleInput(GameInput.RelationDown);
+                if (g.Scales.Relationships < p.BalanceBelow) g.HandleInput(GameInput.RelationRight);
+                else if (g.Scales.Relationships > Game.RelZoneMax) g.HandleInput(GameInput.RelationLeft);
             }
             if (g.ChildOpen && g.ChildFlashing && p.Answers) g.HandleInput(GameInput.ChildPress);
 

@@ -146,7 +146,8 @@ namespace ThanksNoThanks.Tests.PlayMode
         // INCLUDING the shapes a re-written hint would most plausibly slip back in: the height-sensor key
         // «E» as a bare key name («жми E», «(E)»), and the balancer's keyboard arrows, named either as
         // glyphs (↑/↓) or in words («стрелки вверх/вниз»). The cabinet words are «ДАТЧИК ВЫСОТЫ» and
-        // «ДЖОЙСТИК ВВЕРХ/ВНИЗ» (host-content §4), so none of these may appear in player-facing copy.
+        // «ДЖОЙСТИК ВЛЕВО/ВПРАВО» (r7 п.1 — балансир горизонтальный), so none of these may appear in
+        // player-facing copy.
         private static readonly (string Name, Regex Pattern)[] DevKeyPatterns =
         {
             ("Enter",  new Regex("enter",  RegexOptions.IgnoreCase)),
@@ -155,6 +156,13 @@ namespace ThanksNoThanks.Tests.PlayMode
             ("Numpad", new Regex("numpad", RegexOptions.IgnoreCase)),
             ("↑",      new Regex("↑")),
             ("↓",      new Regex("↓")),
+            // ⚠ r7: ГОРИЗОНТАЛЬНЫЕ стрелки под тем же запретом, что и вертикальные. До этого бан знал
+            // только ↑/↓ — то есть ровно ту пару, которой балансир УЖЕ не управляется; после переезда
+            // оси «←/→» стало можно безнаказанно зашить в игровой текст, а это ДЕВ-КЛАВИША: на стойке
+            // стрелок нет, там джойстик. Освобождение прежнее и точечное — две служебные строки
+            // эмуляции (KeyHintObjectNames), которые как раз и обязаны называть клавиши.
+            ("←",      new Regex("←")),
+            ("→",      new Regex("→")),
             ("стрелк", new Regex("стрелк", RegexOptions.IgnoreCase)),
             // Latin «E» standing ALONE as a key name — «жми E», « E », «(E)», «E.» — but never inside a
             // word, so Latin-spelled copy and ids (Energy, BLOCK$, CH0E…) do not false-positive. Cyrillic
@@ -506,8 +514,20 @@ namespace ThanksNoThanks.Tests.PlayMode
             // (в) без плат: подсказка появляется и называет клавишу ИЗ КОНФИГА ПАКЕТА.
             serial.ProvidesHeights = false;
             yield return null;
+            // ⚠ r7 п.2: строка называет ОБА датчика («зажми Q или E») — заряжает любой. Буквы по-прежнему
+            // из конфига пакета, ни одна не зашита здесь; пакет знает только «первичную» клавишу ОДНОГО
+            // датчика, поэтому пару склеивает игра, и проверяем мы ровно её склейку.
+            // ⚠ РАЗДЕЛИТЕЛЬ — ЛИТЕРАЛОМ, А НЕ КОНСТАНТОЙ ПРОДАКШЕНА (находка код-скептика r7). Пока
+            // ожидание брало GameDriver.EitherKeySeparator, мутация самой константы двигала ОБЕ стороны
+            // сравнения, и гард молчал: «или» можно было заменить на « / », «,» или пустую строку.
+            // Слово выбрано осознанно (клавиши ВЗАИМОЗАМЕНЯЕМЫ, это не пара направлений) — значит оно и
+            // пинится. Буквы клавиш по-прежнему из конфига пакета: зашит разделитель, а не клавиша.
+            var defMap = KeyboardMapping.LoadDefault();
             string expected = GameDriver.BreathKeyHintPrefix
-                + KeyboardHints.PrimaryFor(KeyboardMapping.LoadDefault(), ArcadeControlId.HeightA);
+                + KeyboardHints.Label(defMap.HeightAUp) + " или "
+                + KeyboardHints.Label(defMap.HeightBUp);
+            Assert.AreEqual(" или ", GameDriver.EitherKeySeparator,
+                "разделитель взаимозаменяемых клавиш — именно «или»");
             Assert.AreEqual(expected, driver.NewScaleHintLine.text,
                 "без плат строка есть и собрана из маппинга пакета, а не из зашитой в игре буквы");
 

@@ -20,8 +20,9 @@ namespace ThanksNoThanks
     ///   MenuButton  ✔ → выход (Exit — clean end-of-run, arcade contract §5)
     ///   Crank         → крутилка денег (accumulated degrees → discrete MoneyTick — a literal money crank)
     ///   BangButton    → «поднять трубку» звонящего ребёнка (ChildPress, revisions §5b)
-    ///   HeightA       → энергия: HELD EnergyHold, re-emitted every frame the sensor sits above mid-travel
-    ///   Joystick.y    → балансир отношений (held RelationUp/RelationDown, spring-return = drift)
+    ///   HeightA / HeightB → энергия: HELD EnergyHold, re-emitted every frame ЛЮБОЙ из двух датчиков
+    ///                       сидит выше середины хода (r7 п.2 — заряжает любая рука)
+    ///   Joystick.x    → балансир отношений (held RelationRight/RelationLeft, spring-return = drift)
     ///
     /// A drop-in <c>SerialInputSource</c> is unnecessary: swapping keyboard→Arduino is a backend swap inside
     /// arcade-controls, invisible to this class and the game.
@@ -58,12 +59,24 @@ namespace ThanksNoThanks
         [Tooltip("Crank rotation (degrees, either direction) that equals one MoneyTick.")]
         [SerializeField] private float degreesPerMoneyTick = 12f;
 
-        // Датчик высоты (HeightA): УДЕРЖИВАЕМЫЙ сигнал «датчик поднят», переиздаётся каждый кадр, пока рука
+        // Датчики высоты: УДЕРЖИВАЕМЫЙ сигнал «датчик поднят», переиздаётся каждый кадр, пока рука
         // держит датчик выше середины хода (гистерезис — в PURE BreathSensor, чтобы весь клавиатурный путь
         // прошагивался детерминированно в EditMode: BreathKeyboardPathTests).
-        private readonly BreathSensor _breathSensor = new();
-        // Relationship balancer (Joystick.y): held axis, re-emitted every frame past the deadzone.
+        //
+        // ⚠ r7 п.2 («сделать оба датчика, чтобы работали»): детектор теперь СВОЙ У КАЖДОГО датчика, и
+        // энергия заряжается, пока поднят ЛЮБОЙ из двух. Два состояния, а не одно общее, ровно потому,
+        // что гистерезис — это ФИЗИКА КОНКРЕТНОЙ руки на КОНКРЕТНОМ датчике: один общий детектор,
+        // накормленный Max(A,B), склеил бы два независимых жеста в один и терял бы отпускание («держу A,
+        // мигаю B» читалось бы как непрерывное удержание).
+        private readonly BreathSensor _breathSensorA = new();
+        private readonly BreathSensor _breathSensorB = new();
+        // Relationship balancer (Joystick.x): held axis, re-emitted every frame past the deadzone.
         private const float JoyDeadzone = 0.4f;
+
+        // ⚠ ПОЛЯРНОСТЬ ОСИ НА СТОЙКЕ — ИЗ КОНФИГА, А НЕ ИЗ КОДА (см. GameConfig). Читается ОДИН раз на
+        // Awake: это тюнинг сборки автомата, он не меняется посреди забега, а лезть в файл каждый кадр
+        // — мусор на ровном месте.
+        private float _relationAxisSign = GameConfig.DefaultRelationAxisSign;
 
         private float _crankAccum;
         private bool _prevGreen, _prevRed, _prevBang, _prevMenu;
@@ -76,6 +89,8 @@ namespace ThanksNoThanks
             // backend, so this is a no-op there.
             if (UnityEngine.Object.FindAnyObjectByType<ArcadeInputRunner>() == null)
                 gameObject.AddComponent<ArcadeInputRunner>();
+
+            _relationAxisSign = GameConfig.RelationAxisSign;
         }
 
         private void Update()
@@ -104,13 +119,49 @@ namespace ThanksNoThanks
                 Emit(GameInput.MoneyTick);
             }
 
-            // ---- датчик высоты (HeightA) → held EnergyHold, переиздаётся КАЖДЫЙ кадр, пока датчик поднят ----
-            if (_breathSensor.Step(ArcadeInput.HeightA.Value)) Emit(GameInput.EnergyHold);
+            // ---- датчики высоты (A ИЛИ B) → held EnergyHold, переиздаётся КАЖДЫЙ кадр, пока поднят ЛЮБОЙ --
+            // ⚠ ЧТО ЗДЕСЬ НА САМОМ ДЕЛЕ НЕСУЩЕЕ: ДВА ОТДЕЛЬНЫХ ВЫЗОВА Step, А НЕ ЗНАК В УСЛОВИИ.
+            // Оба детектора обязаны прошагать свой гистерезис КАЖДЫЙ кадр, иначе второй датчик застревает
+            // в том состоянии, в котором его застали («отпустил A — B помнит удержание, которого уже нет»,
+            // и наоборот: «держал A, B в это время не опрашивался и подняться уже не может»).
+            //
+            // Гарантирует это ВЫНОС вызовов в локальные переменные: обе строки выполняются безусловно, и
+            // сокращать тут нечего. Поэтому «|» ниже — НЕ оберег: на уже вычисленных bool'ах «|» и «||»
+            // делают ровно одно и то же, и подмена одного другим не меняет НИЧЕГО (проверено мутацией
+            // 2026-09-22 — гард остался зелёным, потому что ловить было нечего). Сломать можно ДРУГИМ
+            // движением — втянув вызовы обратно в условие: `if (_breathSensorA.Step(a) || _breathSensorB
+            // .Step(b))`. Вот ЭТО теряет шаг второго детектора, и вот это ловит гард
+            // ReleasingOneSensor_WhileTheOtherIsHeld_KeepsCharging (кадр B в полосе гистерезиса).
+            // Прежняя редакция комментария приписывала защиту знаку «|» — это было неверно.
+            //
+            // ⚠ И РОВНО ОДИН Emit НА КАДР — не по одному с каждого датчика. Держать оба разом ДОЛЖНО быть
+            // не быстрее, чем держать один (умолчание Maintainer'а: MAX, не сумма). Game._breathHeld —
+            // булев латч, гасимый каждым Tick, так что два Emit и один дают один и тот же такт роста;
+            // единственный Emit делает это свойством ИСТОЧНИКА, а не счастливым совпадением в Game.
+            bool raisedA = _breathSensorA.Step(ArcadeInput.HeightA.Value);
+            bool raisedB = _breathSensorB.Step(ArcadeInput.HeightB.Value);
+            if (raisedA | raisedB) Emit(GameInput.EnergyHold);
 
-            // ---- relationship balancer (Joystick vertical) → held axis, re-emitted each frame ----
-            float y = ArcadeInput.Joystick.Vector.y;
-            if (y >= JoyDeadzone) Emit(GameInput.RelationUp);
-            else if (y <= -JoyDeadzone) Emit(GameInput.RelationDown);
+            // ---- relationship balancer (Joystick HORIZONTAL) → held axis, re-emitted each frame ----
+            // ⚠ r7 п.1: ось переехала с ВЕРТИКАЛИ на ГОРИЗОНТАЛЬ. Шкала отношений нарисована
+            // ГОРИЗОНТАЛЬНЫМ балансиром (парень слева, девушка справа, сердце-маркер ездит между ними —
+            // GameDriver.RelMarkerMinCx/MaxCx), а рычаг просил тянуть вверх-вниз. Вправо = маркер вправо
+            // = рост шкалы: «тяни туда, куда хочешь сдвинуть маркер».
+            //
+            // ⚠ ЗЕРКАЛО X — ТОЛЬКО НА ЖЕЛЕЗЕ. Ориентация оси — свойство ФИЗИЧЕСКОЙ сборки (CONTROLS_BRIEF
+            // §5: модуль джойстика уже дважды пере-подключали, и знак X переворачивался). Пакетный
+            // SerialTuning.InvertJoystickX нам недоступен: раннер пакета строит SerialTuning.Default
+            // жёстко, а пакет трогать нельзя. Поэтому множитель ±1 читается из game.json (GameConfig) и
+            // применяется ЗДЕСЬ — правка одной цифры на стойке вместо пересборки билда.
+            //
+            // И применяется он СТРОГО на железном пути. Клавиатурная эмуляция однозначна по определению:
+            // «←» — влево, «→» — вправо, там нечего зеркалить. Перевернуть заодно и её значило бы, что
+            // человек, чинящий проводку автомата, ломает дев-клавиатуру всем остальным.
+            float x = ArcadeInput.Joystick.Vector.x;
+            if (!ArcadeInput.IsEmulated(ArcadeControlId.Joystick)) x *= _relationAxisSign;
+
+            if (x >= JoyDeadzone) Emit(GameInput.RelationRight);
+            else if (x <= -JoyDeadzone) Emit(GameInput.RelationLeft);
         }
 
         private void Emit(GameInput input) => Received?.Invoke(input);

@@ -34,7 +34,7 @@ namespace ThanksNoThanks.Tests.PlayMode
                         driver.Game.Tick(0.5f);                      // …и такт наполняет батарею (TickModalBreath)
                         break;
                     case NewScale.Relations:
-                        fake.Fire(GameInput.RelationUp);             // the balancer lever (starts in zone)
+                        fake.Fire(GameInput.RelationRight);             // the balancer lever (starts in zone)
                         driver.Game.Tick(0.01f);                     // …consume the latched axis (no stale pull)
                         break;
                     case NewScale.Child:
@@ -90,7 +90,8 @@ namespace ThanksNoThanks.Tests.PlayMode
                         yield return null;
                         break;
                     case NewScale.Relations:
-                        backend.Next = new BackendSnapshot { Joystick = new Vector2(0f, 1f) };
+                        // ⚠ r7 п.1: балансир ведёт ГОРИЗОНТАЛЬ джойстика (X), не вертикаль. Вправо = рост.
+                        backend.Next = new BackendSnapshot { Joystick = new Vector2(1f, 0f) };
                         yield return null;
                         break;
                     case NewScale.Child:

@@ -208,7 +208,7 @@ namespace ThanksNoThanks.Tests.PlayMode
             fake.No();                                    // красный
             fake.Fire(GameInput.MoneyTick);               // крутилка
             fake.Fire(GameInput.EnergyHold);              // датчик
-            fake.Fire(GameInput.RelationUp);              // джойстик
+            fake.Fire(GameInput.RelationRight);              // джойстик
             fake.Fire(GameInput.ChildPress);              // «!»
             driver.DebugTick(0.2f);
 
