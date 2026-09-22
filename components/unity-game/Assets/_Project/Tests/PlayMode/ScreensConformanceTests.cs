@@ -1204,33 +1204,41 @@ namespace ThanksNoThanks.Tests.PlayMode
         /// <summary>
         /// ЗАБЕГ БЕЗ ЕДИНОЙ ВЕХИ НЕ ЛОМАЕТ ЭКРАН. До 2026-09-22 такого случая не существовало: строка
         /// родителей стояла в КАЖДОМ некрологе, поэтому блок истории никогда не был пустым. Сняв её, мы
-        /// завели новое состояние — мгновенный FATAL до первого значимого выбора, — и оно обязано быть
-        /// ЗАКОННЫМ, а не «пустой Text, который никто не проверял»: о забеге честно говорит одна строка
-        /// исхода, а блок истории просто ничего не рисует и никуда не вылезает.
+        /// завели новое состояние — мгновенный FATAL до первого значимого выбора. Основательница
+        /// («для пустого ок», 2026-09-22): совсем пустая плашка читалась бы как поломка, поэтому такой
+        /// забег получает РОВНО ОДНУ строку-эпитафию <see cref="Necrolog.EmptyLifeLine"/>. Это не возврат
+        /// подводки: строка появляется только когда вех НОЛЬ, любая настоящая веха её вытесняет.
         /// </summary>
         [UnityTest]
-        public IEnumerator Finale_WithNoMilestonesAtAll_ShowsTheOutcomeAndAnEmptyStory()
+        public IEnumerator Finale_WithNoMilestonesAtAll_ShowsTheOutcomeAndTheEpitaphLine()
         {
             var driver = Boot(out var go, out var fake);
             yield return null;
 
             var n = Necrolog.Build("вы сунули палец в розетку", new List<NecrologEntry>());
-            Assert.AreEqual(0, n.StoryLines.Count, "без вех история пуста — запечённых строк больше нет");
+            Assert.AreEqual(1, n.StoryLines.Count, "без вех — ровно одна строка-эпитафия");
+            Assert.AreEqual(Necrolog.EmptyLifeLine, n.StoryLines[0], "и это именно утверждённая эпитафия");
             driver.DebugRenderFinale(n, 1);
             yield return null;
 
-            // Исход на месте и читается — именно он и несёт всю информацию о таком забеге.
+            // Исход на месте и читается.
             StringAssert.Contains("Ты дожил до 1 года", driver.FinaleOutcomeText.text);
             StringAssert.Contains("вы сунули палец в розетку", driver.FinaleOutcomeText.text);
             AssertGlyphsInRefBox(driver.FinaleOutcomeText, BakedCreamField, 0f, "исход без вех");
 
-            // Блок истории пуст — и пуст ЧИСТО: ни одного видимого знака, никакого мусора от подводки.
+            // Эпитафия рисуется одной строкой в блоке истории, на той же кромке.
             var t = driver.FinaleStoryText;
-            Assert.IsTrue(string.IsNullOrEmpty(t.text), "блок истории пуст, а не «почти пуст»");
+            StringAssert.Contains(Necrolog.EmptyLifeLine, t.text, "эпитафия в блоке истории");
             var settings = t.GetGenerationSettings(t.rectTransform.rect.size);
             t.cachedTextGenerator.Populate(t.text, settings);
-            Assert.AreEqual(0, t.cachedTextGenerator.characterCountVisible,
-                "…и ничего не рисует");
+            Assert.AreEqual(1, t.cachedTextGenerator.lineCount, "эпитафия — одна визуальная строка");
+
+            // Контроль вытеснения: одна настоящая веха — и эпитафии нет.
+            var n2 = Necrolog.Build("спокойная старость", new List<NecrologEntry>
+                { new() { Age = 7, Order = 0, Line = "В семь лет вы завели рыжего кота и назвали его Борщ." } });
+            Assert.AreEqual(1, n2.StoryLines.Count);
+            Assert.IsFalse(n2.StoryLines.Contains(Necrolog.EmptyLifeLine),
+                "настоящая веха вытесняет эпитафию");
 
             Object.Destroy(go);
             yield return null;
