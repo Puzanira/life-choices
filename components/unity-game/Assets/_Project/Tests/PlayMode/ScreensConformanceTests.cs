@@ -404,10 +404,14 @@ namespace ThanksNoThanks.Tests.PlayMode
         }
 
         /// <summary>
-        /// РЕАЛЬНЫЙ худший случай: 14 самых длинных строк некролога из живой колоды (`Resources/scenes.csv`,
-        /// кол. «Некролог ДА»/«Некролог НЕТ») + фиксированная строка родителей = лимит 15. Синтетика с
-        /// одной повторённой строкой не годится как приёмка: она короче реальной склейки и не ловит,
-        /// например, длинную причину поверх длинной истории.
+        /// РЕАЛЬНЫЙ худший случай: <see cref="Necrolog.MaxLines"/> самых длинных строк некролога из живой
+        /// колоды (`Resources/scenes.csv`, кол. «Некролог ДА»/«Некролог НЕТ»). Синтетика с одной
+        /// повторённой строкой не годится как приёмка: она короче реальной склейки и не ловит, например,
+        /// длинную причину поверх длинной истории.
+        ///
+        /// ⚠ 2026-09-22: было «MaxLines−1 строк + фиксированная строка родителей». Родителей больше нет,
+        /// поэтому худший случай набирается ЦЕЛИКОМ из колоды — и он стал ДЛИННЕЕ на одну настоящую
+        /// строку, а не короче: лимит держит семь строк, и все семь теперь самые длинные в колоде.
         /// </summary>
         private static NecrologResult LongestRealStory()
         {
@@ -423,9 +427,9 @@ namespace ThanksNoThanks.Tests.PlayMode
             lines = lines.Distinct().ToList();
             lines.Sort((a, b) => b.Length.CompareTo(a.Length));
             var entries = new List<NecrologEntry>();
-            for (int i = 0; i < Necrolog.MaxLines - 1 && i < lines.Count; i++)
+            for (int i = 0; i < Necrolog.MaxLines && i < lines.Count; i++)
                 entries.Add(new NecrologEntry { Age = i, Order = i, Line = lines[i], IsRond = false });
-            Assert.AreEqual(Necrolog.MaxLines - 1, entries.Count,
+            Assert.AreEqual(Necrolog.MaxLines, entries.Count,
                 "в колоде хватает строк, чтобы набрать лимит некролога целиком");
             // Длиннейшая причина колоды тоже участвует: строка исхода делит с некрологом одну плашку.
             return Necrolog.Build("вы сунули палец в розетку", entries);
@@ -434,9 +438,14 @@ namespace ThanksNoThanks.Tests.PlayMode
         /// <summary>
         /// ОБЫЧНАЯ прожитая жизнь на полный лимит вех — ровно та поза, которую снимает кадр `finale`
         /// (<c>ArcadeScreenshotTests.SampleNecrolog</c>). Для ВЫСОТЫ блока это худший случай из всех:
-        /// строки короткие, ни одна не получает персонального <c>&lt;size&gt;</c>, поэтому все восемь рядов
+        /// строки короткие, ни одна не получает персонального <c>&lt;size&gt;</c>, поэтому все ряды
         /// стоят полным кеглем блока. Худшие «длинные» случаи, наоборот, часть рядов ужимают и по высоте
         /// оказываются мягче.
+        ///
+        /// ⚠ 2026-09-22: строк СЕМЬ, а не шесть. Раньше седьмой ряд давала строка родителей, и поза
+        /// набирала полный лимит только вместе с ней; теперь лимит набирается прожитыми строками, и
+        /// добавленная сюда седьмая — не «для красоты», а условие того, что гард полного лимита вообще
+        /// что-то стережёт (он сам это и проверяет ассертом на `MaxLines`).
         /// </summary>
         private static NecrologResult OrdinaryFullStory()
         {
@@ -447,7 +456,8 @@ namespace ThanksNoThanks.Tests.PlayMode
                 new NecrologEntry { Age = 24, Order = 2, Line = "В двадцать четыре уехали в другой город и ни разу не пожалели." },
                 new NecrologEntry { Age = 30, Order = 3, Line = "Свадьбу сыграли, и это было громко.", IsMilestone = true },
                 new NecrologEntry { Age = 32, Order = 4, Line = "Ребёнка растили как умели.", IsMilestone = true },
-                new NecrologEntry { Age = 68, Order = 5, Line = "В шестьдесят восемь внуки научили вас проигрывать в карты." },
+                new NecrologEntry { Age = 49, Order = 5, Line = "Ипотеку закрыли на четыре года позже, чем обещали себе." },
+                new NecrologEntry { Age = 68, Order = 6, Line = "В шестьдесят восемь внуки научили вас проигрывать в карты." },
             };
             return Necrolog.Build("спокойная старость", entries);
         }
@@ -719,8 +729,11 @@ namespace ThanksNoThanks.Tests.PlayMode
 
             var t = driver.FinaleStoryText;
             int rows = t.text.Split('\n').Length;
-            Assert.AreEqual(Necrolog.MaxLines + 1, rows,
-                "худший случай набран целиком: зачин + лимит строк истории");
+            // ⚠ 2026-09-22 ПЕРЕСПЕК: было `MaxLines + 1` — «зачин + лимит». Зачина нет, и ряд под него
+            // тоже: рядов ровно столько, сколько вех. Ослаблением это не является — наоборот, равенство
+            // стало точным (лишний ряд теперь краснит, а раньше был обязателен).
+            Assert.AreEqual(Necrolog.MaxLines, rows,
+                "худший случай набран целиком: лимит строк истории, и ни одного ряда сверх них");
 
             // Меряем ТЕМ ЖЕ генератором и теми же настройками, какими подпись рисуется, — включая кегль,
             // который проставил подборщик, и персональные `<size>` на ужатых строках.
@@ -768,7 +781,7 @@ namespace ThanksNoThanks.Tests.PlayMode
 
         /// <summary>
         /// ПОЛНЫЙ НЕКРОЛОГ ДОРИСОВЫВАЕТСЯ ДО ПОСЛЕДНЕЙ ВЕХИ — на кадре КАБИНЕТА ровно
-        /// <see cref="Necrolog.MaxLines"/> + 1 визуальных рядов (зачин + семь вех).
+        /// <see cref="Necrolog.MaxLines"/> визуальных рядов (семь вех; до 2026-09-22 было «+1» на зачин).
         ///
         /// ⚠ РЕГРЕССИЯ 2026-08-08, ПОЙМАНА ГЛАЗАМИ ПО КАДРУ, А НЕ ТЕСТАМИ. Подбор кегля мерил высоту блока
         /// делением на <see cref="Text.pixelsPerUnit"/>, т.е. в сетке ТЕКУЩЕГО канваса. В батч-прогоне это
@@ -803,8 +816,11 @@ namespace ThanksNoThanks.Tests.PlayMode
 
             var t = driver.FinaleStoryText;
             int rows = t.text.Split('\n').Length;
-            Assert.AreEqual(Necrolog.MaxLines + 1, rows,
-                $"[{which}] в подпись отдан весь некролог: зачин + {Necrolog.MaxLines} вех");
+            // ⚠ 2026-09-22 ПЕРЕСПЕК «интро + 7 вех = 8 рядов» → «7 вех = 7 рядов». Суть гарда не тронута:
+            // он стережёт, что `verticalOverflow = Truncate` не срезал ПОСЛЕДНЮЮ веху молча. Изменилось
+            // только число рядов, потому что два из них были запечённой подводкой, а не содержанием.
+            Assert.AreEqual(Necrolog.MaxLines, rows,
+                $"[{which}] в подпись отдан весь некролог: {Necrolog.MaxLines} вех и ничего сверх них");
 
             // (1) РЯДОВ НА ЭКРАНЕ — ровно столько же. Настройки берём у самой подписи, т.е. вместе с её
             // `verticalOverflow = Truncate`: если блок не влез в поле, генератор отдаст меньше рядов —
@@ -815,7 +831,7 @@ namespace ThanksNoThanks.Tests.PlayMode
             var tg = t.cachedTextGenerator;
             tg.Populate(t.text, drawn);
             Assert.AreEqual(rows, tg.lineCount,
-                $"[{which}] на кадре кабинета нарисованы ВСЕ {rows} рядов (зачин + {Necrolog.MaxLines} вех), "
+                $"[{which}] на кадре кабинета нарисованы ВСЕ {rows} рядов ({Necrolog.MaxLines} вех), "
                     + "ни один не срезан по высоте");
 
             // (2) …и срезано не «полряда»: знаков нарисовано столько же, сколько без ограничения по высоте.
@@ -844,6 +860,123 @@ namespace ThanksNoThanks.Tests.PlayMode
             // зелёный и на сломанном подборщике: восемь рядов кеглем 24 влезают в поле с огромным запасом.
             Assert.Greater(t.fontSize, GameDriver.FinaleStoryMinSize,
                 $"[{which}] кегль подобран, а не сорвался в аварийный пол {GameDriver.FinaleStoryMinSize}");
+
+            Object.Destroy(go);
+            yield return null;
+        }
+
+        /// <summary>
+        /// ЛЕВАЯ КРОМКА КАЖДОГО ВИЗУАЛЬНОГО РЯДА в 1920×1080 reference px — по ПЕРУ, а не по чернилам.
+        ///
+        /// ⚠ Мерить выравнивание чернилами нельзя: левый боковой вынос у «Г» и у «Я» разный на несколько
+        /// пикселей, и идеально выровненный блок показал бы разброс, которого в вёрстке нет. uGUI
+        /// выравнивает именно ПЕРО (<c>UICharInfo.cursorPos</c>), поэтому гард смотрит туда же —
+        /// и допуск тогда честно жёсткий, а не подогнанный под шрифт.
+        /// </summary>
+        private static float[] RowLeftKerbsPx(Text t)
+        {
+            var settings = t.GetGenerationSettings(t.rectTransform.rect.size);
+            var tg = t.cachedTextGenerator;
+            tg.Populate(t.text, settings);
+            Assert.Greater(tg.lineCount, 0, t.name + ": рядов нет — мерить нечего");
+
+            float upp = 1f / t.pixelsPerUnit;
+            float cx = t.rectTransform.anchorMin.x * 1920f;
+            var kerbs = new float[tg.lineCount];
+            var chars = tg.characters;
+            for (int i = 0; i < tg.lineCount; i++)
+            {
+                int idx = tg.lines[i].startCharIdx;
+                Assert.Less(idx, chars.Count, $"ряд {i}: генератор отдал индекс за пределами набора");
+                kerbs[i] = cx + chars[idx].cursorPos.x * upp;
+            }
+            return kerbs;
+        }
+
+        /// <summary>
+        /// НЕКРОЛОГ ВЫРОВНЕН ПО ЛЕВОМУ КРАЮ — решение основательницы 2026-09-22 по живым кадрам:
+        /// «выравнивание надо по левому краю, а не по центру».
+        ///
+        /// Центровка давала каждой строке свой отступ слева (строки-то разной длины), и семь законченных
+        /// предложений читались рваным столбиком. Гард держит ТРИ вещи, и третья — не косметика:
+        ///  (1) все ряды начинаются на одной кромке (±<see cref="LeftKerbTolerancePx"/> px);
+        ///  (2) эта кромка — левая кромка РЕКТА, то есть блок прижат, а не «почти прижат»;
+        ///  (3) кромка держит зазор до ЗАПЕЧЁННОЙ ЗВЕЗДЫ слева (x ≤ 403 на y 474…556). Левое
+        ///      выравнивание — единственный режим, в котором глифы вообще доходят до левой кромки ректа,
+        ///      поэтому «не на звезде» впервые стало вопросом про ЧЕРНИЛА, а не про рект.
+        ///
+        /// И строка ИСХОДА при этом осталась ПО ЦЕНТРУ: её основательница не трогала, а общий «заодно
+        /// выровняем весь финал» сломал бы отдельный блок, про который речи не было.
+        /// </summary>
+        private const float LeftKerbTolerancePx = 2f;
+
+        /// <summary>
+        /// Сколько пикселей чернила некролога обязаны держать до запечённой звезды-выкуса (её правая
+        /// граница — x 403).
+        ///
+        /// ⚠ ЭТО ЛИТЕРАЛ, И ЭТО ВАЖНО. Первая редакция гарда требовала
+        /// <c>inkLeft ≥ 403 + GameDriver.FinaleStoryLeftInset</c> — то есть мерила ТЕМ ЖЕ ЧИСЛОМ, которое
+        /// и двигает текст. Прогон мутаций показал это прямо: снятие левого поля (`FinaleStoryLeftInset`
+        /// → 0) уезжало ЗЕЛЁНЫМ, потому что вместе с текстом на те же 8 px уезжал и порог. Требование к
+        /// зазору обязано быть внешним по отношению к вёрстке, иначе гард стережёт тавтологию.
+        /// Замер на отдаваемом дереве: чернила на 417, звезда до 403 → 14 px, порог 10 оставляет 4 px
+        /// запаса и краснеет на 6 px, которые даёт снятое поле.
+        /// </summary>
+        private const float StarClearancePx = 10f;
+
+        [UnityTest]
+        public IEnumerator Finale_Necrolog_IsLeftAligned_EveryRowOnTheSameKerb_ClearOfTheBakedStar(
+            [Values("ordinary", "worst-real", "worst-synthetic")] string which)
+        {
+            var driver = Boot(out var go, out var fake);
+            yield return null;
+
+            driver.DebugRenderFinale(
+                which == "ordinary" ? OrdinaryFullStory()
+              : which == "worst-real" ? LongestRealStory()
+              : LongStory(), 78);
+            yield return null;
+            yield return PinCabinetCanvas(driver);
+
+            var t = driver.FinaleStoryText;
+
+            // (0) Заголовок НЕ ТРОНУТ: он отдельный Text и остаётся по центру.
+            Assert.AreEqual(TextAnchor.UpperCenter, driver.FinaleOutcomeText.alignment,
+                "строка исхода как стояла по центру, так и стоит — её решение основательницы не касалось");
+            Assert.AreNotSame(driver.FinaleOutcomeText, t, "исход и некролог — РАЗНЫЕ Text, а не один блок");
+
+            // (1) Режим выравнивания — по левому краю, по вертикали по-прежнему по центру бокса.
+            Assert.AreEqual(TextAnchor.MiddleLeft, t.alignment,
+                "некролог выровнен по ЛЕВОМУ краю (founder 2026-09-22), вертикаль осталась по центру");
+
+            // (2) Ряды стоят на ОДНОЙ кромке. Это и есть проверка «выровнено», независимая от (1):
+            // возврат центровки разносит кромки на сотни пикселей (строки разной длины).
+            var kerbs = RowLeftKerbsPx(t);
+            Assert.GreaterOrEqual(kerbs.Length, 5, $"[{which}] блок многострочный — иначе гард пустой");
+            float min = float.MaxValue, max = float.MinValue;
+            foreach (var k in kerbs) { if (k < min) min = k; if (k > max) max = k; }
+            Assert.LessOrEqual(max - min, LeftKerbTolerancePx,
+                $"[{which}] левые кромки всех {kerbs.Length} рядов совпадают "
+                    + $"(разброс {max - min:0.##} px при допуске {LeftKerbTolerancePx})");
+
+            // (3) …и это именно ЛЕВАЯ КРОМКА РЕКТА, а не случайное общее место.
+            float rectLeft = t.rectTransform.anchorMin.x * 1920f - t.rectTransform.sizeDelta.x / 2f;
+            Assert.AreEqual(rectLeft, min, LeftKerbTolerancePx,
+                $"[{which}] блок прижат к левой кромке своего ректа ({rectLeft:0.#})");
+
+            // (4) ЗВЕЗДА. Рект и так не левее 407 (это стережёт бокс-гард выше), но глифы ДОХОДЯТ до
+            // кромки только теперь — поэтому зазор проверяется по ЧЕРНИЛАМ, самым левым во всём блоке.
+            var ink = GlyphBoxOf(t);
+            float inkLeft = ink.x - ink.z / 2f;
+            Assert.GreaterOrEqual(inkLeft, 403f + StarClearancePx,
+                $"[{which}] чернила некролога ({inkLeft:0.#}) держат не меньше {StarClearancePx:0.#} px "
+                    + "до запечённой звезды (её правая граница x = 403)");
+            AssertGlyphsInRefBox(t, BakedCreamField, 0f, $"некролог по левому краю ({which})");
+
+            // (5) …и на экране НЕТ ПОДВОДКИ — ни зачина, ни всегда-первой строки родителей.
+            StringAssert.DoesNotContain("переживайте", t.text, $"[{which}] зачина на экране нет");
+            StringAssert.DoesNotContain("прекрасных родителей", t.text,
+                $"[{which}] и всегда-первой строки родителей тоже");
 
             Object.Destroy(go);
             yield return null;
@@ -880,7 +1013,14 @@ namespace ThanksNoThanks.Tests.PlayMode
             yield return null;
         }
 
-        /// <summary>Каждый тип конца доводится до финала и печатает СВОЮ причину в запечённой плашке.</summary>
+        /// <summary>
+        /// Каждый тип конца доводится до финала и печатает СВОЮ причину в запечённой плашке.
+        ///
+        /// ⚠ 2026-09-22: раньше сюда подавался ПУСТОЙ список записей, и блок истории всё равно рисовал
+        /// глифы — потому что их давали зачин и строка родителей. То есть половина этого гарда на самом
+        /// деле проверяла подводку, а не «короткую историю». Теперь подаётся ОДНА настоящая строка: это и
+        /// есть кратчайшая история, которую финал реально показывает.
+        /// </summary>
         [UnityTest]
         public IEnumerator Finale_EveryCauseKind_LandsInTheBakedPlate(
             [Values("весёлая старость", "спокойная старость", "одинокая старость",
@@ -889,7 +1029,10 @@ namespace ThanksNoThanks.Tests.PlayMode
             var driver = Boot(out var go, out var fake);
             yield return null;
 
-            driver.DebugRenderFinale(Necrolog.Build(cause, new List<NecrologEntry>()), 41);
+            driver.DebugRenderFinale(Necrolog.Build(cause, new List<NecrologEntry>
+            {
+                new NecrologEntry { Age = 8, Order = 0, Line = "Ели жуков и ничего не боялись." },
+            }), 41);
             yield return null;
 
             StringAssert.Contains(cause, driver.FinaleOutcomeText.text, "причина этого конца на экране");
@@ -898,6 +1041,41 @@ namespace ThanksNoThanks.Tests.PlayMode
             AssertGlyphsInRefBox(driver.FinaleOutcomeText, BakedCreamField, 0f, "исход «" + cause + "»");
             AssertGlyphsInRefBox(driver.FinaleStoryText, BakedCreamField, 0f, "короткая история «" + cause + "»");
             AssertNoTofu(driver.FinaleOutcomeText, "исход «" + cause + "»");
+
+            Object.Destroy(go);
+            yield return null;
+        }
+
+        /// <summary>
+        /// ЗАБЕГ БЕЗ ЕДИНОЙ ВЕХИ НЕ ЛОМАЕТ ЭКРАН. До 2026-09-22 такого случая не существовало: строка
+        /// родителей стояла в КАЖДОМ некрологе, поэтому блок истории никогда не был пустым. Сняв её, мы
+        /// завели новое состояние — мгновенный FATAL до первого значимого выбора, — и оно обязано быть
+        /// ЗАКОННЫМ, а не «пустой Text, который никто не проверял»: о забеге честно говорит одна строка
+        /// исхода, а блок истории просто ничего не рисует и никуда не вылезает.
+        /// </summary>
+        [UnityTest]
+        public IEnumerator Finale_WithNoMilestonesAtAll_ShowsTheOutcomeAndAnEmptyStory()
+        {
+            var driver = Boot(out var go, out var fake);
+            yield return null;
+
+            var n = Necrolog.Build("вы сунули палец в розетку", new List<NecrologEntry>());
+            Assert.AreEqual(0, n.StoryLines.Count, "без вех история пуста — запечённых строк больше нет");
+            driver.DebugRenderFinale(n, 1);
+            yield return null;
+
+            // Исход на месте и читается — именно он и несёт всю информацию о таком забеге.
+            StringAssert.Contains("Ты дожил до 1 года", driver.FinaleOutcomeText.text);
+            StringAssert.Contains("вы сунули палец в розетку", driver.FinaleOutcomeText.text);
+            AssertGlyphsInRefBox(driver.FinaleOutcomeText, BakedCreamField, 0f, "исход без вех");
+
+            // Блок истории пуст — и пуст ЧИСТО: ни одного видимого знака, никакого мусора от подводки.
+            var t = driver.FinaleStoryText;
+            Assert.IsTrue(string.IsNullOrEmpty(t.text), "блок истории пуст, а не «почти пуст»");
+            var settings = t.GetGenerationSettings(t.rectTransform.rect.size);
+            t.cachedTextGenerator.Populate(t.text, settings);
+            Assert.AreEqual(0, t.cachedTextGenerator.characterCountVisible,
+                "…и ничего не рисует");
 
             Object.Destroy(go);
             yield return null;

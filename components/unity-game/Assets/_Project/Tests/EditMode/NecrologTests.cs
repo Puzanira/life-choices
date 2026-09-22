@@ -8,7 +8,7 @@ namespace ThanksNoThanks.Tests
     public class NecrologTests
     {
         [Test]
-        public void Assembles_ParentsFirst_ThenAgeOrder()
+        public void Assembles_NothingButTheLivedLines_InAgeOrder()
         {
             var entries = new List<NecrologEntry>
             {
@@ -20,11 +20,51 @@ namespace ThanksNoThanks.Tests
 
             Assert.AreEqual("СПАСИБО ЗА ИГРУ!", r.Title);
             Assert.AreEqual("Причина конца: спокойная старость", r.CauseLine);
-            Assert.AreEqual(Necrolog.ParentsLine, r.StoryLines[0], "parents line always first");
-            Assert.AreEqual("ранняя строка", r.StoryLines[1]);
-            Assert.AreEqual("средняя строка", r.StoryLines[2]);
-            Assert.AreEqual("поздняя строка", r.StoryLines[3]);
-            StringAssert.StartsWith("Но не переживайте! Ведь вы…", r.ComposeStory());
+
+            // ⚠ 2026-09-22 (живой отсмотр кадров): ПЕРВАЯ строка — уже прожитая, а не запечённая. Раньше
+            // здесь ассертилось `StoryLines[0] == Necrolog.ParentsLine`, а `ComposeStory` обязан был
+            // НАЧИНАТЬСЯ с зачина: обе эти строки основательница велела снять как «ни о чём игровом не
+            // сообщающие». Три входные строки — ровно три строки истории, без прибавки.
+            Assert.AreEqual(3, r.StoryLines.Count, "ни одного ряда сверх того, что игрок прожил");
+            Assert.AreEqual("ранняя строка", r.StoryLines[0]);
+            Assert.AreEqual("средняя строка", r.StoryLines[1]);
+            Assert.AreEqual("поздняя строка", r.StoryLines[2]);
+            StringAssert.StartsWith("ранняя строка", r.ComposeStory(), "история открывается вехой игрока");
+        }
+
+        /// <summary>
+        /// ПОДВОДКИ НЕТ НИГДЕ — ни в тексте, ни в константах класса. Дословная жалоба основательницы
+        /// (2026-09-22): «„Но не переживайте — ведь вы родились у прекрасных родителей“ как будто пишется
+        /// везде и ни о чём игровом не сообщает — убрать». Гард держит ОБА конца: собранный текст чист, и
+        /// в самом <see cref="Necrolog"/> не осталось константы, из которой подводку можно вернуть одной
+        /// строкой. Reflection — потому что вернуть её проще всего именно так: дописать поле и seed-ить им
+        /// список, как было. Тест бы этого не увидел, если бы смотрел только на выход.
+        /// </summary>
+        [Test]
+        public void NoBakedIntro_NoParentsLine_NeitherInTheTextNorInTheConstants()
+        {
+            var r = Necrolog.Build("спокойная старость", new List<NecrologEntry>
+            {
+                new() { Age = 7, Order = 0, Line = "Ели жуков и ничего не боялись." },
+            });
+
+            var story = r.ComposeStory();
+            Assert.AreEqual("Ели жуков и ничего не боялись.", story,
+                "история = ровно одна прожитая строка, без зачина и без родителей");
+            StringAssert.DoesNotContain("переживайте", story);
+            StringAssert.DoesNotContain("прекрасных родителей", story);
+            Assert.AreEqual(1, story.Split('\n').Length, "и ровно один РЯД на экране");
+
+            foreach (var f in typeof(Necrolog).GetFields(
+                         System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic
+                         | System.Reflection.BindingFlags.Static))
+            {
+                if (f.FieldType != typeof(string)) continue;
+                var v = (string)f.GetValue(null);
+                if (v == null) continue;
+                StringAssert.DoesNotContain("переживайте", v, "константа " + f.Name);
+                StringAssert.DoesNotContain("прекрасных родителей", v, "константа " + f.Name);
+            }
         }
 
         // The intro ends with «…» and the parents line OPENS with «…»: plain concatenation printed
@@ -52,13 +92,16 @@ namespace ThanksNoThanks.Tests
             var r = Necrolog.Build("весёлая старость", new List<NecrologEntry>
             {
                 new() { Age = 5, Order = 0, Line = "Ели жуков и ничего не боялись." },
+                new() { Age = 9, Order = 1, Line = "…А потом всё изменилось." },
             });
             var story = r.ComposeStory();
 
             // Схлопывание двойного многоточия на шве сохранено (дизайн-док §6.2(3): «механика склейки
             // остаётся как есть — меняется только разделитель»). Перенос строки — ЛИТЕРАЛОМ, не через
             // Necrolog.LineSeparator: сверять константу с самой собой значит не проверять ничего.
-            StringAssert.StartsWith("Но не переживайте! Ведь вы…\nродились у прекрасных родителей.", story);
+            // ⚠ Шов, который тут проверялся, был «зачин + строка родителей»; обеих строк нет с 2026-09-22,
+            // поэтому шов собирается из ДВУХ прожитых строк, вторая из которых открывается многоточием.
+            StringAssert.StartsWith("Ели жуков и ничего не боялись.\nА потом всё изменилось.", story);
             StringAssert.DoesNotContain("… …", story, "no double ellipsis anywhere in the glued story");
             StringAssert.DoesNotContain("……", story, "…nor a glued-together one");
             StringAssert.Contains("Ели жуков и ничего не боялись.", story, "the CSV line itself is untouched");
@@ -74,8 +117,8 @@ namespace ThanksNoThanks.Tests
                 new() { Age = 3, Order = 2, Line = "реальная" },
             };
             var r = Necrolog.Build("одинокая старость", entries);
-            Assert.AreEqual(2, r.StoryLines.Count, "parents + one real line");
-            Assert.AreEqual("реальная", r.StoryLines[1]);
+            Assert.AreEqual(1, r.StoryLines.Count, "ровно одна настоящая строка — и ничего запечённого");
+            Assert.AreEqual("реальная", r.StoryLines[0]);
         }
 
         [Test]
@@ -90,9 +133,9 @@ namespace ThanksNoThanks.Tests
 
             var r = Necrolog.Build("весёлая старость", entries);
 
-            // Плашка держит ровно MaxLines строк, считая фиксированных родителей.
+            // Плашка держит ровно MaxLines строк, и ВСЕ они содержательные: фиксированных рядов нет
+            // с 2026-09-22, поэтому бюджет целиком уходит под вехи (было MaxLines−1).
             Assert.AreEqual(Necrolog.MaxLines, r.StoryLines.Count);
-            Assert.AreEqual(Necrolog.ParentsLine, r.StoryLines[0]);
 
             // ROND — низший приоритет: пока есть весомые строки, ни одна кековая не попадает.
             int rondKept = 0;
@@ -101,16 +144,18 @@ namespace ThanksNoThanks.Tests
             Assert.AreEqual(0, rondKept, "бюджет целиком выбран весомыми строками — ROND не попал ни одной");
 
             // …и добраны они с начала хронологии, а не из середины списка.
-            for (int i = 0; i < Necrolog.MaxLines - 1; i++)
-                Assert.AreEqual("weighty" + i, r.StoryLines[i + 1]);
+            for (int i = 0; i < Necrolog.MaxLines; i++)
+                Assert.AreEqual("weighty" + i, r.StoryLines[i]);
         }
 
         [Test]
         public void EveryLine_StartsOnItsOwnLine_NotOneLongParagraph()
         {
             // Главная жалоба живого плейтеста: «некролог большущей простынёй, сплошным текстом, никто
-            // читать не будет». Проверяем ровно её: сколько строк отобрано — столько РЯДОВ и на экране,
-            // плюс отдельный ряд под зачин. Литеральный '\n' — тест не должен зависеть от константы.
+            // читать не будет». Проверяем ровно её: сколько строк отобрано — столько РЯДОВ и на экране.
+            // ⚠ 2026-09-22: ряда под зачин больше НЕТ (`1 + Count` → `Count`), и это половина гарда: если
+            // подводку вернут, рядов станет на один больше — тест покраснеет.
+            // Литеральный '\n' — тест не должен зависеть от константы.
             var r = Necrolog.Build("спокойная старость", new List<NecrologEntry>
             {
                 new() { Age = 7,  Order = 0, Line = "Рыжий кот из детства прожил с вами всю жизнь." },
@@ -119,10 +164,11 @@ namespace ThanksNoThanks.Tests
             });
 
             var rows = r.ComposeStory().Split('\n');
-            Assert.AreEqual(1 + r.StoryLines.Count, rows.Length,
-                "зачин + КАЖДАЯ строка истории отдельным рядом (а не всё одним абзацем через пробел)");
-            Assert.AreEqual(Necrolog.StoryIntro, rows[0]);
-            Assert.AreEqual("родились у прекрасных родителей.", rows[1], "многоточие схлопнулось на шве");
+            Assert.AreEqual(r.StoryLines.Count, rows.Length,
+                "КАЖДАЯ строка истории отдельным рядом — и ни одного ряда сверх них");
+            Assert.AreEqual(3, rows.Length, "три прожитые строки = три ряда, без подводки");
+            Assert.AreEqual("Рыжий кот из детства прожил с вами всю жизнь.", rows[0],
+                "первый ряд — веха игрока, а не запечённый зачин");
             Assert.AreEqual("Свадьбу сыграли, и это было громко.", rows[rows.Length - 1]);
             foreach (var row in rows)
                 Assert.IsFalse(row.Contains("  "), "внутри ряда не остаётся склеек через двойной пробел");
@@ -170,9 +216,11 @@ namespace ThanksNoThanks.Tests
                 CollectionAssert.Contains(r.StoryLines, stage, "этап " + stage + " обязан прозвучать");
             CollectionAssert.Contains(r.StoryLines, "детство0", "…и детство тоже");
             // Перекошенный этап не съедает плашку: сначала каждый этап получает по строке, и только
-            // ОСТАТОК бюджета (6 − 5 = 1) достаётся второй детской. Пяти подряд про шесть лет не бывает.
-            Assert.AreEqual(2, r.StoryLines.Count(l => l.StartsWith("детство")),
-                "детство берёт свою строку + единственный оставшийся слот, не больше");
+            // ОСТАТОК бюджета достаётся детским добором. ⚠ 2026-09-22 бюджет 6 → 7 (снята строка
+            // родителей), поэтому остаток 7 − 5 = 2, и детство берёт три слота вместо двух. Десяти подряд
+            // про шесть лет по-прежнему не бывает — это и стережёт гард.
+            Assert.AreEqual(3, r.StoryLines.Count(l => l.StartsWith("детство")),
+                "детство берёт свою строку + оба оставшихся слота, не больше");
         }
 
         [Test]
@@ -180,14 +228,14 @@ namespace ThanksNoThanks.Tests
         {
             // Обратная сторона правила: «по одной на этап» — это ПОРЯДОК отбора, а не потолок. Если
             // строк мало и место осталось, оставшиеся добираются, иначе короткая жизнь печатала бы две
-            // строки при месте на шесть.
+            // строки при месте на семь.
             var entries = new List<NecrologEntry>();
             for (int i = 0; i < 4; i++)
                 entries.Add(new NecrologEntry { Age = 7, Order = i, Line = "детство" + i });
 
             var r = Necrolog.Build("спокойная старость", entries);
 
-            Assert.AreEqual(5, r.StoryLines.Count, "родители + все четыре строки — место есть");
+            Assert.AreEqual(4, r.StoryLines.Count, "все четыре строки и НИ ОДНОЙ сверх них");
         }
 
         [Test]
@@ -196,6 +244,8 @@ namespace ThanksNoThanks.Tests
             // Находка ревью (MINOR): защита от повтора стояла на ОБЪЕКТЕ записи (`chosen.Contains(e)`), а
             // на плашке дублем читается ОДИНАКОВЫЙ ТЕКСТ. Кек-карточки и филлеры делят строки законно, так
             // что при семи местах всего два «…купили ненужную вещь» подряд съедали слот у настоящей вехи.
+            // ⚠ 2026-09-22: мест под вехи стало семь (было шесть), поэтому кандидатов в списке на одного
+            // больше — иначе дубль «освобождал» бы слот, которому и так никто не был рад.
             var entries = new List<NecrologEntry>
             {
                 new() { Age = 19, Order = 0, Line = "Купили ненужную вещь на распродаже." },
@@ -204,7 +254,8 @@ namespace ThanksNoThanks.Tests
                 new() { Age = 33, Order = 3, Line = "Родился ребёнок.", IsMilestone = true },
                 new() { Age = 40, Order = 4, Line = "Ушли с офисной работы в никуда." },
                 new() { Age = 52, Order = 5, Line = "Второй язык так и остался на уровне A1." },
-                new() { Age = 70, Order = 6, Line = "Внуки приезжали каждое лето." },
+                new() { Age = 61, Order = 6, Line = "Дачу так и не достроили." },
+                new() { Age = 70, Order = 7, Line = "Внуки приезжали каждое лето." },
             };
 
             var r = Necrolog.Build("весёлая старость", entries);
@@ -232,11 +283,10 @@ namespace ThanksNoThanks.Tests
 
             var r = Necrolog.Build("весёлая старость", entries);
 
-            Assert.AreEqual(Necrolog.MaxLines, r.StoryLines.Count, "hard cap: exactly 15 lines");
+            Assert.AreEqual(Necrolog.MaxLines, r.StoryLines.Count, "hard cap: exactly MaxLines lines");
             foreach (var line in r.StoryLines)
                 StringAssert.DoesNotStartWith("rond", line, "every ROND line dropped first");
-            Assert.AreEqual(Necrolog.ParentsLine, r.StoryLines[0], "parents line always survives");
-            Assert.AreEqual("weighty1", r.StoryLines[1], "the childhood opening survives");
+            Assert.AreEqual("weighty1", r.StoryLines[0], "the childhood opening survives — and opens the block");
             Assert.AreEqual("weighty20", r.StoryLines[^1], "the late-life ending survives");
         }
 

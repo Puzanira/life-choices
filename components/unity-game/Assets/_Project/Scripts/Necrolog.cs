@@ -23,22 +23,30 @@ namespace ThanksNoThanks
     {
         public string Title;             // "СПАСИБО ЗА ИГРУ!"
         public string Cause;             // cause phrase, e.g. "весёлая старость"
-        public string IntroLine;         // "Но не переживайте! Ведь вы…"
-        public List<string> StoryLines;  // [0] is always the parents line, then choices in age order
+        public List<string> StoryLines;  // ТОЛЬКО содержательные вехи, в порядке возраста
 
         /// <summary>
-        /// Полный текст истории: зачин + все строки, швы нормализованы (<see cref="Necrolog.Glue"/>),
-        /// КАЖДАЯ СТРОКА С НОВОЙ СТРОКИ.
+        /// Полный текст истории: отобранные вехи, КАЖДАЯ С НОВОЙ СТРОКИ, швы нормализованы
+        /// (<see cref="Necrolog.Glue"/>).
         ///
         /// ⚠ 2026-08-08: разделитель был ПРОБЕЛ, и финал выходил сплошным абзацем из пятнадцати законченных
         /// предложений подряд (живой плейтест основательницы: «некролог большущей простынёй, никто читать не
-        /// будет»). Отрезок 0 меняет ровно две вещи: лимит 15 → <see cref="Necrolog.MaxLines"/> и этот
-        /// разделитель. Механика склейки (схлопывание двойного многоточия на шве «Ведь вы… …родились»)
-        /// оставлена как есть по прямому указанию дизайн-дока §6.2(3).
+        /// будет»). Отрезок 0 поменял лимит 15 → <see cref="Necrolog.MaxLines"/> и этот разделитель.
+        ///
+        /// ⚠ 2026-09-22, ЖИВОЙ ОТСМОТР КАДРОВ ОСНОВАТЕЛЬНИЦЕЙ — ПОДВОДКИ БОЛЬШЕ НЕТ. Её слова: «„Но не
+        /// переживайте — ведь вы родились у прекрасных родителей“ как будто пишется везде и ни о чём игровом
+        /// не сообщает — убрать, на последнем экране много текста и читается плохо». Обе строки были
+        /// ЗАПЕЧЁННЫМИ, не игровыми: зачин `StoryIntro` печатался всегда, и строка родителей стояла первой
+        /// в КАЖДОМ забеге независимо от того, что игрок делал. Удалены обе, и вместе с ними — поле
+        /// `IntroLine`: некролог теперь равен ровно тому, что игрок прожил. Освободившиеся два ряда
+        /// отданы содержанию (бюджет вех 6 → <see cref="Necrolog.MaxLines"/>) и воздуху блока.
+        ///
+        /// Склейка (схлопывание двойного многоточия на шве) ОСТАВЛЕНА: она защищает шов между любыми двумя
+        /// строками, а не только тот, которого больше нет (дизайн-док §6.2(3)).
         /// </summary>
         public string ComposeStory()
         {
-            var text = IntroLine ?? string.Empty;
+            var text = string.Empty;
             if (StoryLines != null)
                 foreach (var l in StoryLines) text = Necrolog.Glue(text, l, Necrolog.LineSeparator);
             return text;
@@ -55,22 +63,26 @@ namespace ThanksNoThanks
     }
 
     /// <summary>
-    /// Assembles the finale necrolog: title + cause + glued story. The story always opens
-    /// with the parents line, then the chosen cards' lines in AGE order. When there are too
-    /// many lines, ROND ("неважные") entries are dropped first.
+    /// Assembles the finale necrolog: title + cause + glued story. The story is the chosen cards'
+    /// lines in AGE order and NOTHING else. When there are too many lines, ROND ("неважные")
+    /// entries are dropped first.
     /// </summary>
     public static class Necrolog
     {
         public const string Title = "СПАСИБО ЗА ИГРУ!";
-        public const string StoryIntro = "Но не переживайте! Ведь вы…";
-        public const string ParentsLine = "…родились у прекрасных родителей.";
 
         /// <summary>
-        /// Сколько строк ВСЕГО на финальной плашке, считая фиксированную строку родителей.
+        /// Сколько СОДЕРЖАТЕЛЬНЫХ строк на финальной плашке. Фиксированных рядов больше нет — сколько
+        /// здесь написано, столько вех игрок и увидит.
         ///
         /// ⚠ БЫЛО 15 (≈550 знаков сплошным абзацем). Решение основательницы 2026-08-07: «финал шоу — не
-        /// биография, а эпитафия: чем короче, тем злее» → родители + максимум 6 выборов ≈ 260 знаков,
-        /// читается за четыре секунды.
+        /// биография, а эпитафия: чем короче, тем злее» → 7, но из них ДВА ряда съедали зачин и строка
+        /// родителей, то есть содержания оставалось шесть.
+        ///
+        /// ⚠ 2026-09-22 (живой отсмотр кадров): зачин и строка родителей удалены как «ни о чём игровом не
+        /// сообщающие». Число 7 не тронуто — тронут его СМЫСЛ: теперь это семь строк ПРО ИГРОКА, а не
+        /// «две запечённых + пять прожитых». Высота плашки от этого не изменилась (было 8 рисуемых рядов,
+        /// стало 7), поэтому освободившийся ряд ушёл в воздух блока.
         /// </summary>
         public const int MaxLines = 7;
 
@@ -120,10 +132,12 @@ namespace ThanksNoThanks
         }
 
         /// <summary>
-        /// Glues one story fragment onto the running text and NORMALISES THE SEAM. The intro ends with
-        /// «…» and the parents line opens with «…», so plain concatenation printed the double ellipsis
-        /// the design gate caught on the finale frame (2026-07-31): «Ведь вы… …родились у прекрасных
-        /// родителей». Rule: when the previous fragment already ends in a terminator («…» or «.») and the
+        /// Glues one story fragment onto the running text and NORMALISES THE SEAM. Историческое
+        /// происхождение: зачин кончался на «…», а строка родителей на «…» ОТКРЫВАЛАСЬ, и простая склейка
+        /// печатала двойное многоточие, пойманное дизайн-гейтом на кадре финала (2026-07-31): «Ведь вы…
+        /// …родились у прекрасных родителей». Обеих строк с 2026-09-22 нет, а шов ОСТАЛСЯ — он про любые
+        /// две соседние строки, и ни одна строка колоды не обязана начинаться с буквы.
+        /// Rule: when the previous fragment already ends in a terminator («…» or «.») and the
         /// next one opens with an ellipsis, the redundant LEADING ellipsis is dropped — exactly one mark
         /// survives the seam. This touches the JOIN only: no CSV line and no constant is edited, and a
         /// fragment that does not open with «…» is appended verbatim.
@@ -174,8 +188,10 @@ namespace ThanksNoThanks
         ///  3. ОБЫЧНЫЕ остальные — добивают бюджет, если место ещё есть;
         ///  4. `ROND` (кек и флейвор) — только по остаточному принципу, как и раньше.
         ///
-        /// Бюджет — <see cref="MaxLines"/> минус фиксированная строка родителей. Отобранное печатается в
-        /// хронологическом порядке независимо от того, каким проходом попало.
+        /// Бюджет — весь <see cref="MaxLines"/>: фиксированных рядов больше нет (решение основательницы
+        /// 2026-09-22, см. <see cref="NecrologResult.ComposeStory"/>), и освободившееся место от строки
+        /// родителей досталось СОДЕРЖАНИЮ. Отобранное печатается в хронологическом порядке независимо от
+        /// того, каким проходом попало.
         /// </summary>
         public static NecrologResult Build(string cause, IEnumerable<NecrologEntry> entries)
         {
@@ -184,7 +200,7 @@ namespace ThanksNoThanks
                 .OrderBy(e => e.Age).ThenBy(e => e.Order)
                 .ToList();
 
-            int budget = MaxLines - 1;          // строка родителей всегда занимает одно место
+            int budget = MaxLines;              // весь лимит — под вехи игрока
             var chosen = new List<NecrologEntry>(budget);
 
             // ⚠ ДЕДУП ПО ТЕКСТУ, А НЕ ПО ОБЪЕКТУ (находка ревью, MINOR). Проходов отбора четыре, и одна и
@@ -221,14 +237,16 @@ namespace ThanksNoThanks
 
             chosen.Sort((a, b) => a.Age != b.Age ? a.Age.CompareTo(b.Age) : a.Order.CompareTo(b.Order));
 
-            var story = new List<string> { ParentsLine };
-            story.AddRange(chosen.Select(e => e.Line));
+            // ⚠ НИКАКОЙ ЗАПЕЧЁННОЙ ПЕРВОЙ СТРОКИ (2026-09-22). Здесь стояло
+            // `new List<string> { ParentsLine }` — и это была ровно та строка, которую основательница
+            // прочитала на кадре как «пишется везде и ни о чём игровом не сообщает». Пустой список при
+            // пустом отборе — законный результат: тогда о забеге честно говорит одна строка исхода.
+            var story = chosen.Select(e => e.Line).ToList();
 
             return new NecrologResult
             {
                 Title = Title,
                 Cause = cause,
-                IntroLine = StoryIntro,
                 StoryLines = story,
             };
         }

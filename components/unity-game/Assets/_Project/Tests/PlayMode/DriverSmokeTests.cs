@@ -33,8 +33,23 @@ namespace ThanksNoThanks.Tests.PlayMode
 
             Assert.AreEqual(GameState.Finale, driver.Game.State, "run reached an ending");
             Assert.IsNotNull(driver.Game.Necrolog);
-            Assert.AreEqual(Necrolog.ParentsLine, driver.Game.Necrolog.StoryLines[0],
-                "necrolog opens with the parents line");
+
+            // ⚠ НА ЖИВОМ ЗАБЕГЕ: НИ ОДНОЙ ЗАПЕЧЁННОЙ СТРОКИ (решение основательницы 2026-09-22 — «пишется
+            // везде и ни о чём игровом не сообщает»). Здесь стояло `StoryLines[0] == Necrolog.ParentsLine`,
+            // то есть гард ТРЕБОВАЛ ту самую строку. Теперь он требует обратного, и требует на РЕАЛЬНОМ
+            // прогоне колоды, а не на синтетике: подводка вернулась бы именно сюда.
+            var story = driver.Game.Necrolog.ComposeStory();
+            StringAssert.DoesNotContain("переживайте", story, "зачина в некрологе нет");
+            StringAssert.DoesNotContain("прекрасных родителей", story, "…и всегда-первой строки родителей");
+            Assert.Greater(driver.Game.Necrolog.StoryLines.Count, 0,
+                "забег по всей колоде прожит — вехи в некрологе есть");
+            // …и каждая строка некролога пришла ИЗ КАРТОЧКИ, а не из кода: сверяем с колодой.
+            var deck = new System.Collections.Generic.HashSet<string>();
+            foreach (var c in CardLoader.ParseAll(Resources.Load<TextAsset>("scenes").text))
+            { deck.Add(c.YesNecrolog); deck.Add(c.NoNecrolog); }
+            foreach (var line in driver.Game.Necrolog.StoryLines)
+                Assert.IsTrue(deck.Contains(line) || line == "Отношения не удержали — расстались.",
+                    $"строка «{line}» пришла из колоды/механики, а не запечена в некрологе");
 
             fake.Confirm();                                // finale -> opener, fresh state
             Assert.AreEqual(GameState.Opener, driver.Game.State);

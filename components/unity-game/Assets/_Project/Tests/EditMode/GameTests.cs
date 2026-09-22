@@ -226,7 +226,12 @@ namespace ThanksNoThanks.Tests
                 "all-NO leaves relationships at 56 -> спокойная");
 
             var n = g.Necrolog;
-            Assert.AreEqual(Necrolog.ParentsLine, n.StoryLines[0], "parents line first");
+            // ⚠ 2026-09-22 (решение основательницы по кадрам): запечённой первой строки больше нет —
+            // раньше здесь ассертилось `StoryLines[0] == Necrolog.ParentsLine`. Теперь гард держит
+            // обратное, и на РЕАЛЬНОЙ колоде: ни одна строка некролога не пришла из кода.
+            CollectionAssert.DoesNotContain(n.StoryLines, "…родились у прекрасных родителей.",
+                "запечённой строки родителей в некрологе нет");
+            Assert.IsFalse(n.ComposeStory().Contains("переживайте"), "и зачина тоже нет");
             // Отрезок 0: отбор по ВЕСУ и лимит 7 — ВЕСОМАЯ строка обязана попасть в некролог, а
             // ROND-строки идут по остаточному принципу.
             //
@@ -547,7 +552,10 @@ namespace ThanksNoThanks.Tests
 
             Assert.AreEqual(GameState.Finale, g.State, "seeded full run reaches an ending");
             Assert.IsNotNull(g.Necrolog);
-            Assert.AreEqual(Necrolog.ParentsLine, g.Necrolog.StoryLines[0], "necrolog opens with parents");
+            // ⚠ 2026-09-22: было «necrolog opens with parents». Открывается ВЕХОЙ — и вех хотя бы одна.
+            Assert.Greater(g.Necrolog.StoryLines.Count, 0, "прожитый забег даёт вехи");
+            CollectionAssert.DoesNotContain(g.Necrolog.StoryLines, "…родились у прекрасных родителей.",
+                "и ни одной запечённой строки среди них");
         }
 
         // ---- FORCED cards never contribute a necrolog line (canon; enforced structurally) ----

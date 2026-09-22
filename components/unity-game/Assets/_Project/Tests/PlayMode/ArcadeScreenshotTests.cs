@@ -21,10 +21,13 @@ namespace ThanksNoThanks.Tests.PlayMode
         private const int W = 1920;
         private const int H = 1080;
 
-        // ОБЫЧНАЯ прожитая жизнь для позы «finale» — ПОЛНЫЕ семь строк (родители + шесть выборов), как
-        // их отбирает отрезок 0: вехи (свадьба, ребёнок) плюс по кусочку каждого возраста. До 2026-08-08
-        // эта поза показывала всего четыре строки и потому ничего не говорила о вёрстке — а именно она
-        // сломалась в живом плейтесте («некролог большущей простынёй»).
+        // ОБЫЧНАЯ прожитая жизнь для позы «finale» — ПОЛНЫЕ семь строк, как их отбирает отрезок 0: вехи
+        // (свадьба, ребёнок) плюс по кусочку каждого возраста. До 2026-08-08 эта поза показывала всего
+        // четыре строки и потому ничего не говорила о вёрстке — а именно она сломалась в живом плейтесте
+        // («некролог большущей простынёй»).
+        // ⚠ 2026-09-22: седьмую строку раньше давала запечённая строка родителей. Её больше нет (решение
+        // основательницы), поэтому полный лимит набирают семь ПРОЖИТЫХ строк — фикстура зеркалит
+        // `ScreensConformanceTests.OrdinaryFullStory`, чтобы кадр и гард смотрели на одну позу.
         private static NecrologResult SampleNecrolog()
         {
             var entries = new System.Collections.Generic.List<NecrologEntry>
@@ -34,14 +37,16 @@ namespace ThanksNoThanks.Tests.PlayMode
                 new NecrologEntry { Age = 24, Order = 2, Line = "В двадцать четыре уехали в другой город и ни разу не пожалели." },
                 new NecrologEntry { Age = 30, Order = 3, Line = "Свадьбу сыграли, и это было громко.", IsMilestone = true },
                 new NecrologEntry { Age = 32, Order = 4, Line = "Ребёнка растили как умели.", IsMilestone = true },
-                new NecrologEntry { Age = 68, Order = 5, Line = "В шестьдесят восемь внуки научили вас проигрывать в карты." },
+                new NecrologEntry { Age = 49, Order = 5, Line = "Ипотеку закрыли на четыре года позже, чем обещали себе." },
+                new NecrologEntry { Age = 68, Order = 6, Line = "В шестьдесят восемь внуки научили вас проигрывать в карты." },
             };
             return Necrolog.Build("спокойная старость", entries);
         }
 
-        // The WORST case the finale can ever have to draw: the 14 longest necrolog lines of the live deck
-        // + the fixed parents line (= the 15-line cap of scenes-table кол.11–12) under the longest cause.
-        // The design gate reads this frame to judge the legibility floor of the best-fit shrink.
+        // The WORST case the finale can ever have to draw: the MaxLines longest necrolog lines of the live
+        // deck under the longest cause. The design gate reads this frame to judge the legibility floor of
+        // the best-fit shrink. (Было «14 длиннейших + фиксированная строка родителей»; родителей нет с
+        // 2026-09-22, и весь лимит теперь набирается настоящими строками колоды.)
         private static NecrologResult LongestRealNecrolog()
         {
             var csv = Resources.Load<TextAsset>("scenes");
@@ -57,7 +62,7 @@ namespace ThanksNoThanks.Tests.PlayMode
             }
             lines.Sort((a, b) => b.Length.CompareTo(a.Length));
             var entries = new System.Collections.Generic.List<NecrologEntry>();
-            for (int i = 0; i < Necrolog.MaxLines - 1 && i < lines.Count; i++)
+            for (int i = 0; i < Necrolog.MaxLines && i < lines.Count; i++)
                 entries.Add(new NecrologEntry { Age = i, Order = i, Line = lines[i], IsRond = false });
             return Necrolog.Build("вы сунули палец в розетку", entries);
         }
