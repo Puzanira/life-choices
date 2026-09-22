@@ -80,8 +80,17 @@ namespace ThanksNoThanks
     /// Helvetica lookalike, OFL, full Cyrillic + ₽), Rubik for body copy and small print (the BLOCK$
     /// price sub-line, the Ведущий bubble).
     /// </summary>
+    [DefaultExecutionOrder(TickAfterInput)]
     public sealed class GameDriver : MonoBehaviour
     {
+        /// <summary>
+        /// Приоритет исполнения драйвера — ПОСЛЕДНИЙ слой кадра (r5 п.1). Порядок обязан быть
+        /// «раннер пакета (0) → <see cref="ArcadeInputSource.InputBeforeTick"/> (100) → драйвер (200)»:
+        /// сначала опрос устройства, потом латч семантического ввода, и только потом <c>Game.Tick</c>,
+        /// который этот латч сводит. Разбор бутерброда — в шапке <see cref="ArcadeInputSource"/>.
+        /// </summary>
+        public const int TickAfterInput = 200;
+
         // ---- palette tokens (#kit) — used for text only; sprites carry their own colour ----
         private static readonly Color Cobalt = new(0.184f, 0.329f, 0.784f);    // #2f54c8
         private static readonly Color CobaltDeep = new(0.122f, 0.227f, 0.588f);// #1F3A96
@@ -152,6 +161,46 @@ namespace ThanksNoThanks
         public static readonly Vector4 BlockBannerRect = new(959.5f, 760f, 900f, 110f);
         /// <summary>Чип цены («СТОИТ N ₽» / «цена N ₽») — так же абсолютным боксом (y 811…889).</summary>
         public static readonly Vector4 CardPriceRect = new(959.5f, 850f, 360f, 78f);
+        // ---- ЖИВОЙ ЭКРАН ДЕПРЕССИИ (r5 п.3): боксы ОБЪЯВЛЕНЫ, как у всех экранов D-стиля ----------------
+        // Раньше три пилюли ловли пульса стояли на голых числах прямо в `AnchorPx` — единственный экран
+        // игры без объявленных боксов, из-за чего его нельзя было ни замерить тестом, ни сверить с
+        // соседями. Числа те же, что стояли в коде: композиция экрана НЕ двигается этим инкрементом.
+        /// <summary>
+        /// ОБЩИЙ ТОКЕН ХИНТ-ПИЛЮЛЬ (дизайн-гейт r5, п.12 «геометрия пилюль разъехалась»).
+        ///
+        /// Было три близких, но разных набора: депрессия 640×100 / поле 24, импульс 380×84 / поле 8…18,
+        /// счётчик режима 380×112 / поле 18. Разница ничем не оправдана — это одна и та же деталь языка.
+        /// СВЕДЕНО: высота и внутреннее поле ДВУХ ХИНТ-ПИЛЮЛЬ (депрессия + импульс). Ширина у каждой
+        /// своя — её задаёт длина строки, и это законно.
+        ///
+        /// НЕ СВЕДЕНО, сознательно: счётчик кризиса `CrisisInfo` (380×112, поле 18). Это НЕ хинт-пилюля,
+        /// а постоянный индикатор режима в углу HUD: он живёт рядом с куполом таймера, его высота собрана
+        /// под свою двухстрочную посадку («ИМПУЛЬС 2/3») и уже прибита экранными гардами соответствия.
+        /// Подгонять его под токен подсказок значило бы переверстать угол HUD ради симметрии в таблице —
+        /// это другая работа и другой гейт.
+        /// </summary>
+        public const float HintPillH = 100f;
+        /// <summary>Внутреннее поле хинт-пилюли (см. <see cref="HintPillH"/>).</summary>
+        public const float HintPillPad = 24f;
+
+        /// <summary>Пилюля «СОБРАТЬСЯ»: центр x, центр y от ВЕРХА, w, h.</summary>
+        public static readonly Vector4 DepGatherPlateRect = new(960f, 968f, 420f, 116f);
+        /// <summary>
+        /// Тёмная плашка подсказки НАД кнопкой — «лови пульс — жми …».
+        ///
+        /// ⚠ ПОДНЯТА 866 → 834 (дизайн-гейт r5, MAJOR). Стояла вплотную к «СОБРАТЬСЯ»: низ пилюли 916
+        /// против верха кнопки 910 — то есть они не просто соприкасались, а НАКЛАДЫВАЛИСЬ, и чёрный кант
+        /// кнопки был съеден пилюлей. Теперь низ 884 против верха канта кнопки 906: зазор 22 px.
+        /// </summary>
+        public static readonly Vector4 DepHintPlateRect = new(960f, 834f, 640f, HintPillH);
+        /// <summary>Строка «эмуляция: …» — ещё выше, уже без плашки. Поднята на те же 32 px, что и
+        /// пилюля: её взаимное положение с подсказкой сохранено пиксель-в-пиксель. На стойке этой строки
+        /// нет вовсе (она только про клавиатурную эмуляцию).</summary>
+        public static readonly Vector4 DepKeyHintRect = new(960f, 774f, 640f, 40f);
+
+        /// <summary>Импульсная пилюля «молчание = ДА»: центр y от ВЕРХА (x 940, ширина 380). Полоса
+        /// 323.5…423.5 — верхнее внутреннее поле кремовой карточки, над боксом вопроса.</summary>
+        public const float ImpulseWarnCy = 373.5f;
         private static readonly Color PlateMute = new(0.62f, 0.62f, 0.64f);    // S10: muted answer plates while BLOCK$-blocked
         private static readonly Color CardBlockDim = new(0.52f, 0.54f, 0.60f); // S10: tint the card frame when unaffordable (dims to muted cobalt)
         // S1 opener, снято с эталона «Стартовый экран.png»: золото марки-рамки и тёплый крем её плашки —
@@ -509,6 +558,25 @@ namespace ThanksNoThanks
         /// <summary>Bottom of the question box when the card carries NOTHING else (the full §8 safe box).</summary>
         public const float CardTextFullBottom = 857f;
         /// <summary>
+        /// ⚠ ПОЛНЫЙ БОКС ВОПРОСА ОГРАНИЧЕН ПО ВЫСОТЕ (дизайн-гейт r5, BLOCKER «пилюля накрывает вопрос»).
+        ///
+        /// Исторический §8-бокс — <see cref="CardTextTop"/>…<see cref="CardTextFullBottom"/> (322…857):
+        /// центр 589.5, высота 535. В его ВЕРХНЮЮ ТРЕТЬ садится импульсная пилюля «молчание = ДА», и на
+        /// кадре `r5-impulse` она закрывала 67 % второй строки вопроса.
+        ///
+        /// Лечение НЕ ДВИГАЕТ ТЕКСТ. Центр бокса остаётся ровно там же (589.5 — та же арифметика от §8),
+        /// ужимается только ВЫСОТА: 535 → 290. Любой сегодняшний вопрос печатается пиксель-в-пиксель как
+        /// печатался, но БОЛЬШЕ не может вырасти вверх, в полосу пилюли. 290 px держат четыре строки
+        /// канон-кеглем 64 — всё, что длиннее, подхватывает существующий авторазмер (best-fit 30…64).
+        ///
+        /// Полосу с баннером BLOCK$ это не касается: там бокс считается от <see cref="CardTextTop"/> вниз
+        /// (<see cref="CardTextShortBottom"/>) и центр законно уезжает вверх, а пилюли импульса на том
+        /// экране не бывает — кризис гасит и баннер, и цену (см. RenderCrisis).
+        /// </summary>
+        public const float CardTextFullCy = (CardTextTop + CardTextFullBottom) / 2f;   // 589.5, не двигается
+        /// <summary>Высота полного бокса вопроса — потолок роста, а не посадка (см. <see cref="CardTextFullCy"/>).</summary>
+        public const float CardTextFullH = 290f;
+        /// <summary>
         /// Top of the RESERVED bottom band of the cream field: the BLOCK$ banner (y 705…815) and the price
         /// sub-line (y 811…889) live here. While either is up the question box must end above this line —
         /// без этого длинный вопрос гарантированно печатается прямо по баннеру и цене (skeptic MAJOR-1).
@@ -744,6 +812,25 @@ namespace ThanksNoThanks
         /// <summary>Зазор от нижней кромки кремового поля окна-задачи до КАНТА зелёной CTA. До 2026-08-08
         /// CTA стояла на 770 и её кант упирался в кромку поля 0…3 px — «приклеена ко дну» (дизайн-скептик,
         /// раунд 2). Коридор ≥16, взято 24 — и дыхание есть, и CTA не лезет в текстовую полосу.</summary>
+        /// <summary>
+        /// ВНУТРЕННЕЕ ПОЛЕ ЛЮБОЙ ЗЕЛЁНОЙ CTA-ПЛАШКИ (дизайн-гейт r5, п.13 — разобрано и ОСТАВЛЕНО).
+        ///
+        /// Гейт замерил «поле 1.2× капители у финальной CTA против 2.3× у туториальной» и попросил решить:
+        /// свести к токену или обосновать. РАЗБОР: поле УЖЕ один токен — 26 px на обеих плашках, и число
+        /// не вкусовое, а выведенное: видимое скругление `bar-track` съедает ~16 px, поле обязано быть
+        /// больше, иначе глиф вылезает на скругление.
+        ///
+        /// Разъехались не поля, а КАПИТЕЛИ: строки разной длины («НАЧАТЬ ЗАНОВО — ЖМИ ЗЕЛЁНУЮ КНОПКУ» —
+        /// 34 знака на плашке 860×104, «ПОНЯЛ — ЖМИ ЗЕЛЁНУЮ КНОПКУ» — 26 знаков на 620×84), авторазмер
+        /// садит их на разный кегль, и ОДНО И ТО ЖЕ поле читается разной долей капители.
+        ///
+        /// ОСТАВЛЕНО КАК ЕСТЬ, сознательно. Мерить поле долями капители значит поставить геометрию плашки
+        /// в зависимость от ДЛИНЫ СТРОКИ — ровно та связь, которую этот же гейт велел разорвать на окнах
+        /// задач (см. <see cref="TaskTextFixedSize"/>). Пиксельный токен от скругления спрайта — правильная
+        /// единица: он про АРТ-ПАК, а не про текст. Разная ширина плашек законна, гейт это и допускал.
+        /// </summary>
+        public const float CtaTextInset = 26f;
+
         public const float SpecialCtaFieldGap = 24f;
         /// <summary>Зелёная CTA входного экрана: центр x, центр y от ВЕРХА, w, h — в кремовом поле плашки
         /// (поле 343…819), поэтому плашка целиком лежит на креме, а не на кайме со звёздами. Вертикаль
@@ -868,6 +955,42 @@ namespace ThanksNoThanks
         // и КОРОТКАЯ задача (а новая задача энергии короче прежней) набиралась им впритык к кайме. Потолок
         // — это страховка «не крупнее эталона», а не цель: реальный кегль всё равно выбирает best-fit.
         private const int TaskTextMaxSize = 96, TaskTextMinSize = 40;
+        /// <summary>
+        /// ЕДИНЫЙ КЕГЛЬ ОКНА-ЗАДАЧИ (дизайн-гейт r5, MAJOR «три модалки разъехались по кеглю»).
+        ///
+        /// Раньше окно-задача жило на авторазмере 40…96, и кегль получался ПОБОЧНЫМ ЭФФЕКТОМ длины строки:
+        /// деньги (46 знаков) вставали на ~96, отношения (60) на ~80, депрессия (77 знаков, да ещё на
+        /// боксе на 70 px ниже — <see cref="SpecialTaskReserve"/>) падала до ~69. То есть САМЫЙ ПЛОТНЫЙ
+        /// экран игра показывала САМЫМ МЕЛКИМ шрифтом — ровно наоборот от нужного.
+        ///
+        /// Лечение двухтактное и в этом порядке: (1) тексты УКОРОЧЕНЫ (см. <see cref="RelationsTaskText"/>,
+        /// <see cref="DepressionTaskText"/>) — именно тексты, а не кегль; (2) кегль ПРИБИТ к одному числу
+        /// на все окна-задачи, чтобы длина строки больше НИКОГДА не решала за типографику. Авторазмер не
+        /// выключен физически (uGUI иначе игнорирует перенос), а СХЛОПНУТ: min = max = токен.
+        ///
+        /// Число — не «на глаз», а ЗАМЕР (свип по кеглю, все восемь окон-задач, проверка «сколько символов
+        /// генератор реально нарисовал»):
+        ///
+        /// | кегль | деньги | отношения | энергия | ребёнок | депрессия | блиц | здоровье | выгорание |
+        /// |---|---|---|---|---|---|---|---|---|
+        /// | 92 | ✔ | ✔ | режет | режет | режет | режет | режет | режет |
+        /// | 84 | ✔ | ✔ | ✔ | режет | режет | режет | режет | режет |
+        /// | 74 | ✔ | ✔ | ✔ | режет | ✔ | режет | ✔ | ✔ |
+        /// | 72 | ✔ | ✔ | ✔ | режет | ✔ | ✔ | ✔ | ✔ |
+        /// | **70** | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ |
+        ///
+        /// ⚠ ЧЕСТНО ПРО ЦЕНУ. Гейт просил «целиться в размер экрана денег» (там было ~92). Дотянуть не
+        /// вышло, и упирается это НЕ в три названные гейтом модалки — после укорачивания текстов они
+        /// держат 74. Потолок задают <see cref="ChildTaskText"/> (70 знаков) и <see cref="BlitzTaskText"/>
+        /// (72) — канон-строки, укорачивать которые гейт не поручал. Итог: набор стал ЕДИНЫМ (этого гейт
+        /// и требовал), но по нижней границе, а не по деньгам: x-height ≈37 px на всех восьми окнах вместо
+        /// прежнего разброса 49 / 41 / 36. Поднять токен до ~74–80 можно ровно одним шагом — укоротить те
+        /// две строки; это решение основательницы/гейта, не моё.
+        ///
+        /// Гард `TaskWindows_ShareOneTypeSize_AndEveryLongestLineFits` проверяет ВСЕ ВОСЕМЬ окон на
+        /// обрезку, а не только три: иначе поднятый кем-то токен молча съел бы хвост чужого экрана.
+        /// </summary>
+        public const int TaskTextFixedSize = 70;
         // Служебная вторая строка (клавиша эмуляции / отклик «не в ритм»): МЕЛКО — втрое ниже задачи.
         private const int HintTextSize = 30;
         // Полоса под неё ВЫРЕЗАЕТСЯ из текстового поля задачи (а не кладётся поверх): иначе длинная
@@ -885,6 +1008,14 @@ namespace ThanksNoThanks
         /// Гард: KeyHintLine_IsLegibleOnTheCreamField.
         /// </summary>
         private static Color HintInk => new(Ink.r, Ink.g, Ink.b, 0.74f);
+        /// <summary>
+        /// ЗЕРКАЛО <see cref="HintInk"/> ДЛЯ ТЁМНОГО ФОНА (r5 п.3). Строка «эмуляция: …» всегда живёт на
+        /// той же глубине 0.74 — но на кремовом поле это приглушённые чернила, а на тёмной подложке
+        /// (живой экран депрессии) приглушать надо СВЕТЛЫЙ токен, иначе подсказка уходит в фон совсем.
+        /// Новый оттенок тут не изобретается: это ровно <see cref="TextLight"/> с той же альфой, что и у
+        /// кремового собрата — раньше там стоял самодельный серо-голубой литерал мимо палитры.
+        /// </summary>
+        private static Color HintLight => new(TextLight.r, TextLight.g, TextLight.b, 0.74f);
         private const int StoryTextMaxSize = 39, StoryTextMinSize = 22;
         // Поля текста внутри кремовых полей (чтобы best-fit не садился на рамку/звёзды).
         // ⚠ ГОРИЗОНТАЛЬНОЕ поле задачи 60 → 90 (дизайн-скептик 2026-08-07). <see cref="TaskFieldRect"/> —
@@ -998,21 +1129,27 @@ namespace ThanksNoThanks
         public const string RelationsStoryText =
             "Ого-го! У кого-то, кажется, появились ЧУВСТВА! Только не задуши и не забрось — любовь любит золотую середину!";
         /// <summary>Задача на открытии ОТНОШЕНИЙ (host-content §4). Формулировка основательницы,
-        /// плейтест 2026-08-05: контрол назван прямо («джойстиком»), вар.1 заменён.</summary>
+        /// плейтест 2026-08-05: контрол назван прямо («джойстиком»), вар.1 заменён.
+        /// ⚠ УКОРОЧЕНА r5-дизайн-гейтом (MAJOR «модалки разъехались по кеглю»): «сохраняй маркер
+        /// отношений в зелёной зоне» → «держи маркер в зелёной зоне». Лечим ДЛИНОЙ, а не ужатием кегля:
+        /// слово «отношений» на экране открытия ОТНОШЕНИЙ не несёт информации (рядом крупная шкала и
+        /// рассказ Ведущего ровно про них), а «сохраняй» длиннее «держи» без выигрыша в смысле.</summary>
         public const string RelationsTaskText =
-            "Двигай джойстиком — сохраняй маркер отношений в зелёной зоне";
+            "Двигай джойстиком — держи маркер в зелёной зоне";
         /// <summary>Рассказ Ведущего на открытии ДЕНЕГ (host-content §4, вар.2).</summary>
         public const string MoneyStoryText =
             "Добро пожаловать во взрослую жизнь! Денежки любят тех, кто их крутит. Так покрути же!";
-        /// <summary>Задача на открытии ДЕНЕГ (host-content §4, вар.2).</summary>
+        /// <summary>Задача на открытии ДЕНЕГ (host-content §4, вар.2). ⚠ r5 п.2: «ручку» → «крутилку» —
+        /// орган на стойке подписан «крутилка», глагол основательницы («верти») сохранён как был.</summary>
         public const string MoneyTaskText =
-            "Верти ручку — и монетки посыплются в копилку";
+            "Верти крутилку — и монетки посыплются в копилку";
         /// <summary>Рассказ Ведущего на открытии РЕБЁНКА (host-content §4, вар.1).</summary>
         public const string ChildStoryText =
             "Пополнение в семействе! Теперь вас трое! Малыш будет звонить — не игнорируй, а то запишем в плохие родители!";
-        /// <summary>Задача на открытии РЕБЁНКА (host-content §4, вар.1).</summary>
+        /// <summary>Задача на открытии РЕБЁНКА (host-content §4, вар.1). ⚠ r5 п.2: «жми «!»» → «жми жёлтую
+        /// кнопку» — на стойке эта кнопка подписана ЖЁЛТОЙ, значка «!» на ней нет.</summary>
         public const string ChildTaskText =
-            "Когда телефон слева зазвонит — жми «!», чтобы поднять трубку";
+            "Когда телефон слева зазвонит — жми жёлтую кнопку, чтобы поднять трубку";
 
         // ---- КАНОН-ЧЕРНОВИКИ ВХОДНЫХ ЭКРАНОВ СПЕЦРЕЖИМОВ (host-content §4, помечены «✍ черновик») -----
         // Все четыре пары «рассказ + задача» лежат в docs/new_concept/host-content.md §4 с пометкой
@@ -1021,11 +1158,16 @@ namespace ThanksNoThanks
 
         /// <summary>
         /// КОНТРОЛ ЛОВЛИ ДЕПРЕССИИ — одна константа на все тексты (п.3г контракта). ⚠ ВОПРОС ЗАКРЫТ
-        /// ОСНОВАТЕЛЬНИЦЕЙ 2026-08-08: ловля идёт по КНОПКЕ «!» (<see cref="GameInput.ChildPress"/>,
-        /// BangButton кабинета), как и стояло в спеке встречи, а не по зелёной. Заготовка сработала как
-        /// задумано — смена контрола вышла правкой одной строки текста и одной ветки в Game.
+        /// ОСНОВАТЕЛЬНИЦЕЙ 2026-08-08: ловля идёт по КНОПКЕ <see cref="GameInput.ChildPress"/> (BangButton
+        /// кабинета), как и стояло в спеке встречи, а не по зелёной. КОНТРОЛ НЕ МЕНЯЛСЯ — поменялось ИМЯ.
+        ///
+        /// ⚠ r5 п.2 (панч-лист автомата 2026-09-22): ««!»» → «жёлтую кнопку». На стойке органы подписаны
+        /// физически, и этот орган подписан ЖЁЛТОЙ КНОПКОЙ — значка «!» на панели нет вообще, игрок искал
+        /// на стойке кнопку, которой там не существует. Заготовка сработала второй раз подряд: смена имени
+        /// снова вышла правкой ОДНОЙ строки — задача входного экрана и подсказка на доске собираются из неё.
+        /// Падеж — винительный («жми жёлтую кнопку»), потому что обе строки читают её после глагола «жми».
         /// </summary>
-        public const string DepressionCatchControlName = "«!»";
+        public const string DepressionCatchControlName = "жёлтую кнопку";
 
         /// <summary>Рассказ Ведущего на открытии ЗДОРОВЬЯ (30). ✍ черновик.</summary>
         public const string HealthStoryText =
@@ -1042,9 +1184,14 @@ namespace ThanksNoThanks
 
         /// <summary>Рассказ Ведущего на входе в ДЕПРЕССИЮ — глухое объявление (HostContent.DepressionAnnounce).</summary>
         public static string DepressionStoryText => HostContent.DepressionAnnounce;
-        /// <summary>Задача на входе в ДЕПРЕССИЮ (crisis-content §1). Контрол — через константу. ✍ черновик.</summary>
+        /// <summary>Задача на входе в ДЕПРЕССИЮ (crisis-content §1). Контрол — через константу. ✍ черновик.
+        /// ⚠ УКОРОЧЕНА r5-дизайн-гейтом (MAJOR): снят зачин «Лови пульс: ». Это был самый ДЛИННЫЙ текст
+        /// трёх модалок на самом ТЕСНОМ боксе (у входного экрана спецрежима вертикали на 70 px меньше —
+        /// <see cref="SpecialTaskReserve"/>), и авторазмер добивал его до самого мелкого кегля в игре.
+        /// «Лови пульс» при этом ДУБЛИРОВАЛОСЬ: ровно это говорит внутриигровая пилюля
+        /// <see cref="DepressionBoardHint"/>, которая висит на экране всю ловлю.</summary>
         public static string DepressionTaskText =>
-            "Лови пульс: жми " + DepressionCatchControlName + " в момент вспышки — пять попаданий вернут краски";
+            "Жми " + DepressionCatchControlName + " в момент вспышки — пять попаданий вернут краски";
         /// <summary>Подсказка контрола НА САМОМ экране депрессии (п.3в) — из той же константы.</summary>
         public static string DepressionBoardHint =>
             "лови пульс — жми " + DepressionCatchControlName.ToLowerInvariant();
@@ -1064,7 +1211,15 @@ namespace ThanksNoThanks
         public const string ChildMissedLine = "Малыш ждал…";
 
         /// <summary>CTA входного экрана спецрежима — тот же блок и та же грамматика, что у опенера/финала.</summary>
-        public const string SpecialModeCtaText = "ПОНЯЛ — ЖМИ ЗЕЛЁНУЮ";
+        public const string SpecialModeCtaText = "ПОНЯЛ — ЖМИ ЗЕЛЁНУЮ КНОПКУ";
+
+        /// <summary>
+        /// CTA снятия обычной подсказки-модалки S5. ⚠ r5 п.2: раньше это был ЛИТЕРАЛ прямо в сборке
+        /// модалки — единственная зелёная CTA игры, которую не видела ни одна константа, а значит и
+        /// словарный гард. Вынесена в константу вместе с переименованием («ЗЕЛЁНУЮ» → «ЗЕЛЁНУЮ КНОПКУ»),
+        /// чтобы все ЧЕТЫРЕ зелёные CTA проверялись одним списком.
+        /// </summary>
+        public const string TutorialDismissCtaText = "ПОНЯТНО — ЖМИ ЗЕЛЁНУЮ КНОПКУ";
 
         // Tutorial overlay (S5): dimmed bg + yellow modal + «ПОНЯТНО»; freezes the game while up.
         // Reused for every hint: money (18), energy (25), health (30) and the first burnout.
@@ -1320,6 +1475,11 @@ namespace ThanksNoThanks
         /// <summary>S10: чёрный keyline вокруг BLOCK$-баннера (сосед НИЖЕ него).</summary>
         public GameObject BlockBannerInk => _blockBannerInk;
         public Text CardPriceText => _cardPriceText;
+        /// <summary>Текст вопроса карточки — чтобы гард мерил ЕГО бокс, а не догадывался о нём.</summary>
+        public Text CardQuestionText => _cardText;
+        /// <summary>Layer-2 seam: подставить произвольный вопрос в карточку (длиннейший из колоды,
+        /// синтетический четырёхстрочный) и не гонять ради этого целый забег.</summary>
+        public void DebugSetCardQuestion(string q) { if (_cardText != null) _cardText.text = q ?? ""; }
         public Image CardPricePlate => _cardPricePlate;
         /// <summary>S10: чёрный keyline вокруг чипа цены (сосед НИЖЕ него).</summary>
         public Image CardPriceInk => _cardPriceInk;
@@ -1390,8 +1550,8 @@ namespace ThanksNoThanks
         public void DebugCloseSpecialMode() => CloseSpecialMode();
 
         /// <summary>
-        /// Test seam: сбросить одноразовые «съесть остаток кадра» гейты — ровно то, что делает начало
-        /// <see cref="Update"/>. Синхронный тест-цикл, который гонит вводы без реальных кадров, иначе
+        /// Test seam: сбросить одноразовые «съесть остаток кадра» гейты — ровно то, что делает
+        /// <see cref="LateUpdate"/> в конце кадра. Синхронный тест-цикл, который гонит вводы без реальных кадров, иначе
         /// упёрся бы в гейт, поставленный закрытием подсказки/входного экрана, и остался бы без ввода.
         /// </summary>
         public void DebugClearFrameGuards() { _dismissedThisFrame = false; _smClosedThisFrame = false; }
@@ -1616,10 +1776,15 @@ namespace ThanksNoThanks
         // up a long question printed straight THROUGH them — best-fit only shrinks text to its RECT, and the
         // rect overlapped. Fix: the rect itself moves. Its bottom rises above the band while the band is
         // occupied, and returns to the full §8 safe box when the card carries nothing else.
+        /// <summary>Бокс вопроса, натянутый от канон-верха <see cref="CardTextTop"/> до заданного низа —
+        /// форма для случая «низ занят полосой» (баннер BLOCK$ / строка цены).</summary>
         private void SetCardTextBottom(float bottomRef)
+            => SetCardTextBox(CardTextTop + (bottomRef - CardTextTop) / 2f, bottomRef - CardTextTop);
+
+        /// <summary>Бокс вопроса ЦЕНТРОМ И ВЫСОТОЙ. Полный бокс задаётся именно так (см.
+        /// <see cref="CardTextFullCy"/>): центр приколочен к §8, а высота — потолок роста текста.</summary>
+        private void SetCardTextBox(float cyRef, float h)
         {
-            float h = bottomRef - CardTextTop;
-            float cyRef = CardTextTop + h / 2f;
             float cardLeft = CardPlateRect.x - CardPlateRect.z / 2f;   // card rect edges in reference px
             float cardTop = CardPlateRect.y - CardPlateRect.w / 2f;
             Anchor(_cardText.rectTransform,
@@ -1637,7 +1802,8 @@ namespace ThanksNoThanks
         {
             bool band = (_blockBanner != null && _blockBanner.activeSelf)
                      || (_cardPricePlate != null && _cardPricePlate.gameObject.activeSelf);
-            SetCardTextBottom(band ? CardTextShortBottom : CardTextFullBottom);
+            if (band) SetCardTextBottom(CardTextShortBottom);
+            else SetCardTextBox(CardTextFullCy, CardTextFullH);
         }
 
         /// <summary>Screenshot pose: an ordinary frame with the Ведущий's comment plate up, so the
@@ -1780,6 +1946,28 @@ namespace ThanksNoThanks
             if (punch) _yesRect.localScale = PunchScaleAt(0.5f);   // нижняя точка дуги (sin(π/2) = 1)
         }
 
+        /// <summary>
+        /// Кадр РАУНДА ИМПУЛЬСА (S13) — второй раунд того же кризиса среднего возраста. Поза-близнец
+        /// <see cref="DebugPreviewBlitzPlates"/>: их и надо смотреть ПАРОЙ, потому что весь смысл правки
+        /// r5 п.3 в том, что два раунда одного кризиса перестали выглядеть как две разные игры.
+        /// </summary>
+        public void DebugPreviewImpulsePlates()
+        {
+            DebugPreviewArcadeShot();
+            _crisisUiActive = true;
+            ApplyAgeGates(45f);
+            _ageText.text = "45";
+            _cardText.text = "КУПИТЬ ПРЯМО СЕЙЧАС!";
+            UseImpulsePlates();
+            SetYesLabel("ДА");
+            SetNoLabel("СПАСИБО,\nНЕ НАДО");
+            _yesPlate.color = Color.white;
+            _noPlate.color = Color.white;
+            _crisisInfoText.text = "ИМПУЛЬС 2/3";
+            if (!_crisisInfo.activeSelf) _crisisInfo.SetActive(true);
+            if (!_impulseWarning.activeSelf) _impulseWarning.SetActive(true);
+        }
+
         public void DebugPreviewStarBurst()
         {
             DebugPreviewArcadeShot();
@@ -1846,6 +2034,29 @@ namespace ThanksNoThanks
         }
 
         /// <summary>
+        /// Посадить блок некролога в заданный набор типографики (r5 п.4): лицо, коридор кеглей, межстрочье.
+        /// Коридор пишется в сам <see cref="Text"/> — подборщик <see cref="FitStoryPerLine"/> читает его
+        /// оттуда, поэтому смена набора не разъезжается с подбором кегля.
+        /// </summary>
+        private void ApplyFinaleStoryStyle(FinaleStoryStyle style)
+        {
+            if (_finaleStory == null) return;
+            _finaleStory.font = style.UseDisplayFace ? _display : _bodyBold;
+            _finaleStory.fontSize = style.MaxSize;
+            _finaleStory.resizeTextMaxSize = style.MaxSize;
+            _finaleStory.resizeTextMinSize = style.MinSize;
+            _finaleStory.lineSpacing = style.LineSpacing;
+        }
+
+        /// <summary>Test/screenshot seam (r5 п.4): переодеть некролог в набор A/B/C и перерисовать его тем
+        /// же путём, каким его рисует финал — чтобы кадры вариантов отличались ТОЛЬКО типографикой.</summary>
+        public void DebugApplyFinaleStoryStyle(FinaleStoryStyle style, NecrologResult n, int age = 100)
+        {
+            ApplyFinaleStoryStyle(style);
+            DebugRenderFinale(n, age);
+        }
+
+        /// <summary>
         /// ОДНА ВЕХА — ОДНА СТРОКА НА ЭКРАНЕ. Подбирает кегль некролога и возвращает разметку для
         /// <see cref="_finaleStory"/>.
         ///
@@ -1876,7 +2087,10 @@ namespace ThanksNoThanks
 
             var rows = story.Split('\n');
             string markup = story;
-            for (int size = FinaleStoryMaxSize; size >= FinaleStoryMinSize; size--)
+            // ⚠ Коридор берётся С САМОГО Text (его туда положил ApplyFinaleStoryStyle), а не из канон-
+            // констант: иначе набор C с потолком 30 подбирался бы всё равно от 34 и «воздух» не появился.
+            int maxSize = t.resizeTextMaxSize, minSize = t.resizeTextMinSize;
+            for (int size = maxSize; size >= minSize; size--)
             {
                 markup = ComposeFittedRows(t, rows, size, boxW);
                 if (PreferredBlockHeight(t, markup, size, boxW) <= boxH)
@@ -1886,7 +2100,7 @@ namespace ThanksNoThanks
                 }
             }
             // Не сошлось даже на полу читаемости: берём пол (verticalOverflow=Truncate дорисует остальное).
-            t.fontSize = FinaleStoryMinSize;
+            t.fontSize = minSize;
             return markup;
         }
 
@@ -1932,9 +2146,10 @@ namespace ThanksNoThanks
         {
             if (string.IsNullOrEmpty(row)) return from;
             float limit = FinaleStoryLineLimit(boxW);
-            for (int k = from; k > FinaleStoryMinSize; k--)
+            int floor = t.resizeTextMinSize;     // пол НАБОРА — тот же, что у блока (см. FitStoryPerLine)
+            for (int k = from; k > floor; k--)
                 if (PreferredRowWidth(t, row, k) <= limit) return k;
-            return FinaleStoryMinSize;
+            return floor;
         }
 
         /// <summary>
@@ -2074,7 +2289,7 @@ namespace ThanksNoThanks
         /// </summary>
         private void DestroyBlitzPlateSprites()
         {
-            foreach (var sp in new[] { _blitzYesSprite, _blitzNoSprite })
+            foreach (var sp in new[] { _blitzYesSprite, _blitzNoSprite, _impulseYesSprite, _impulseNoSprite })
             {
                 if (sp == null) continue;
                 var tex = sp.texture;
@@ -2082,6 +2297,7 @@ namespace ThanksNoThanks
                 if (tex != null) Destroy(tex);
             }
             _blitzYesSprite = _blitzNoSprite = null;
+            _impulseYesSprite = _impulseNoSprite = null;
         }
 
         private void SubscribeGame()
@@ -2414,10 +2630,28 @@ namespace ThanksNoThanks
             _game = new Game(() => DeckSampler.PlanFromCsv(csv, new System.Random()));
         }
 
+        /// <summary>
+        /// ⚠ ГЕЙТЫ КАДРА ГАСЯТСЯ В КОНЦЕ КАДРА, А НЕ В НАЧАЛЕ СЛЕДУЮЩЕГО (r5 п.1).
+        ///
+        /// Оба флага — «съесть остаток кадра» после снятия подсказки/входного экрана (см. OnInput). Раньше
+        /// они гасились первой строкой <see cref="Update"/>, и это работало ровно до тех пор, пока источник
+        /// ввода отрабатывал ПОСЛЕ драйвера. В r5 ввод пришлось пинить РАНЬШЕ тика
+        /// (<see cref="ArcadeInputSource.InputBeforeTick"/> — иначе ось балансира ехала на кадр позже), и
+        /// порядок перевернулся: ввод кадра N+1 приходил, пока флаг кадра N ещё стоял, и его СЪЕДАЛО.
+        /// Ловится это не глазом, а намертво: живой прогон реальной цепочки кабинета
+        /// (ChildPhoneTests.BangButton_ThroughTheRealCabinetChain…) вис на таймауте — «!» не доезжала.
+        ///
+        /// LateUpdate идёт после ВСЕХ Update, то есть после любого источника ввода, поэтому гейт снова
+        /// живёт ровно один кадр — и теперь независимо от порядка исполнения, а не по счастливому совпадению.
+        /// </summary>
+        private void LateUpdate()
+        {
+            _dismissedThisFrame = false;         // кадр дожит → гейт «съесть остаток кадра» снимается
+            _smClosedThisFrame = false;          // …и его строгий брат с входного экрана спецрежима
+        }
+
         private void Update()
         {
-            _dismissedThisFrame = false;         // fresh frame → the same-frame dismiss-swallow guard clears
-            _smClosedThisFrame = false;          // …и его строгий брат с входного экрана спецрежима
             SpinBackground(Time.deltaTime);      // ambient §7 ray spin — runs on every screen, pause included
             if (_game == null) return;
             _crankCap.Advance(Time.deltaTime);   // deterministic clock for the income cap
@@ -2438,7 +2672,10 @@ namespace ThanksNoThanks
                 var s = _game.Scales;
                 ReflectEnergyLevel(s.Energy);
                 ReflectHealthMarker(s.Health);
-                ReflectRelationsMarker(s.Relationships, _game.RelationshipRedZone);
+                // r5 п.1 — маркер рисуется по НЕПРЕРЫВНОМУ значению (целое + остаток аккумулятора), а не по
+                // целой шкале: иначе он ждёт, пока интегратор накопит целый процент, и ввод «не виден» на
+                // экране до третьего кадра. Механика/пороги/разрыв по-прежнему на целых.
+                ReflectRelationsMarker(_game.RelationshipsPrecise, _game.RelationshipRedZone);
                 // ⚠ ПЛАШКА И ТУТОРИАЛ ВЫГОРАНИЯ — ВЗАИМОИСКЛЮЧАЮЩИ (находка ревью r3, MAJOR). Плашка —
                 // подача ПОВТОРНОГО выгорания (п.5б), а ПЕРВОЕ за жизнь объясняет входной экран с паузой.
                 // Без гейта первый раз показывал ОБА разом: под затемнением экрана в полосе HUD висела ещё
@@ -2541,10 +2778,13 @@ namespace ThanksNoThanks
                 UseImpulsePlates();
                 SetYesLabel("ДА");
                 SetNoLabel("СПАСИБО,\nНЕ НАДО");
-                _yesPlateText.resizeTextMaxSize = 60;   // single-line «ДА» reads big
-                _noPlateText.resizeTextMaxSize = 40;
+                // ⚠ r5 п.3: потолки кегля тут БОЛЬШЕ НЕ ЗАДАЮТСЯ. Раньше стояли 60/40 под старую
+                // мелкую подпись, и они бы срезали подбор, который ставит ApplyBlitzLabel (40…180).
+                // Кегль теперь связывает прямоугольник подписи, общий закон с блицем.
+                // r5 п.3: цвет обеих плашек теперь В ТЕКСТУРЕ (BuildBlitzPlateSprite), как у блица —
+                // золотая подсветка безопасного отказа осталась, но не тинтом поверх красного спрайта.
                 _yesPlate.color = Color.white;
-                _noPlate.color = Bulb;   // gold-highlight the safe active decline
+                _noPlate.color = Color.white;
                 _crisisInfoText.text = $"ИМПУЛЬС {_game.ImpulseCardNumber}/3";
             }
             if (!_crisisInfo.activeSelf) _crisisInfo.SetActive(true);
@@ -2619,6 +2859,15 @@ namespace ThanksNoThanks
         public const float BlitzPlateStripeOutFrac = 0.059f;// внешний край жёлтой полосы / высота
         public const float BlitzPlateStripeFrac = 0.025f;   // толщина жёлтой полосы / высота
         private Sprite _blitzYesSprite, _blitzNoSprite;
+        // r5 п.3 — ИМПУЛЬС ПЕРЕОДЕТ В ТУ ЖЕ СЕМЬЮ ПЛАШЕК. Блиц и импульс — два раунда ОДНОГО кризиса
+        // среднего возраста, и после r4 они выглядели по-разному: блиц получил сгенерированную плашку в
+        // канон-пропорциях (радиус 0.17·H, чернильный кант, жёлтая полоса), а импульс остался на плоских
+        // 9-slice `plate-yes`/`plate-no` — без канта, без полосы, да ещё с золотым ТИНТОМ поверх красного
+        // спрайта (умножение давало грязно-оранжевый, а не золото пака). Тот же генератор, свои размеры,
+        // цвет — В ТЕКСТУРЕ, а не тинтом. ПОДПИСЬ переехала туда же: блок блица (`ApplyBlitzLabel`)
+        // параметризован по габариту плашки и зовётся из `UseImpulsePlates` — почему план «подпись не
+        // трогаем» не пережил первого же кадра, написано там.
+        private Sprite _impulseYesSprite, _impulseNoSprite;
 
         // Ordinary play: baked art, NO dynamic label (the words are part of the picture — a live Text on top
         // would double them). Idempotent; called on build, on every restart and when a crisis ends.
@@ -2744,25 +2993,40 @@ namespace ThanksNoThanks
             _noPlate.type = Image.Type.Simple;
             _yesPlate.color = Color.white;        // цвет уже в текстуре; тинт только исказил бы токены
             _noPlate.color = Color.white;
-            ApplyBlitzLabel(_yesPlateText, _yesPlateShade, _yesLabelKant, _yesLabelSoft);
-            ApplyBlitzLabel(_noPlateText, _noPlateShade, _noLabelKant, _noLabelSoft);
+            ApplyBlitzLabel(_yesPlateText, _yesPlateShade, _yesLabelKant, _yesLabelSoft, CrisisBlitzPlateSize);
+            ApplyBlitzLabel(_noPlateText, _noPlateShade, _noLabelKant, _noLabelSoft, CrisisBlitzPlateSize);
             SetLabelShades(true);
         }
 
-        // S13 impulse plates: the code-plates at the sizes/insets the accepted 03 shot uses.
-        // ⚠ ИМПУЛЬС НАМЕРЕННО НЕ ПЕРЕОДЕВАЕТСЯ: его вид зафиксирован принятым кадром «03», поэтому здесь
-        // восстанавливается ИСХОДНАЯ типографика плашки (Arimo Bold, мягкая тень DisplayFx, кегль 1:1) —
-        // всё, что блиц у себя поменял, откатывается явно, иначе режимы утекали бы друг в друга.
+        // S13 impulse plates: плашки кризиса в размерах импульса.
+        // ⚠ ИЗМЕНЕНО r5 п.3 (панч-лист автомата «мини-игры не в единой стилистике»). Раньше здесь стояла
+        // пометка «импульс намеренно не переодевается — его вид зафиксирован принятым кадром 03». Панч-лист
+        // 2026-09-22 СТАРШЕ того кадра и прямо требует единого вида мини-режимов, поэтому ФОРМА плашки
+        // переходит в семью блица (сгенерированный спрайт, канон-радиус, чернильный кант, жёлтая полоса) —
+        // блиц и импульс перестают быть двумя разными играми внутри одного кризиса.
+        // ⚠ ТИПОГРАФИКА ПОДПИСИ ПЕРЕЕХАЛА ТУДА ЖЕ — вопреки первоначальному плану, и это осознанная смена
+        // курса, а не недосмотр (комментарий приведён к коду по находке код-скептика r5). План был
+        // «подпись оставляем импульсной (Arimo Bold + мягкая тень DisplayFx), расчёт блица прибит к
+        // CrisisBlitzPlateSize». Его отменил КАДР: с новой формой и старыми буквами импульс читался не как
+        // «другой режим», а как БАГ. Оказалось к тому же, что расчёт вёлся в долях высоты и к габаритам
+        // блица был прибит по недосмотру — хватило параметризации (`BlitzLabelInsetX(plateH)`), никакого
+        // нового подбора кегля. Сегодня здесь зовётся `ApplyBlitzLabel` (дудл-капсы Rubik-Bold + ЖЁСТКАЯ
+        // тень), а НЕ Arimo/DisplayFx. Смена вынесена на дизайн-гейт как моя развилка.
         private void UseImpulsePlates()
         {
             UseCodePlates(ImpulseYesPlateSize, ImpulseNoPlateSize);
-            RestoreDisplayLabel(_yesPlateText, _yesPlateShade, _yesLabelKant, _yesLabelSoft);
-            RestoreDisplayLabel(_noPlateText, _noPlateShade, _noLabelKant, _noLabelSoft);
-            PlateTextRect(_yesPlateText.rectTransform);
-            PlateTextRect(_noPlateText.rectTransform);
-            _yesPlateText.resizeTextMinSize = 40; _yesPlateText.resizeTextMaxSize = 120;
-            _noPlateText.resizeTextMinSize = 24; _noPlateText.resizeTextMaxSize = 60;
-            SetLabelShades(false);
+            _yesPlate.sprite = _impulseYesSprite;
+            _noPlate.sprite = _impulseNoSprite;
+            _yesPlate.type = Image.Type.Simple;   // спрайт нарисован ПОД этот размер — растягивать нечего
+            _noPlate.type = Image.Type.Simple;
+            // …и ПОДПИСЬ — та же, что у блица, каждая по своему габариту плашки. Сначала кадр показал
+            // ровно то, чего боялся контракт: форма совпала, а буквы остались прежние — мелкие, тонкие,
+            // высоко на плашке. Рядом с блицем это читалось не как «другой режим», а как БАГ. Лечение —
+            // не новое решение, а ТОТ ЖЕ блок, что гейт уже принял для блица (дудл-капсы Rubik-Bold с
+            // жёсткой тенью); прибитым к габаритам блица он был лишь по недосмотру, см. BlitzLabelInsetX.
+            ApplyBlitzLabel(_yesPlateText, _yesPlateShade, _yesLabelKant, _yesLabelSoft, ImpulseYesPlateSize);
+            ApplyBlitzLabel(_noPlateText, _noPlateShade, _noLabelKant, _noLabelSoft, ImpulseNoPlateSize);
+            SetLabelShades(true);
         }
 
         // ---- ТИПОГРАФИКА ПОДПИСИ БЛИЦА (r4 п.4, переделка по дизайн-гейту MAJOR-2) ------------------
@@ -2840,15 +3104,19 @@ namespace ThanksNoThanks
 
         /// <summary>Горизонтальный отступ подписи: внутренняя кромка жёлтой полосы + канонный воздух +
         /// вылет эффектов. Именно он СВЯЗЫВАЕТ best-fit — и потому задаёт обеим плашкам одно заполнение.</summary>
-        private static float BlitzLabelInsetX =>
-            (BlitzPlateStripeOutFrac + BlitzPlateStripeFrac + BlitzLabelAirFrac) * CrisisBlitzPlateSize.y
+        /// ⚠ r5 п.3: считается ОТ ВЫСОТЫ КОНКРЕТНОЙ ПЛАШКИ, а не от блицевой. Вся геометрия подписи и
+        /// так была долями высоты (в этом и был смысл разбора двух гейтов) — прибитой к
+        /// <see cref="CrisisBlitzPlateSize"/> оставалась только точка подстановки. Теперь тот же расчёт
+        /// обслуживает и плашки импульса, у которых свои габариты.
+        private static float BlitzLabelInsetX(float plateH) =>
+            (BlitzPlateStripeOutFrac + BlitzPlateStripeFrac + BlitzLabelAirFrac) * plateH
             + BlitzLabelInkBleed;
 
         /// <summary>Вертикальный отступ: кант + тот же канонный воздух + вылет эффектов по вертикали
         /// (кант буквы вверх, кант + сдвиг тени вниз). МЕНЬШЕ горизонтального намеренно: высота обязана
         /// оставлять место обеим подписям, но НЕ давать третьей строке — см. <see cref="ApplyBlitzLabel"/>.</summary>
-        private static float BlitzLabelInsetY =>
-            (BlitzPlateKeylineFrac + BlitzLabelAirFrac) * CrisisBlitzPlateSize.y
+        private static float BlitzLabelInsetY(float plateH) =>
+            (BlitzPlateKeylineFrac + BlitzLabelAirFrac) * plateH
             + BlitzLabelKantPx + Mathf.Abs(BlitzLabelShadeOffset.y);
 
         /// <summary>
@@ -2870,10 +3138,10 @@ namespace ThanksNoThanks
         /// Высота прямоугольника подобрана так, чтобы у длинного слова не появилась ТРЕТЬЯ строка:
         /// 2 строки кегля 77 занимают ≈145 px, три строки кегля 78 — уже ≈220 px, и 197 px их не пускает.
         /// </summary>
-        private void ApplyBlitzLabel(Text t, Text shade, Outline kant, Shadow soft)
+        private void ApplyBlitzLabel(Text t, Text shade, Outline kant, Shadow soft, Vector2 plate)
         {
-            var size = new Vector2((CrisisBlitzPlateSize.x - 2f * BlitzLabelInsetX) / BlitzLabelCondense,
-                                    CrisisBlitzPlateSize.y - 2f * BlitzLabelInsetY);
+            var size = new Vector2((plate.x - 2f * BlitzLabelInsetX(plate.y)) / BlitzLabelCondense,
+                                    plate.y - 2f * BlitzLabelInsetY(plate.y));
             foreach (var g in new[] { shade, t })
             {
                 var rt = g.rectTransform;
@@ -2895,22 +3163,11 @@ namespace ThanksNoThanks
             soft.enabled = false;                          // мягкой полупрозрачной тени в блице нет
         }
 
-        private void RestoreDisplayLabel(Text t, Text shade, Outline kant, Shadow soft)
-        {
-            var rt = t.rectTransform;
-            rt.localScale = Vector3.one;
-            t.font = _display;
-            t.lineSpacing = 1f;
-            t.color = Color.white;
-            kant.effectColor = DisplayKantInk;
-            kant.effectDistance = new Vector2(3f, -3f);
-            soft.enabled = true;
-            shade.rectTransform.localScale = Vector3.one;
-            // …и режим подбора тоже откатывается: блиц ставит Truncate (см. ApplyBlitzLabel), а импульс
-            // живёт на принятом кадре «03», где подпись подбиралась по ширине. Режимы не должны утекать.
-            t.verticalOverflow = VerticalWrapMode.Overflow;
-            shade.verticalOverflow = VerticalWrapMode.Overflow;
-        }
+        // ⚠ `RestoreDisplayLabel` УДАЛЁН (находка код-скептика r5, MINOR). Он откатывал подпись плашки
+        // на импульсный набор (`_display` + мягкая тень + Overflow) и был нужен ровно пока импульс жил
+        // на СВОЕЙ типографике. С r5 п.3 оба раунда кризиса зовут `ApplyBlitzLabel`, откатывать не к
+        // чему — у метода стало ноль вызовов, а его комментарий вдобавок ссылался на отменённый «кадр 03»
+        // как на действующее решение. Мёртвый код, который врёт про живое, опаснее просто мёртвого.
 
         // The game is paused while a tutorial overlay OR the §D modal is up. Both share the single
         // Game.Paused freeze (age, drains, cost-of-living, card timer, crisis timer). Kept in sync from
@@ -3344,7 +3601,7 @@ namespace ThanksNoThanks
             "Уследить за всем невозможно, но давай попробуем!";
 
         /// <summary>CTA опенера — называет ФИЗИЧЕСКИЙ контрол (founder 99fab3c), не dev-клавишу.</summary>
-        public const string OpenerStartHintText = "НАЧАТЬ ЖИЗНЬ — ЖМИ ЗЕЛЁНУЮ";
+        public const string OpenerStartHintText = "НАЧАТЬ ЖИЗНЬ — ЖМИ ЗЕЛЁНУЮ КНОПКУ";
 
         private void BuildOpener(Transform parent)
         {
@@ -3525,7 +3782,7 @@ namespace ThanksNoThanks
             // field 467,286,984,606), expressed as a fraction of the card rect. Ink on cream: NO DisplayFx —
             // a dark outline on dark letters over a light plate just muddies them (the reference is flat black).
             _cardText = NewText("CardText", _cardRoot, "", 64, TextAnchor.MiddleCenter, Ink, _display);
-            SetCardTextBottom(CardTextFullBottom);   // full §8 safe box until the bottom band is occupied
+            SetCardTextBox(CardTextFullCy, CardTextFullH);   // full §8 box (height-capped) until the band fills
             _cardText.resizeTextForBestFit = true;   // auto-shrink long questions to fit the plate
             _cardText.resizeTextMinSize = 30;
             _cardText.resizeTextMaxSize = 64;
@@ -3556,6 +3813,13 @@ namespace ThanksNoThanks
                 Mathf.RoundToInt(CrisisBlitzPlateSize.x), Mathf.RoundToInt(CrisisBlitzPlateSize.y), GoGreen);
             _blitzNoSprite = BuildBlitzPlateSprite("BlitzPlateNo",
                 Mathf.RoundToInt(CrisisBlitzPlateSize.x), Mathf.RoundToInt(CrisisBlitzPlateSize.y), TimerRed);
+            // …и те же плашки для ИМПУЛЬСА, под его собственные размеры (r5 п.3). ДА — зелёная кабинета,
+            // как у блица; «СПАСИБО, НЕ НАДО» — золото: акцент на БЕЗОПАСНОМ отказе, смысловая подсветка
+            // S13, которая была тут и раньше (только тинтом поверх красного спрайта, а теперь — цветом тела).
+            _impulseYesSprite = BuildBlitzPlateSprite("ImpulsePlateYes",
+                Mathf.RoundToInt(ImpulseYesPlateSize.x), Mathf.RoundToInt(ImpulseYesPlateSize.y), GoGreen);
+            _impulseNoSprite = BuildBlitzPlateSprite("ImpulsePlateNo",
+                Mathf.RoundToInt(ImpulseNoPlateSize.x), Mathf.RoundToInt(ImpulseNoPlateSize.y), Bulb);
 
             // Crisis-only overlay label — «ДА» is baked into the art, so this stays HIDDEN in ordinary play.
             // (White with the ink kant, matching the baked lettering, for the «ВСЁ НОРМАЛЬНО»/«О НЕТ» relabel.)
@@ -3730,8 +3994,33 @@ namespace ThanksNoThanks
             burnoutKant.effectDistance = new Vector2(2f, -2f);
             var burnoutSub = NewText("BurnoutSubtitle", burnPlate.transform,
                 BurnoutPlateSubtitle, 28, TextAnchor.MiddleCenter, Color.white, _display);
-            Anchor(burnoutSub.rectTransform, new Vector2(0.5f, 0.3295f), new Vector2(BurnoutPlateRect.z - 56f, 24f));
-            burnoutSub.resizeTextForBestFit = true; burnoutSub.resizeTextMinSize = 13; burnoutSub.resizeTextMaxSize = 18;
+            // ⚠ КЕГЛЬ ПОДНЯТ ×1.5 (дизайн-гейт r5, MINOR). Коридор был 13…18, и best-fit садился на НИЖНЮЮ
+            // границу: подпись выходила ~13 px — САМЫЙ МЕЛКИЙ тип во всей игре, при этом с полями в 44 %
+            // ширины плашки, то есть место было, а буквы всё равно мельчили. Виноват был не кегль, а бокс:
+            // 24 px высоты не давали best-fit подняться. Бокс растянут до 27 (внутрь видимой пилюли, её
+            // скругление ест 16 px — свободный низ там есть), коридор поднят до 20…26. ЛЭЙАУТ НЕ ТРОНУТ:
+            // плашка, её рект и заголовок остались прежними, изменилась только посадка второй строки.
+            // ⚠ КЕГЛЬ ПОДНЯТ 18 → 22, НО НЕ В ПОЛТОРА РАЗА — И ЭТО ГЕОМЕТРИЯ, А НЕ ЛЕНЬ.
+            //
+            // Дизайн-гейт (r5, MINOR) просил «×1.5–1.6 без изменения лэйаута»: подпись выходила мельче
+            // всего в игре (кегль 18, капитель ≈13 px) при полях в 44 % ширины. Ширина и правда была
+            // свободна — упор оказался по ВЕРТИКАЛИ, и он жёсткий:
+            //   • плашка 88 px, скругление `bar-track` съедает по 16 px сверху и снизу ⇒ на ОБЕ строки
+            //     остаётся видимая полоса ровно 56 px;
+            //   • заголовок «ВЫГОРАНИЕ» занимает в ней 0…23.4 (замер), подписи остаётся −28…0, то есть 28 px;
+            //   • нарисованный бокс глифов «зажми датчик высоты» на кегле 22 — уже 23.4 px.
+            // Кегль ×1.5 (это ~28) дал бы бокс глифов ~30 px — он не помещается между заголовком и
+            // скруглением НИ ПРИ КАКОМ сдвиге. Дотянуть до просимого можно только ростом плашки или
+            // ужатием заголовка, а это ровно то «изменение лэйаута», которое гейт исключил.
+            //
+            // Поэтому взят НАИБОЛЬШИЙ помещающийся набор (свип по кеглю × позиции, все варианты замерены
+            // тем же способом, каким мерит гард соответствия): кегль 22, бокс поднят на 0.37. Глифы
+            // ложатся в −27.0…−3.7 — внутри видимой пилюли (−28) с запасом 1 px снизу и 3.7 px до
+            // заголовка. Итог: капитель 13 → ~16 px (×1.22), подпись перестала быть самым мелким типом
+            // игры и сравнялась с заголовком по весу. ОСТАТОК ЗАПРОСА — на гейт/основательницу: ×1.5
+            // требует переверстки плашки.
+            Anchor(burnoutSub.rectTransform, new Vector2(0.5f, 0.37f), new Vector2(BurnoutPlateRect.z - 56f, 27f));
+            burnoutSub.resizeTextForBestFit = true; burnoutSub.resizeTextMinSize = 20; burnoutSub.resizeTextMaxSize = 22;
             burnoutSub.verticalOverflow = VerticalWrapMode.Truncate;
             _burnoutPlate.SetActive(false);
 
@@ -3759,7 +4048,8 @@ namespace ThanksNoThanks
             // bar-track 9-slice tinted Ink gives the rounded dark plate; text stays fully inside via Inset.
             var infoImg = NewSprite("CrisisInfo", _gamePanel.transform, Sprite("bar-track"));
             infoImg.type = Image.Type.Sliced;
-            infoImg.color = Ink;                    // dark navy badge — readable over the sunburst
+            infoImg.color = OnBarTrack(Ink);        // dark navy badge — readable over the sunburst
+                                                    // (r5 п.3: через OnBarTrack, как все плашки `bar-track`)
             _crisisInfo = infoImg.gameObject;
             AnchorPx(infoImg.rectTransform, 1690f, 100f, 380f, 112f);
             _crisisInfoText = NewText("CrisisInfoText", _crisisInfo.transform,
@@ -3771,19 +4061,27 @@ namespace ThanksNoThanks
             // ---- Impulse warning (S13): dark pill «молчание = ДА» with a DRAWN mute icon (never a glyph) ----
             var warnImg = NewSprite("ImpulseWarning", _gamePanel.transform, Sprite("bar-track"));
             warnImg.type = Image.Type.Sliced;
-            warnImg.color = Ink;
+            warnImg.color = OnBarTrack(Ink);        // r5 п.3 — тот же путь тинта, что у остальных пилюль
             _impulseWarning = warnImg.gameObject;
-            // Sits above the enlarged §9 answer plates (their tilted AABBs start at y≈703) so the pill never
-            // clips a plate corner.
-            AnchorPx(warnImg.rectTransform, 940f, 650f, 380f, 84f);
+            // ⚠ ПИЛЮЛЯ ПЕРЕЕХАЛА В ВЕРХНЮЮ ВНУТРЕННЮЮ ПОЛОСУ КАРТОЧКИ (дизайн-гейт r5, BLOCKER).
+            // Стояла на y 650 — «над наклонными плашками ответов», и это правда, но соседа выбрали не того:
+            // y 650 приходится ровно на ВТОРУЮ СТРОКУ вопроса, и на кадре `r5-impulse` пилюля закрывала
+            // 67 % её ширины. Свободного коридора между низом карточки и плашками ответов нет, поэтому
+            // пилюля ушла ВВЕРХ, в поле кремовой карточки над текстом: там пусто на всех экранах.
+            // Пара работает ВМЕСТЕ с потолком высоты бокса вопроса (<see cref="CardTextFullH"/>): пилюля
+            // заняла полосу 339.5…423.5, а текст физически не может подняться выше 444.5 — зазор 21 px
+            // держится сам, а не «пока вопросы короткие». Гард: ImpulsePill_ClearsTheQuestionText.
+            AnchorPx(warnImg.rectTransform, 940f, ImpulseWarnCy, 380f, HintPillH);
             var mute = NewSprite("MuteIcon", _impulseWarning.transform, MakeMuteSprite());
             Anchor(mute.rectTransform, new Vector2(0.14f, 0.5f), new Vector2(52, 52));
             var warn = NewText("ImpulseWarnText", _impulseWarning.transform,
                 "молчание = ДА", 34, TextAnchor.MiddleCenter, Color.white, _display);
             var wrt = warn.rectTransform;
             wrt.anchorMin = Vector2.zero; wrt.anchorMax = Vector2.one;
-            wrt.offsetMin = new Vector2(78f, 8f);   // clear the mute icon on the left
-            wrt.offsetMax = new Vector2(-18f, -8f);
+            // Вертикальное поле и правое — общий токен хинт-пилюль (п.12); левое шире на ширину
+            // мьют-иконки, и это единственная законная разница между двумя пилюлями.
+            wrt.offsetMin = new Vector2(78f, HintPillPad);   // clear the mute icon on the left
+            wrt.offsetMax = new Vector2(-HintPillPad, -HintPillPad);
             DisplayFx(warn);
             _impulseWarning.SetActive(false);
         }
@@ -4653,6 +4951,67 @@ namespace ThanksNoThanks
         /// </summary>
         public const int FinaleStoryMaxSize = 34, FinaleStoryMinSize = 24;
 
+        // ================================================================ r5 п.4 · ТИПОГРАФИКА НЕКРОЛОГА
+        //
+        // ЖАЛОБА ОСНОВАТЕЛЬНИЦЫ (живой автомат 2026-09-22): финальный текст «большой, плохо читаемый, и
+        // шрифт не нравится». Все три слова про одно место — блок из семи вех в кремовом поле финала.
+        //
+        // НАЙДЕННЫЙ КОРЕНЬ «ПЛОХО ЧИТАЕМОГО». Некролог набран шрифтом `_body` = `Fonts/Rubik`, а это
+        // ВАРИАТИВНЫЙ файл с осью wght 300…900 и дефолтом 300 — legacy-uGUI растеризует именно дефолтную
+        // инстанцию, то есть Rubik LIGHT. Ровно эту ловушку уже ловили на плашке Ведущего (см. `_bodyBold`
+        // в Awake: замер штриха 0.081 при 300 против 0.216 при 700). Семь строк светлого начертания на
+        // кремовом поле, которые смотрят с расстояния стойки, — это и есть «плохо читаемый», и никаким
+        // кеглем оно не лечится: не хватает ВЕСА, а не размера.
+        //
+        // ТРИ НАБОРА НА ВЫБОР ОСНОВАТЕЛЬНИЦЫ (кадры r5-finale-A/B/C.png). Все лица — из уже поднятых в
+        // Resources шрифтов проекта, оба семейства OFL, новых файлов не заводим:
+        //   A «вес»      — то же лицо и та же геометрия, но Rubik-Bold (wght 700) вместо Light.
+        //                  Минимальная правка: меняется ровно то, что сломано.
+        //   B «одна семья» — Arimo Bold, то есть ЛИЦО СТРОКИ ИСХОДА. Весь финал становится одной
+        //                  гарнитурой; Arimo — метрический клон Helvetica, на дистанции читается ровнее.
+        //   C «вес + воздух» — Rubik-Bold, но кегль ниже (потолок 30 вместо 34) и межстрочье +18 %.
+        //                  Единственный набор, который отвечает и на «большой»: блок становится мельче и
+        //                  просторнее, а читается лучше за счёт веса, а не размера.
+        //
+        // ⚠ ГРАНИЦЫ КЕГЛЕЙ НАБОРА ОБЯЗАНЫ ЛЕЖАТЬ ВНУТРИ КАНОН-КОРИДОРА <see cref="FinaleStoryMaxSize"/> /
+        // <see cref="FinaleStoryMinSize"/> — пол 24 это задокументированный порог читаемости на стойке, и
+        // «красивый» набор не имеет права его продавить. Гард: FinaleStoryStyles_StayInsideTheCanonBounds.
+        /// <summary>Набор типографики блока некролога: лицо, коридор кеглей, межстрочье.</summary>
+        public readonly struct FinaleStoryStyle
+        {
+            public readonly string Name;
+            /// <summary>true → лицо строки исхода (Arimo Bold); false → Rubik Bold.</summary>
+            public readonly bool UseDisplayFace;
+            public readonly int MaxSize, MinSize;
+            public readonly float LineSpacing;
+
+            public FinaleStoryStyle(string name, bool useDisplayFace, int maxSize, int minSize, float lineSpacing)
+            {
+                Name = name; UseDisplayFace = useDisplayFace;
+                MaxSize = maxSize; MinSize = minSize; LineSpacing = lineSpacing;
+            }
+        }
+
+        public static readonly FinaleStoryStyle FinaleStoryStyleA =
+            new("A — вес (Rubik Bold, геометрия прежняя)", false, FinaleStoryMaxSize, FinaleStoryMinSize, 1.00f);
+        public static readonly FinaleStoryStyle FinaleStoryStyleB =
+            new("B — одна семья (Arimo Bold, геометрия прежняя)", true, FinaleStoryMaxSize, FinaleStoryMinSize, 1.00f);
+        public static readonly FinaleStoryStyle FinaleStoryStyleC =
+            new("C — вес + воздух (Rubik Bold, кегль ≤30, межстрочье 1.18)", false, 30, FinaleStoryMinSize, 1.18f);
+
+        /// <summary>Все три набора — для кадров и для гарда границ.</summary>
+        public static FinaleStoryStyle[] FinaleStoryStyles
+            => new[] { FinaleStoryStyleA, FinaleStoryStyleB, FinaleStoryStyleC };
+
+        /// <summary>
+        /// НАБОР, КОТОРЫЙ СТОИТ В ИГРЕ. Рекомендация владельца инкремента — «C»: он единственный отвечает
+        /// на ОБА слова жалобы сразу («большой» лечится кеглем и воздухом, «плохо читаемый» — весом), а
+        /// «шрифт не нравится» закрывается тем, что светлого начертания в финале не остаётся вовсе.
+        /// ПОСЛЕДНЕЕ СЛОВО ЗА ОСНОВАТЕЛЬНИЦЕЙ по кадрам r5-finale-A/B/C.png — смена набора здесь
+        /// однострочная и гардов не трогает.
+        /// </summary>
+        public static FinaleStoryStyle ShippedFinaleStoryStyle => FinaleStoryStyleC;
+
         // CTA рестарта. На эталоне кнопки НЕТ (как и на опенере) — место выбрано по композиции: плашка
         // кончается на y≈929.5 (внешний синий кант, замер по `end.png`), ниже до края кадра 150 px чистой
         // сцены. CTA встаёт по центру этой полосы (центр y 1005), соосно плашке, с полем 17.5 px сверху
@@ -4665,7 +5024,7 @@ namespace ThanksNoThanks
         /// <summary>CTA финала — называет ФИЗИЧЕСКИЙ контрол, ОДНОЙ строкой через «—», ровно как опенер
         /// (<see cref="OpenerStartHintText"/>): раньше здесь стоял перенос строки вместо тире, и одна и та
         /// же формула управления печаталась в игре двумя разными способами.</summary>
-        public const string FinaleRestartHintText = "НАЧАТЬ ЗАНОВО — ЖМИ ЗЕЛЁНУЮ";
+        public const string FinaleRestartHintText = "НАЧАТЬ ЗАНОВО — ЖМИ ЗЕЛЁНУЮ КНОПКУ";
 
         private void BuildFinale(Transform parent)
         {
@@ -4700,12 +5059,13 @@ namespace ThanksNoThanks
                 "", FinaleStoryMaxSize, TextAnchor.MiddleCenter, Ink, _body);
             AnchorPx(_finaleStory.rectTransform, FinaleStoryRect.x, FinaleStoryRect.y,
                 FinaleStoryRect.z, FinaleStoryRect.w);
+            ApplyFinaleStoryStyle(ShippedFinaleStoryStyle);   // r5 п.4 — лицо/коридор/межстрочье блока
             // Кегль подбирает НЕ uGUI-best-fit, а FitStoryPerLine: блочный best-fit меряет только высоту и
             // потому спокойно переносит слишком широкую строку (сирота в середине блока, дизайн-гейт
             // 2026-08-08). Границы кеглей те же — они и есть вход подборщика.
             _finaleStory.resizeTextForBestFit = false;
-            _finaleStory.resizeTextMinSize = FinaleStoryMinSize;
-            _finaleStory.resizeTextMaxSize = FinaleStoryMaxSize;
+            // ⚠ Коридор кеглей и межстрочье ставит НАБОР (ApplyFinaleStoryStyle выше), а подборщик
+            // FitStoryPerLine читает их с самого Text — поэтому смена набора не требует правок в нём.
             _finaleStory.supportRichText = true;    // персональный `<size=k>` на слишком широкой строке
             _finaleStory.verticalOverflow = VerticalWrapMode.Truncate;
 
@@ -4726,7 +5086,7 @@ namespace ThanksNoThanks
             AnchorPx(again.rectTransform, FinaleCtaRect.x, FinaleCtaRect.y, FinaleCtaRect.z, FinaleCtaRect.w);
             var againText = NewText("AgainText", again.transform,
                 FinaleRestartHintText, 46, TextAnchor.MiddleCenter, Ink, _display);
-            Inset(againText.rectTransform, 26f);   // ≥ видимого скругления bar-track (16) → глифы всегда на плашке
+            Inset(againText.rectTransform, CtaTextInset);   // общий токен поля CTA (см. CtaTextInset)
             againText.resizeTextForBestFit = true; againText.resizeTextMinSize = 28; againText.resizeTextMaxSize = 46;
             againText.verticalOverflow = VerticalWrapMode.Truncate;
             // No DisplayFx: dark Ink text on the green pill needs no dark outline (it muddies it to a blob).
@@ -4772,7 +5132,7 @@ namespace ThanksNoThanks
             plate.color = Cobalt;
             Anchor(plate.rectTransform, new Vector2(0.5f, 0.16f), new Vector2(470, 116));
             _tutorialButton = plate;
-            var plateTxt = NewText("GotItText", plate.transform, "ПОНЯТНО — ЖМИ ЗЕЛЁНУЮ", 32, TextAnchor.MiddleCenter, Color.white, _display);
+            var plateTxt = NewText("GotItText", plate.transform, TutorialDismissCtaText, 32, TextAnchor.MiddleCenter, Color.white, _display);
             Inset(plateTxt.rectTransform, 30f);
             plateTxt.resizeTextForBestFit = true; plateTxt.resizeTextMinSize = 22; plateTxt.resizeTextMaxSize = 34;
             DisplayFx(plateTxt);
@@ -4809,9 +5169,11 @@ namespace ThanksNoThanks
                 TextAnchor.MiddleCenter, Ink, _display);
             AnchorPx(_nsTaskText.rectTransform, TaskFieldRect.x, TaskFieldRect.y - HintLineReserve / 2f,
                 TaskFieldRect.z - 2f * TaskTextPadX, TaskFieldRect.w - 2f * TaskTextPadY - HintLineReserve);
+            // ⚠ Авторазмер СХЛОПНУТ в одно число (см. TaskTextFixedSize): длина строки больше не решает,
+            // каким кеглем набран экран. Диапазон 40…96 остался только как канон-коридор для гардов.
             _nsTaskText.resizeTextForBestFit = true;
-            _nsTaskText.resizeTextMinSize = TaskTextMinSize;
-            _nsTaskText.resizeTextMaxSize = TaskTextMaxSize;
+            _nsTaskText.resizeTextMinSize = TaskTextFixedSize;
+            _nsTaskText.resizeTextMaxSize = TaskTextFixedSize;
             _nsTaskText.verticalOverflow = VerticalWrapMode.Truncate;
 
             // Вторая строка: мелко, Rubik, приглушённым — она служебная и не должна спорить с задачей.
@@ -4866,7 +5228,7 @@ namespace ThanksNoThanks
             AnchorPx(_smCta.rectTransform, SpecialCtaRect.x, SpecialCtaRect.y, SpecialCtaRect.z, SpecialCtaRect.w);
             _smCtaText = NewText("SpecialCtaText", _smCta.transform,
                 SpecialModeCtaText, 46, TextAnchor.MiddleCenter, Ink, _display);
-            Inset(_smCtaText.rectTransform, 26f);   // ≥ видимого скругления bar-track (16)
+            Inset(_smCtaText.rectTransform, CtaTextInset);   // тот же токен, что у финальной CTA
             _smCtaText.resizeTextForBestFit = true;
             _smCtaText.resizeTextMinSize = 28; _smCtaText.resizeTextMaxSize = 46;
             _smCtaText.verticalOverflow = VerticalWrapMode.Truncate;
@@ -4927,12 +5289,25 @@ namespace ThanksNoThanks
 
             // «СОБРАТЬСЯ» button (S8): a near-white rounded pill low-centre with dark text (monochrome, so it
             // reads on the gray wash). bar-track 9-slice = the filled rounded plate.
+            // r5 п.3 — ЧЁРНЫЙ КАНТ, как у всех плашек пака (плашка выгорания, зелёная CTA, плашка блица):
+            // `bar-track`-сосед ПОЗАДИ, раздутый на BlockKeylineInk с каждой стороны. Именно его отсутствие
+            // и читалось как «устаревшее оформление»: две пилюли депрессии висели голыми светлыми пятнами,
+            // без единой обводки, которую несёт весь остальной экран.
+            var gatherEdge = NewSprite("DepGatherPlateEdge", _depressionGroup.transform, Sprite("bar-track"));
+            gatherEdge.type = Image.Type.Sliced;
+            gatherEdge.color = OnBarTrack(Ink);
+            AnchorPx(gatherEdge.rectTransform, DepGatherPlateRect.x, DepGatherPlateRect.y,
+                DepGatherPlateRect.z + 2f * BlockKeylineInk, DepGatherPlateRect.w + 2f * BlockKeylineInk);
+
             var gatherPlate = NewSprite("DepGatherPlate", _depressionGroup.transform, Sprite("bar-track"));
             gatherPlate.type = Image.Type.Sliced;
-            gatherPlate.color = new Color(0.93f, 0.93f, 0.95f);
-            AnchorPx(gatherPlate.rectTransform, 960f, 968f, 420f, 116f);
+            // …и ТОКЕН вместо самодельного светло-серого: `bar-track` умножает тинт на свою заливку, поэтому
+            // красим через OnBarTrack — тем же путём, что плашка выгорания (иначе пилюля садится мимо пака).
+            gatherPlate.color = OnBarTrack(TextLight);
+            AnchorPx(gatherPlate.rectTransform, DepGatherPlateRect.x, DepGatherPlateRect.y,
+                DepGatherPlateRect.z, DepGatherPlateRect.w);
             var label = NewText("DepLabel", gatherPlate.transform,
-                "СОБРАТЬСЯ", 60, TextAnchor.MiddleCenter, new Color(0.10f, 0.10f, 0.12f), _display);
+                "СОБРАТЬСЯ", 60, TextAnchor.MiddleCenter, Ink, _display);
             Inset(label.rectTransform, 40f);
             label.resizeTextForBestFit = true; label.resizeTextMinSize = 30; label.resizeTextMaxSize = 60;
 
@@ -4940,20 +5315,25 @@ namespace ThanksNoThanks
             // основательницы — серое по серому было не видно). Текст называет КОНТРОЛ, а не только ритм:
             // «лови пульс — жми зелёную» вместо безадресного «нажми в такт пульсу». Имя контрола берётся
             // из DepressionCatchControlName — той же константы, что и в задаче входного экрана (п.3г).
+            // Канта тут НЕТ намеренно: кант пака — ЧЁРНЫЙ, а плашка сама чернильная, обводить её нечем.
+            // Так же живёт тёмный счётчик кризиса (`CrisisInfo`) — тёмная пилюля идёт без канта.
             var hintPlate = NewSprite("DepHintPlate", _depressionGroup.transform, Sprite("bar-track"));
             hintPlate.type = Image.Type.Sliced;
-            hintPlate.color = new Color(0.08f, 0.08f, 0.10f, 0.96f);
-            AnchorPx(hintPlate.rectTransform, 960f, 866f, 640f, 100f);
+            var hintPlateInk = OnBarTrack(Ink); hintPlateInk.a = 0.96f;
+            hintPlate.color = hintPlateInk;
+            AnchorPx(hintPlate.rectTransform, DepHintPlateRect.x, DepHintPlateRect.y,
+                DepHintPlateRect.z, DepHintPlateRect.w);
             _depHint = NewText("DepHint", hintPlate.transform,
-                DepressionBoardHint, 34, TextAnchor.MiddleCenter, new Color(0.96f, 0.96f, 0.98f), _display);
-            Inset(_depHint.rectTransform, 24f);
+                DepressionBoardHint, 34, TextAnchor.MiddleCenter, TextLight, _display);
+            Inset(_depHint.rectTransform, HintPillPad);   // общий токен поля хинт-пилюль (п.12)
             _depHint.resizeTextForBestFit = true; _depHint.resizeTextMinSize = 20; _depHint.resizeTextMaxSize = 34;
 
             // …и вторая строка — КЛАВИША при эмуляции, ровно тем же путём (ArcadeInput.KeyHint), что и на
             // окнах-подсказках. На стойке её нет: там контрол ведёт настоящая плата.
             _depKeyHint = NewText("DepKeyHint", _depressionGroup.transform, "", HintTextSize,
-                TextAnchor.MiddleCenter, new Color(0.86f, 0.86f, 0.92f), _body);
-            AnchorPx(_depKeyHint.rectTransform, 960f, 806f, 640f, 40f);
+                TextAnchor.MiddleCenter, HintLight, _body);
+            AnchorPx(_depKeyHint.rectTransform, DepKeyHintRect.x, DepKeyHintRect.y,
+                DepKeyHintRect.z, DepKeyHintRect.w);
             _depKeyHint.resizeTextForBestFit = true;
             _depKeyHint.resizeTextMinSize = 16; _depKeyHint.resizeTextMaxSize = HintTextSize;
             _depKeyHint.verticalOverflow = VerticalWrapMode.Truncate;
@@ -6043,7 +6423,14 @@ namespace ThanksNoThanks
             _moneyText.text = FormatMoneyJar(_game.Money);
             ReflectEnergyLevel(s.Energy);
             ReflectHealthMarker(s.Health);
-            ReflectRelationsMarker(s.Relationships, _game.RelationshipRedZone);
+            // ⚠ МАРКЕР — ПО НЕПРЕРЫВНОМУ ЗНАЧЕНИЮ, как в живом Update (находка код-скептика r5, MINOR).
+            // Здесь стояло `s.Relationships`, то есть ЦЕЛАЯ шкала, — и это расходилось с обещанием
+            // вызывающих («тот же путь, что у Update») ровно в той точке, ради которой r5 п.1 и заводил
+            // RelationshipsPrecise. Расхождение было не косметическим: все синхронные пути (DebugTick,
+            // позы, скриншоты, DebugPumpAlarms) рисовали маркер с квантованием в целый процент, то есть
+            // показывали ТУ САМУЮ «задержку отклика», которую инкремент лечит, — и ни один экранный гард
+            // не мог её увидеть, потому что смотрел на тот же огрублённый путь.
+            ReflectRelationsMarker(_game.RelationshipsPrecise, _game.RelationshipRedZone);
         }
 
         /// <summary>Reveal HUD widgets by age (visual only — the scales themselves stay passive).</summary>

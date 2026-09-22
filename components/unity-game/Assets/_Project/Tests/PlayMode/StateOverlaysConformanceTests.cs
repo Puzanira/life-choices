@@ -302,8 +302,12 @@ namespace ThanksNoThanks.Tests.PlayMode
 
             // Exhaustive: exactly the wash + grain + the two plates (pulse is inactive here), and exactly the
             // two labels — no stray element / re-added pip / placeholder.
+            // r5 п.3: у светлой пилюли появился ЧЁРНЫЙ КАНТ — тот же блок `bar-track`-соседа, что несут
+            // плашка выгорания и зелёная CTA. Без него экран депрессии был единственным местом игры, где
+            // плашка висела без обводки арт-пака («устаревшее оформление» из панч-листа).
             AssertExactImages(group, "depression",
-                "DepressionVeil", "DepressionGrain", "DepGatherPlate", "DepHintPlate");
+                "DepressionVeil", "DepressionGrain",
+                "DepGatherPlateEdge", "DepGatherPlate", "DepHintPlate");
             AssertExactTexts(group, "depression", "DepLabel", "DepHint");
             // Строка КЛАВИШИ существует, но скрыта на стойке (плата ведёт контрол) — поэтому она не в
             // перечне активных, но обязана быть собрана.

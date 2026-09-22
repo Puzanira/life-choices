@@ -390,16 +390,35 @@ namespace ThanksNoThanks.Tests.PlayMode
             Assert.IsNotNull(muteImg, "the mute icon is a drawn Image (not a Text glyph)");
             Assert.IsNotNull(muteImg.sprite, "the mute icon has a real sprite (not tofu)");
 
-            // The impulse keeps the blank code-plates + live labels (the baked art can't carry «поддаться»).
-            Assert.AreEqual("plate-yes", driver.YesPlateImage.sprite.name, "the impulse uses the code-plate");
-            Assert.AreEqual("plate-no", driver.NoPlateImage.sprite.name, "the impulse uses the code-plate");
+            // ⚠ r5 п.3 — ИМПУЛЬС ПЕРЕОДЕТ В СЕМЬЮ ПЛАШЕК БЛИЦА (панч-лист автомата 2026-09-22 «мини-игры
+            // не в единой стилистике»). Раньше здесь был ПИН на плоские 9-slice `plate-yes`/`plate-no` —
+            // он и держал импульс в старом виде, из-за чего два раунда ОДНОГО кризиса выглядели как две
+            // разные игры. Теперь оба раунда рисуются одним генератором (BuildBlitzPlateSprite): канон-
+            // радиус, чернильный кант, жёлтая полоса. Пин переставлен на новые спрайты, а не снят.
+            Assert.AreEqual("ImpulsePlateYes", driver.YesPlateImage.sprite.name,
+                "импульс рисуется сгенерированной плашкой кризиса, а не плоским code-plate");
+            Assert.AreEqual("ImpulsePlateNo", driver.NoPlateImage.sprite.name,
+                "…и вторая плашка тоже");
             Assert.IsTrue(driver.NoPlateText.gameObject.activeInHierarchy, "the impulse label overlay is VISIBLE");
 
             // «СПАСИБО, НЕ НАДО» is the highlighted decline (gold), «ДА» sits on the yes plate.
-            var noC = driver.NoPlateImage.color;
+            // ⚠ ЗОЛОТО ТЕПЕРЬ В ТЕКСТУРЕ, а не в тинте Image (тинт умножался на красный спрайт и давал
+            // грязно-оранжевый). Поэтому цвет читается из ТЕЛА сгенерированной плашки — её центрального
+            // пикселя, внутри жёлтой полосы. Тинт при этом обязан быть нейтральным: иначе цвет поехал бы
+            // второй раз поверх уже правильного.
+            var noTint = driver.NoPlateImage.color;
+            Assert.AreEqual(Color.white, noTint, "плашка импульса не тонируется — цвет уже в текстуре");
+            var noTex = driver.NoPlateImage.sprite.texture;
+            var noC = noTex.GetPixel(noTex.width / 2, noTex.height / 2);
             Assert.Greater(noC.r, 0.9f, "decline plate highlighted warm (red channel high)");
             Assert.Greater(noC.g, 0.7f, "decline plate highlighted warm (green channel high)");
             Assert.Less(noC.b, 0.6f, "decline plate highlighted gold (blue channel low)");
+
+            // …и ФОРМА действительно канон-семьи: у плашки есть чернильный кант по краю (у плоского
+            // code-plate его не было). Читаем угловой-краевой пиксель по средней линии.
+            var edge = noTex.GetPixel(1, noTex.height / 2);
+            Assert.Less(Mathf.Max(edge.r, Mathf.Max(edge.g, edge.b)), 0.25f,
+                "по краю плашки идёт чернильный кант арт-пака");
             StringAssert.Contains("СПАСИБО", driver.NoPlateText.text, "the decline label");
             Assert.AreEqual("ДА", driver.YesPlateText.text, "the yes plate reads «ДА» (поддаться)");
 

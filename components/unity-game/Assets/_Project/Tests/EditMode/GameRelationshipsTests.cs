@@ -227,29 +227,43 @@ namespace ThanksNoThanks.Tests
                 "held ↓ плюс дрейф тянут вниз заметно быстрее одного дрейфа (4 с ≳ 8 %)");
         }
 
+        /// <summary>
+        /// Величина САМОЙ оси, очищенная от дрейфа: (Δс ↑) − (Δбез ввода) на одном и том же окне.
+        ///
+        /// ⚠ ОКНО СОКРАЩЕНО ДО 1 с (r5 п.1). Тяга выросла 4.0 → 22.0 %/с (панч-лист автомата: «отношения
+        /// всё время выходят, удержать нельзя»), и прежнее окно в 4 с упирало маркер в потолок 100 —
+        /// замер мерил бы КЛАМП, а не скорость. Число берётся из КОНСТАНТЫ, а не зашито: балансная правка
+        /// снова меняет одну строку в Game, а не этот тест.
+        /// </summary>
         [Test]
-        public void AxisMagnitude_IsAboutFourPerSecond()
+        public void AxisMagnitude_MatchesTheBalancerConstant()
         {
-            // Isolate the axis: (Δwith ↑) − (Δwithout) over the same window ≈ +4%/s × window (bumped from 1.5
-            // so «держу ↑» visibly moves the marker — founder playtest 2026-07-23).
+            const float window = 1f;          // ровно столько, чтобы тяга 22 %/с не достала потолка со старта 55
+            const int steps = 2;              // 2 × 0.5 с
+
             int WithoutAxis()
             {
                 var g = NewGame(() => false, Plain("A", 21), Plain("L", 90));
                 g.StartLife(); No(g); g.Tick(2f); No(g);
                 int r0 = g.Scales.Relationships;
-                for (int i = 0; i < 8; i++) g.Tick(0.5f);
-                return g.Scales.Relationships - r0;   // ≈ −2.4
+                for (int i = 0; i < steps; i++) g.Tick(window / steps);
+                return g.Scales.Relationships - r0;   // ≈ −дрейф
             }
             int WithUp()
             {
                 var g = NewGame(() => false, Plain("A", 21), Plain("L", 90));
                 g.StartLife(); No(g); g.Tick(2f); No(g);
                 int r0 = g.Scales.Relationships;
-                for (int i = 0; i < 8; i++) { Up(g); g.Tick(0.5f); }
-                return g.Scales.Relationships - r0;   // ≈ +3.6
+                for (int i = 0; i < steps; i++) { Up(g); g.Tick(window / steps); }
+                Assert.Less(g.Scales.Relationships, 100, "замер не упёрся в потолок — иначе мерили бы кламп");
+                return g.Scales.Relationships - r0;
             }
-            int axisOnly = WithUp() - WithoutAxis();   // ≈ 16 over 4s (4%/s)
-            Assert.That(axisOnly, Is.InRange(14, 18), "the ↑ pull alone is ≈4%/s (≈16% over 4s)");
+
+            int axisOnly = WithUp() - WithoutAxis();
+            double want = Game.RelBalancerPerSec * window;
+            Assert.That(axisOnly, Is.InRange(want - 3.0, want + 3.0),
+                $"тяга оси ≈{Game.RelBalancerPerSec} %/с (за {window} с ≈ {want}) — замерено {axisOnly}; "
+                + "округление до целого на двух замерах даёт ±3");
         }
 
         [Test]

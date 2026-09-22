@@ -596,9 +596,12 @@ namespace ThanksNoThanks.Tests.PlayMode
             // (4) «НАЧАТЬ ЗАНОВО — ЖМИ ЗЕЛЁНУЮ» — одной строкой, через ТИРЕ, ровно как CTA опенера.
             var again = driver.FinalePanel.transform.Find("AgainPlate").GetComponent<Image>();
             var againText = again.transform.Find("AgainText").GetComponent<Text>();
-            Assert.AreEqual("НАЧАТЬ ЗАНОВО — ЖМИ ЗЕЛЁНУЮ", againText.text,
+            Assert.AreEqual(GameDriver.FinaleRestartHintText, againText.text,
                 "CTA финала — та же формула управления, что у опенера, и через «—» (U+2014)");
-            AssertGeneratedInPill(againText, again, BarTrackPill, "«НАЧАТЬ ЗАНОВО — ЖМИ ЗЕЛЁНУЮ»");
+            // r5 п.2: строка называет ОРГАН целиком («зелёную кнопку»), а не цвет-прилагательное.
+            StringAssert.Contains("ЗЕЛЁНУЮ КНОПКУ", againText.text,
+                "CTA финала называет орган словарём стойки, а не голое «ЗЕЛЁНУЮ»");
+            AssertGeneratedInPill(againText, again, BarTrackPill, "«" + GameDriver.FinaleRestartHintText + "»");
             AssertTokenGreen(again, "finale restart CTA");
 
             // (4b) …и CTA стоит НИЖЕ запечённой плашки, не накрывая её (место выбрано по композиции).

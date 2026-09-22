@@ -60,8 +60,10 @@ namespace ThanksNoThanks
 
         /// <summary>S13 impulse-round warning: INVERT means silence accepts — press → to decline.</summary>
         public const string ImpulseInvertWarning = "МОЛЧАНИЕ = ДА!";
-        /// <summary>S13 sub-line prompting the active decline (the highlighted «СПАСИБО, НЕ НАДО» → button).</summary>
-        public const string ImpulseDeclinePrompt = "ЖМИ «СПАСИБО, НЕ НАДО» →";
+        /// <summary>S13 sub-line prompting the active decline (the highlighted «СПАСИБО, НЕ НАДО» plate).
+        /// ⚠ r5 п.2: строка называла КЛАВИШУ-стрелку «→» как орган. На стойке стрелок нет: отказ — это
+        /// КРАСНАЯ КНОПКА (RedButton → AnswerNo, см. ArcadeInputSource). Стрелка убрана, орган назван.</summary>
+        public const string ImpulseDeclinePrompt = "ЖМИ КРАСНУЮ КНОПКУ";
 
         /// <summary>Tone → the 6 short (1–3 word) fallback lines. Verbatim from host-content.md §2.</summary>
         public static readonly IReadOnlyDictionary<HostTone, string[]> Pool = new Dictionary<HostTone, string[]>

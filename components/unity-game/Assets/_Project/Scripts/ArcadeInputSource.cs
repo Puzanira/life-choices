@@ -26,8 +26,33 @@ namespace ThanksNoThanks
     /// A drop-in <c>SerialInputSource</c> is unnecessary: swapping keyboard→Arduino is a backend swap inside
     /// arcade-controls, invisible to this class and the game.
     /// </summary>
+    /// <remarks>
+    /// ⚠ ПОРЯДОК ИСПОЛНЕНИЯ (r5 п.1, «без задержки отклика»). Кадр обязан идти БУТЕРБРОДОМ из трёх слоёв:
+    ///
+    ///   1. <c>ArcadeInputRunner</c> (ПАКЕТ, порядок 0) — опрашивает бэкенд, обновляет <c>ArcadeInput</c>;
+    ///   2. <c>ArcadeInputSource</c> (МЫ, <see cref="InputBeforeTick"/>) — читает свежее состояние и ЛАТЧИТ
+    ///      семантический ввод (ось балансира, датчик высоты, фронты кнопок);
+    ///   3. <see cref="GameDriver"/> (<see cref="GameDriver.TickAfterInput"/>) — сводит латч вызовом
+    ///      <c>Game.Tick</c>.
+    ///
+    /// Без явных порядков Unity ставила все три как попало: ось, взведённая в кадре N, доезжала до
+    /// интегратора кадром N+1, и порядок мог отличаться между сценой, тестом и билдом.
+    ///
+    /// ⚠ ПОЧЕМУ ЧИСЛА ПОЛОЖИТЕЛЬНЫЕ, А НЕ ОТРИЦАТЕЛЬНЫЕ. Первая редакция r5 пинила источник на −100 —
+    /// «пораньше всех». Это ломало слой 1: раннер пакета остаётся на 0, и мы начинали читать состояние
+    /// устройства ДО того, как он его обновил, то есть кадром СТАРШЕ (а дельта крутилки считается
+    /// per-poll и так просто терялась). Поймал это не глаз, а живой прогон реальной цепочки кабинета —
+    /// `ChildPhoneTests.BangButton_ThroughTheRealCabinetChain…` вставал на таймауте. Раннер пакета трогать
+    /// нельзя, поэтому оба НАШИХ слоя уезжают ВПРАВО от него: 100 и 200.
+    /// </remarks>
+    [DefaultExecutionOrder(InputBeforeTick)]
     public sealed class ArcadeInputSource : MonoBehaviour, IInputSource
     {
+        /// <summary>Приоритет исполнения: ПОЗЖЕ раннера пакета (он на 0 и обновляет ArcadeInput), но
+        /// строго РАНЬШЕ <see cref="GameDriver.TickAfterInput"/>, чтобы латч сводился ТЕМ ЖЕ кадром.
+        /// Гард — PlaytestFixesR5Tests.InputSource_Runs_AfterTheDevicePump_AndBeforeTheTick.</summary>
+        public const int InputBeforeTick = 100;
+
         public event Action<GameInput> Received;
 
         [Tooltip("Crank rotation (degrees, either direction) that equals one MoneyTick.")]

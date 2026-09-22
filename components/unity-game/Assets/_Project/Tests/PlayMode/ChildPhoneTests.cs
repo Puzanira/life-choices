@@ -590,7 +590,8 @@ namespace ThanksNoThanks.Tests.PlayMode
             StringAssert.Contains("Пополнение", driver.NewScaleStoryText.text, "рассказ про пополнение");
             StringAssert.Contains("телефон", driver.NewScaleTaskText.text,
                 "задача канон host-content §4: «когда телефон слева зазвонит»");
-            StringAssert.Contains("«!»", driver.NewScaleTaskText.text, "…и называет кнопку «!»");
+            StringAssert.Contains("жёлтую кнопку", driver.NewScaleTaskText.text,
+                "…и называет орган словарём стойки — жёлтую кнопку (r5 п.2, было «!»)");
 
             // (3) Под экраном CONFIRM = ПОДНЯТЬ ТРУБКУ (условие выхода), а не «понятно»: туториал
             // заводит звонок принудительно, поэтому dev-Enter здесь работает как «!» кабинета.

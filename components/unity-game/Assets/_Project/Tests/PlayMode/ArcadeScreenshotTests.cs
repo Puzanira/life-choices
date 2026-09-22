@@ -154,6 +154,32 @@ namespace ThanksNoThanks.Tests.PlayMode
                     driver.DebugRenderFinale(LongestRealNecrolog(), 100);
                     driver.enabled = false;
                     break;
+                // ---- r5: МИНИ-РЕЖИМЫ ЖИВЬЁМ (панч-лист «мини-игры не в единой стилистике») -----------
+                // Входные экраны спецрежимов уже снимались (tutdepression/tutburnout), а вот ЖИВЫЕ
+                // экраны — те, на которых игрок сидит и играет, — до r5 поз не имели вовсе. Именно их и
+                // видела основательница, когда говорила про «устаревшее оформление».
+                case "depression": driver.DebugPreviewDepression(lit: true); break;
+                case "impulse": driver.DebugPreviewImpulsePlates(); break;
+
+                // ---- r5 п.4: ТРИ НАБОРА ТИПОГРАФИКИ НЕКРОЛОГА, выбор основательницы по кадрам --------
+                // Один и тот же некролог, одна и та же вёрстка — отличается ТОЛЬКО типографика, иначе
+                // кадры сравнивать было бы не с чем. Длинный вариант (LIFECHOICES_SHOT_WORST=1) показывает
+                // тот же набор на худшем случае колоды, где подборщик кегля работает на пределе.
+                case "finalea":
+                case "finaleb":
+                case "finalec":
+                {
+                    var pose = (Environment.GetEnvironmentVariable("LIFECHOICES_SHOT_POSE") ?? "").ToLowerInvariant();
+                    var style = pose.EndsWith("a") ? GameDriver.FinaleStoryStyleA
+                              : pose.EndsWith("b") ? GameDriver.FinaleStoryStyleB
+                              : GameDriver.FinaleStoryStyleC;
+                    bool worst = Environment.GetEnvironmentVariable("LIFECHOICES_SHOT_WORST") == "1";
+                    driver.DebugApplyFinaleStoryStyle(style,
+                        worst ? LongestRealNecrolog() : SampleNecrolog(), ShotAge(worst ? 100 : 78));
+                    driver.enabled = false;
+                    break;
+                }
+
                 default: driver.DebugPreviewArcadeShot(); break;
             }
             // Optional CARD TEXT override (отрезки 1–7): колода выросла втрое, и дизайн-гейту нужно уметь

@@ -165,6 +165,207 @@ namespace ThanksNoThanks.Tests.PlayMode
         // Имена объектов ДВУХ служебных строк подсказки клавиши — единственное исключение свипа (2).
         private static readonly string[] KeyHintObjectNames = { "TaskKeyHint", "TutKeyHint" };
 
+        // ================================================================ r5 п.2 — СЛОВАРЬ ОРГАНОВ СТОЙКИ
+        //
+        // Стойка автомата подписана ФИЗИЧЕСКИ, и экранные имена обязаны совпадать с подписями. Словарь
+        // один на все игры автомата (панч-лист живого плейтеста 2026-09-22):
+        //   крутилка · жёлтая кнопка · зелёная кнопка · красная кнопка · датчики высоты · джойстик ·
+        //   кнопка меню
+        // Этот гард ловит ОБРАТНОЕ — старые имена, которых на стойке нет и искать которые игрок будет
+        // впустую. Ровно четыре запрета из панч-листа; шире не берём, чтобы не воевать с прозой карточек.
+        private static readonly (string Name, Regex Pattern, string Instead)[] OffVocabularyOrganPatterns =
+        {
+            // «стик» — но НЕ внутри «джойстика», который как раз и есть канон-слово.
+            ("стик", new Regex(@"(?<!джой)стик", RegexOptions.IgnoreCase), "джойстик"),
+            // «ручка/ручку/ручкой» как орган. Негативный взгляд назад пропускает «выручку» и подобные
+            // слова, где «ручк» — это хвост другого корня, а не название органа.
+            ("ручка", new Regex(@"(?<![а-яёa-z])ручк", RegexOptions.IgnoreCase), "крутилка"),
+            ("динамо", new Regex("динамо", RegexOptions.IgnoreCase), "крутилка"),
+            // ГОЛОЕ «!» КАК ИМЯ ОРГАНА. Именно в кавычках-ёлочках — так его и писали во всех текстах
+            // («жми «!»»). Восклицательный знак в обычной прозе («Браво!») этим не задевается.
+            ("«!» как имя органа", new Regex("«!»"), "жёлтая кнопка"),
+        };
+
+        // ================================================================ то же, но ПО КОЛОДЕ
+        //
+        // ⚠ ДВА РЕЖИМА СВИПА, А НЕ ОДИН (находка код-скептика r5, MINOR). Строгие паттерны выше написаны
+        // под УПРАВЛЯЮЩИЕ строки — константы и экранные подписи. Там каждое слово выбрано нами, и любое
+        // совпадение — это ошибка. КОЛОДА устроена иначе: это авторская ПРОЗА про жизнь, и те же буквы
+        // в ней законны. Голое «стик» ловит «плаСТИКовое окно» и «стаТИСТИКа»; «ручк» с одним взглядом
+        // назад ловит дверную «ручку»; «динамо» — стадион. Ни одна из этих карточек не называет орган
+        // стойки, но гард краснел бы, и автор колоды был бы вынужден обходить СЛУЧАЙНЫЕ буквосочетания.
+        //
+        // По колоде проверяется то, ради чего гард и заведён: не «встретилось слово», а «карточка ВЕЛИТ
+        // игроку крутить/жать/двигать орган, называя его не по-стоечному». Два условия вместе:
+        //   • слово стоит ЦЕЛИКОМ (границы слова + русские окончания), а не хвостом другого корня;
+        //   • перед ним, в пределах <see cref="InstructionWindow"/> символов, стоит ПОВЕЛИТЕЛЬНЫЙ глагол
+        //     управления — тот самый словарь, которым игре разрешено давать команды.
+        // «Купить пластиковое окно?» проходит, «двигай стиком» — нет. Проверено обоими негатив-тестами
+        // в <see cref="DeckSweep_PassesProse_ButCatchesAnOrganInstruction"/>.
+        private const int InstructionWindow = 40;
+
+        // ⚠ ТОЛЬКО ПОВЕЛИТЕЛЬНЫЕ ФОРМЫ ЦЕЛИКОМ, не корни. Корень «поверн» ловил бы «он поверНУЛ дверную
+        // ручку» — прошедшее время в прозе, а не команда игроку. Формы на -и/-й (+ вежливое -те) — ровно
+        // тот регистр, которым игра разговаривает с игроком в задачах и подсказках.
+        private static readonly Regex InstructionVerb = new Regex(
+            @"(?<![а-яёa-z])(?:верти|крути|покрути|поверни|жми|нажми|двигай|подвигай|зажми|держи"
+            + @"|удерживай|тяни|потяни|хватай|дёргай|дергай|тряси)(?:те)?(?![а-яёa-z])",
+            RegexOptions.IgnoreCase);
+
+        // Те же четыре запрета, но словом целиком: русский хвост склонения допускается, соседняя буква — нет.
+        private static readonly (string Name, Regex Pattern, string Instead)[] DeckOrganPatterns =
+        {
+            ("стик",   new Regex(@"(?<![а-яёa-z])стик(?:а|у|ом|е|и|ов|ами)?(?![а-яёa-z])",
+                                 RegexOptions.IgnoreCase), "джойстик"),
+            ("ручка",  new Regex(@"(?<![а-яёa-z])ручк(?:а|у|и|е|ой|ам|ами|ах)?(?![а-яёa-z])",
+                                 RegexOptions.IgnoreCase), "крутилка"),
+            ("динамо", new Regex(@"(?<![а-яёa-z])динамо(?![а-яёa-z])", RegexOptions.IgnoreCase), "крутилка"),
+            // «!» в ёлочках — форма НЕ прозаическая: так орган и писали в текстах. Остаётся строгой везде.
+            ("«!» как имя органа", new Regex("«!»"), "жёлтая кнопка"),
+        };
+
+        private static void AssertVocabularyOrgan(string text, string where)
+        {
+            if (string.IsNullOrEmpty(text)) return;
+            foreach (var (name, pattern, instead) in OffVocabularyOrganPatterns)
+                Assert.IsFalse(pattern.IsMatch(text),
+                    where + " называет орган словом «" + name + "», которого на стойке нет — "
+                        + "словарь автомата требует «" + instead + "» (панч-лист 2026-09-22). "
+                        + "Строка: «" + text + "»");
+        }
+
+        /// <summary>Нарушение словаря в ПРОЗЕ колоды: слово целиком И в повелительном контексте.
+        /// Возвращает описание нарушения или <c>null</c>, если строка чиста.</summary>
+        private static string DeckOrganViolation(string text)
+        {
+            if (string.IsNullOrEmpty(text)) return null;
+            foreach (var (name, pattern, instead) in DeckOrganPatterns)
+                foreach (Match m in pattern.Matches(text))
+                {
+                    int from = System.Math.Max(0, m.Index - InstructionWindow);
+                    string before = text.Substring(from, m.Index - from);
+                    // «!» в ёлочках — имя органа само по себе, ему повелительный контекст не нужен.
+                    if (name[0] != '«' && !InstructionVerb.IsMatch(before)) continue;
+                    return "называет орган словом «" + name + "», которого на стойке нет — "
+                           + "словарь автомата требует «" + instead + "» (панч-лист 2026-09-22)";
+                }
+            return null;
+        }
+
+        private static void AssertDeckOrgan(string text, string where)
+        {
+            string bad = DeckOrganViolation(text);
+            Assert.IsNull(bad, where + " " + bad + ". Строка: «" + text + "»");
+        }
+
+        /// <summary>
+        /// r5 п.2 — НИ ОДНА строка, которую видит игрок, не зовёт орган стойки старым именем.
+        ///
+        /// Свип тот же трёхчастный, что у дев-клавиш (константы через рефлексию → живые Text → вся колода),
+        /// поэтому новый текст, добавленный позже, попадает под гард сам и список не может протухнуть в
+        /// белый лист. Служебные строки «эмуляция: …» здесь НЕ освобождаются: они называют КЛАВИШУ
+        /// («эмуляция: Ж», «колесо мыши»), и ни одного запрещённого слова в них быть не может — а если
+        /// появится, значит подсказка клавиши начала называть орган, и это как раз ошибка.
+        ///
+        /// Mutation-proof: верни `DepressionCatchControlName` в «!», `MoneyTaskText` в «Верти ручку» или
+        /// `ChildTaskText` в «жми «!»» — тест краснеет на каждой из трёх правок по отдельности.
+        /// </summary>
+        [UnityTest]
+        public IEnumerator No_PlayerFacing_String_Names_AnOrgan_OutsideTheCabinetVocabulary()
+        {
+            var driver = Boot(out var go, out var fake);
+            yield return null;
+
+            // (1) КОНСТАНТЫ трёх контентных типов — той же рефлексией, что и свип дев-клавиш.
+            var constants = StaticStrings(typeof(GameDriver))
+                .Concat(StaticStrings(typeof(HostContent)))
+                .Concat(StaticStrings(typeof(Necrolog)))
+                .ToList();
+            Assert.Greater(constants.Count, 40, "контентные типы действительно держат свою копию полями");
+            foreach (var (where, text) in constants)
+                AssertVocabularyOrgan(text, "константа «" + where + "»");
+
+            // (2) …и КАЖДЫЙ Text, собранный в HUD, включая выключенные панели (опенер, финал, модалки).
+            var texts = driver.GetComponentsInChildren<Text>(includeInactive: true);
+            Assert.Greater(texts.Length, 3, "HUD действительно собрал свои подписи");
+            foreach (var t in texts)
+                AssertVocabularyOrgan(t.text, "экранная подпись «" + t.name + "»");
+
+            // (3) …и вся авторская колода — вопросы, реплики Ведущего, строки некролога.
+            var csv = Resources.Load<TextAsset>("scenes");
+            Assert.IsNotNull(csv, "колода читается из Resources");
+            var deck = CardLoader.ParseAll(csv.text);
+            Assert.Greater(deck.Count, 50, "вся колода, а не подмножество");
+            // ⚠ По колоде — ПРОЗАИЧЕСКИЙ режим (см. DeckOrganPatterns): слово целиком + повелительный
+            // контекст. Строгие паттерны здесь воевали бы с авторским текстом, а не со словарём.
+            foreach (var c in deck)
+            {
+                AssertDeckOrgan(c.Question, "карточка «" + c.Id + "» вопрос");
+                AssertDeckOrgan(c.HostYes, "карточка «" + c.Id + "» Ведущий ДА");
+                AssertDeckOrgan(c.HostNo, "карточка «" + c.Id + "» Ведущий НЕТ");
+                AssertDeckOrgan(c.YesNecrolog, "карточка «" + c.Id + "» некролог ДА");
+                AssertDeckOrgan(c.NoNecrolog, "карточка «" + c.Id + "» некролог НЕТ");
+            }
+
+            // (4) ПОЛОЖИТЕЛЬНАЯ половина: словарь не просто «не нарушен», он ПРИНЯТ — четыре зелёные CTA
+            // называют орган целиком, а не цвет-прилагательное, и оба текста жёлтой кнопки её называют.
+            foreach (var cta in new[]
+                     {
+                         GameDriver.OpenerStartHintText, GameDriver.FinaleRestartHintText,
+                         GameDriver.SpecialModeCtaText, GameDriver.TutorialDismissCtaText,
+                     })
+                StringAssert.Contains("ЗЕЛЁНУЮ КНОПКУ", cta,
+                    "зелёная CTA называет ОРГАН («зелёную кнопку»), а не голое «зелёную»: «" + cta + "»");
+            StringAssert.Contains("жёлтую кнопку", GameDriver.ChildTaskText, "задача ребёнка — жёлтая кнопка");
+            StringAssert.Contains("жёлтую кнопку", GameDriver.DepressionTaskText, "задача депрессии — она же");
+            StringAssert.Contains("крутилку", GameDriver.MoneyTaskText, "задача денег — крутилка");
+            StringAssert.Contains("джойстик", GameDriver.RelationsTaskText, "задача отношений — джойстик");
+
+            Object.Destroy(go);
+            yield return null;
+        }
+
+        /// <summary>
+        /// СВИП ПО КОЛОДЕ УМЕЕТ ОТЛИЧАТЬ ПРОЗУ ОТ КОМАНДЫ (находка код-скептика r5, MINOR).
+        ///
+        /// Прежний свип гнал по колоде те же строгие паттерны, что по константам, и краснел бы на
+        /// авторском тексте: «стик» сидит внутри «плаСТИКовое» и «стаТИСТИКа», «ручк» — внутри дверной
+        /// «ручки». Автор колоды не должен обходить случайные буквосочетания — гард обязан ловить
+        /// КОМАНДУ игроку, а не совпадение букв.
+        ///
+        /// Этот тест — сама пара «не краснит / краснит», ради которой правка и делалась. Он проверяет
+        /// правило НАПРЯМУЮ, без колоды, поэтому не протухнет вместе с текстами карточек.
+        /// Mutation-proof в обе стороны: ослабь правило до «слово встретилось» — покраснеют прозаические
+        /// случаи; выкини проверку целиком — покраснеют командные.
+        /// </summary>
+        [Test]
+        public void DeckSweep_PassesProse_ButCatchesAnOrganInstruction()
+        {
+            // (1) ПРОЗА — законный авторский текст, гард молчит.
+            foreach (var ok in new[]
+                     {
+                         "Купить пластиковое окно?",                       // «стик» внутри «пластиковое»
+                         "Статистика говорит: так живут все.",             // …и внутри «статистика»
+                         "Он повернул дверную ручку и вышел навсегда.",    // «ручку» как предмет, не орган
+                         "Записаться в «Динамо»?",                         // название клуба
+                         "Мистика какая-то.",                              // «стик» внутри «мистика»
+                         "Двигай джойстиком — держи маркер в зелёной зоне.",  // КАНОН-слово, мимо запрета
+                     })
+                Assert.IsNull(DeckOrganViolation(ok),
+                    "прозаическая строка не имеет права краснить словарный гард: «" + ok + "»");
+
+            // (2) КОМАНДА — те же корни, но карточка ВЕЛИТ игроку работать органом.
+            foreach (var bad in new[]
+                     {
+                         "двигай стиком",
+                         "Верти ручку — и монетки посыплются.",
+                         "Крути динамо, пока не надоест.",
+                         "Чтобы ответить, жми «!».",                       // ёлочки — строгий запрет везде
+                     })
+                Assert.IsNotNull(DeckOrganViolation(bad),
+                    "команда органом по старому имени обязана краснить гард: «" + bad + "»");
+        }
+
         private static void AssertNoDevKey(string text, string where)
         {
             if (string.IsNullOrEmpty(text)) return;
@@ -266,10 +467,14 @@ namespace ThanksNoThanks.Tests.PlayMode
             StringAssert.Contains("ЗЕЛЁНУЮ", againText.text, "the finale CTA names the GREEN button");
             StringAssert.Contains("ЗЕЛЁНУЮ", driver.TutorialButtonText.text, "the hint dismiss names the GREEN button");
 
-            // (4) …and the child tutorial names the «!» button (the cabinet control), per the same decision.
-            // Since the §D screen replaced the old text hint, the canon copy now lives in the TASK window.
-            StringAssert.Contains("«!»", GameDriver.ChildTaskText,
-                "the child task window names the physical «!» button");
+            // (4) …and the child tutorial names the YELLOW button (the cabinet control), per the same
+            // decision. Since the §D screen replaced the old text hint, the canon copy lives in the TASK
+            // window. ⚠ r5 п.2: раньше тут ждали «!» — на стойке такой подписи нет, орган зовётся жёлтой
+            // кнопкой. Гард развернут: имя обязано БЫТЬ и голого «!» в строке остаться НЕ ДОЛЖНО.
+            StringAssert.Contains("жёлтую кнопку", GameDriver.ChildTaskText,
+                "the child task window names the physical YELLOW button");
+            StringAssert.DoesNotContain("«!»", GameDriver.ChildTaskText,
+                "…и старое имя-значок «!» из неё ушло совсем");
 
             Object.Destroy(go);
             yield return null;

@@ -133,17 +133,23 @@ namespace ThanksNoThanks.Tests
         }
 
         /// <summary>
-        /// п.3г — ВОПРОС ЗАКРЫТ ОСНОВАТЕЛЬНИЦЕЙ 2026-08-08: ловля идёт по КНОПКЕ «!». Гард держит две вещи
-        /// сразу: (а) все тексты по-прежнему собираются из ОДНОЙ константы (заготовка и сделала смену
-        /// правкой одной строки), (б) ни в одном из них не осталось ЗЕЛЁНОЙ — иначе экран звал бы игрока
-        /// жать не тот контрол, а механика молчала бы.
+        /// п.3г — ВОПРОС ЗАКРЫТ ОСНОВАТЕЛЬНИЦЕЙ 2026-08-08: ловля идёт по BangButton кабинета. Гард
+        /// держит две вещи сразу: (а) все тексты по-прежнему собираются из ОДНОЙ константы (заготовка и
+        /// сделала смену правкой одной строки), (б) ни в одном из них не осталось ЗЕЛЁНОЙ — иначе экран
+        /// звал бы игрока жать не тот контрол, а механика молчала бы.
+        ///
+        /// ⚠ r5 п.2 — ИМЯ КОНТРОЛА СМЕНИЛОСЬ: «!» → «жёлтая кнопка» (панч-лист автомата 2026-09-22, на
+        /// стойке органы подписаны физически и значка «!» там нет). КОНТРОЛ ТОТ ЖЕ, поменялась подпись.
+        /// Гард тоже развёрнут: теперь он требует имя из словаря стойки и ЗАПРЕЩАЕТ откат к голому «!».
         /// </summary>
         [Test]
         public void DepressionCatchControl_IsNamedFromASingleConstant_AndItIsTheBangButton()
         {
             Assert.IsNotEmpty(GameDriver.DepressionCatchControlName, "константа контрола задана");
-            StringAssert.Contains("!", GameDriver.DepressionCatchControlName,
-                "решение основательницы 2026-08-08: контрол ловли — кнопка «!»");
+            StringAssert.Contains("жёлтую кнопку", GameDriver.DepressionCatchControlName,
+                "r5 п.2: контрол ловли зовётся словарём стойки — «жёлтая кнопка»");
+            StringAssert.DoesNotContain("!", GameDriver.DepressionCatchControlName,
+                "…и откат к значку «!» как имени органа запрещён: на стойке такой подписи нет");
             StringAssert.Contains(GameDriver.DepressionCatchControlName, GameDriver.DepressionTaskText,
                 "задача входного экрана называет контрол ИЗ константы");
             StringAssert.Contains(GameDriver.DepressionCatchControlName.ToLowerInvariant(),
