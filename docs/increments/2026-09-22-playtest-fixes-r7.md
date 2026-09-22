@@ -370,5 +370,5 @@ PlayMode **+3** (три гарда знака оси). Ни один стары�
 
 ## 6. Playtest verdict
 
-`Playtest ok:` —
-`Landed:` —
+`Playtest ok:` — (ждёт стойку: проверить НАПРАВЛЕНИЕ джойстика; зеркалит → RelationAxisSign: -1 в game.json)
+`Landed:` ffdeeda923b77c0ba829651634a76ce73129a65b (2026-09-22)
