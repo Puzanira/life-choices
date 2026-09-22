@@ -372,5 +372,5 @@ legacy-uGUI растеризует дефолтную инстанцию, то �
 
 ## 6. Playtest verdict
 
-`Playtest ok:` —
-`Landed:` —
+`Playtest ok:` — (ждёт плейтест основательницы на автомате)
+`Landed:` c3cd6856e700326c67dbae421d10b7a69fa2086d (2026-09-22)
